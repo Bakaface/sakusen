@@ -508,6 +508,68 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 	return nil
 }
 
+// resolveWorkflowSteps expands step *references* (bare-string step entries) in
+// wf.Steps into concrete StepConfigs pulled from the same-named base workflow.
+//
+// The base is the workflow with the same name in globalPool — i.e. the global
+// ~/.sortie.yml workflow this project-level workflow overrides. A project can
+// thus reuse a global workflow's steps by name (reordering, dropping, or
+// interleaving new inline steps) without re-declaring each one:
+//
+//	workflows:
+//	  - name: the-work        # overrides the global "the-work"
+//	    steps:
+//	      - planning          # ref → global the-work's "planning" step
+//	      - implementing      # ref → global the-work's "implementing" step
+//	      - name: reviewing   # new step defined locally
+//	        prompt: "..."
+//
+// Inline step entries pass through unchanged; an inline step whose name matches
+// a base step fully overrides it (replace-not-merge, same as workflow-level
+// overrides). Referencing a step absent from the base — or having no base
+// workflow at all — is a hard error. A no-op when wf has no reference steps, so
+// it is safe (and idempotent) to call on any workflow.
+func resolveWorkflowSteps(wf *WorkflowConfig, globalPool *globalWorkflowPool) error {
+	hasRef := false
+	for i := range wf.Steps {
+		if wf.Steps[i].ref {
+			hasRef = true
+			break
+		}
+	}
+	if !hasRef {
+		return nil
+	}
+
+	base := map[string]StepConfig{}
+	if g, ok := globalPool.lookup(wf.Name); ok {
+		for _, s := range g.Steps {
+			base[s.Name] = s
+		}
+	}
+
+	out := make([]StepConfig, 0, len(wf.Steps))
+	seen := make(map[string]bool, len(wf.Steps))
+	for _, s := range wf.Steps {
+		if s.ref {
+			def, ok := base[s.Name]
+			if !ok {
+				return fmt.Errorf("workflows: workflow %q references step %q, which is not defined in the base workflow (define it inline or add it to the same-named global workflow)", wf.Name, s.Name)
+			}
+			s = def
+		}
+		if s.Name != "" {
+			if seen[s.Name] {
+				return fmt.Errorf("workflows: workflow %q has a duplicate step %q", wf.Name, s.Name)
+			}
+			seen[s.Name] = true
+		}
+		out = append(out, s)
+	}
+	wf.Steps = out
+	return nil
+}
+
 // resolveFlat expands the flat workflows entries (string refs + inline defs)
 // into a flat slice of WorkflowConfig. Active workflows come first in listing
 // order; any files in the local pool not referenced are appended as Hidden.
@@ -545,6 +607,9 @@ func resolveFlat(entries []WorkflowEntry, filePool *workflowFilePool, globalPool
 				return nil, fmt.Errorf("workflows: referenced workflow %q has no file at .sortie/workflows/%s.yml and is not defined in the global config", name, name)
 			}
 			wf.Hidden = false
+			if err := resolveWorkflowSteps(&wf, globalPool); err != nil {
+				return nil, err
+			}
 			out = append(out, wf)
 			seen[name] = true
 		case entry.Inline != nil:
@@ -563,6 +628,9 @@ func resolveFlat(entries []WorkflowEntry, filePool *workflowFilePool, globalPool
 			}
 			wf.Source = "inline"
 			wf.Hidden = false
+			if err := resolveWorkflowSteps(&wf, globalPool); err != nil {
+				return nil, err
+			}
 			out = append(out, wf)
 			seen[wf.Name] = true
 		default:
@@ -577,6 +645,9 @@ func resolveFlat(entries []WorkflowEntry, filePool *workflowFilePool, globalPool
 			continue
 		}
 		wf.Hidden = true
+		if err := resolveWorkflowSteps(&wf, globalPool); err != nil {
+			return nil, err
+		}
 		out = append(out, wf)
 	}
 

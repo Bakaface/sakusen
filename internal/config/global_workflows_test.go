@@ -404,6 +404,322 @@ func TestGlobalWorkflows_FlatGlobalAndProjectRefs(t *testing.T) {
 	}
 }
 
+// Step refs: project overrides a global workflow, references two of its steps
+// by name, and appends a new inline step. Referenced steps carry their global
+// definitions; the new step is added locally; ordering follows the listing.
+func TestStepRefs_ReferenceGlobalStepsAndAddNew(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+      - name: implementing
+        prompt: "global implementing"
+`,
+		nil,
+		`workflows:
+  - name: the-work
+    steps:
+      - planning
+      - implementing
+      - name: reviewing
+        prompt: "local reviewing"
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil {
+		t.Fatalf("want the-work workflow, got nil")
+	}
+	if len(wf.Steps) != 3 {
+		t.Fatalf("want 3 steps, got %d: %+v", len(wf.Steps), wf.Steps)
+	}
+	want := []struct{ name, prompt string }{
+		{"planning", "global planning"},
+		{"implementing", "global implementing"},
+		{"reviewing", "local reviewing"},
+	}
+	for i, w := range want {
+		if wf.Steps[i].Name != w.name || wf.Steps[i].Prompt != w.prompt {
+			t.Errorf("step %d: want {%q, %q}, got {%q, %q}", i, w.name, w.prompt, wf.Steps[i].Name, wf.Steps[i].Prompt)
+		}
+	}
+}
+
+// Step refs: an inline step whose name matches a base step fully overrides it
+// (replace-not-merge), while another step is pulled unchanged by reference.
+func TestStepRefs_InlineOverridesReferencedStep(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+      - name: implementing
+        prompt: "global implementing"
+`,
+		nil,
+		`workflows:
+  - name: the-work
+    steps:
+      - planning
+      - name: implementing
+        prompt: "project implementing"
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil || len(wf.Steps) != 2 {
+		t.Fatalf("want 2 steps, got %+v", wf)
+	}
+	if wf.Steps[0].Prompt != "global planning" {
+		t.Errorf("referenced planning: want global prompt, got %q", wf.Steps[0].Prompt)
+	}
+	if wf.Steps[1].Prompt != "project implementing" {
+		t.Errorf("overridden implementing: want project prompt, got %q", wf.Steps[1].Prompt)
+	}
+}
+
+// Step refs: dropping a step is just omitting it from the list — the project
+// references only a subset (and may reorder) of the global workflow's steps.
+func TestStepRefs_DropAndReorderSteps(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+      - name: implementing
+        prompt: "global implementing"
+      - name: reviewing
+        prompt: "global reviewing"
+`,
+		nil,
+		`workflows:
+  - name: the-work
+    steps:
+      - reviewing
+      - planning
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil || len(wf.Steps) != 2 {
+		t.Fatalf("want 2 steps, got %+v", wf)
+	}
+	if wf.Steps[0].Name != "reviewing" || wf.Steps[1].Name != "planning" {
+		t.Errorf("want [reviewing, planning], got [%q, %q]", wf.Steps[0].Name, wf.Steps[1].Name)
+	}
+	if wf.Steps[0].Prompt != "global reviewing" {
+		t.Errorf("want global reviewing prompt, got %q", wf.Steps[0].Prompt)
+	}
+}
+
+// Step refs: referencing a step that exists in neither the base nor inline is a
+// hard error naming the offending step.
+func TestStepRefs_UnknownStepRefErrors(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+`,
+		nil,
+		`workflows:
+  - name: the-work
+    steps:
+      - planning
+      - nonexistent
+`,
+		nil,
+	)
+
+	_, err := LoadForProject(projectDir)
+	if err == nil || !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("want error naming unknown step %q, got %v", "nonexistent", err)
+	}
+}
+
+// Step refs: a step reference in a workflow with no same-named base workflow
+// (a brand-new project workflow) errors — there is nothing to resolve against.
+func TestStepRefs_NoBaseWorkflowErrors(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`# no global workflows
+`,
+		nil,
+		`workflows:
+  - name: brand-new
+    steps:
+      - planning
+`,
+		nil,
+	)
+
+	_, err := LoadForProject(projectDir)
+	if err == nil || !strings.Contains(err.Error(), "planning") {
+		t.Fatalf("want error about unresolvable step %q, got %v", "planning", err)
+	}
+}
+
+// Step refs also resolve against a global workflow defined in a file under
+// ~/.sortie/workflows/ (not just inline global workflows).
+func TestStepRefs_ReferenceGlobalFileWorkflowSteps(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`# global file-pool workflow exists but isn't listed; project references it.
+`,
+		map[string]string{
+			".sortie/workflows/the-work.yml": `
+steps:
+  - name: planning
+    prompt: "global file planning"
+  - name: implementing
+    prompt: "global file implementing"
+`,
+		},
+		`workflows:
+  - name: the-work
+    steps:
+      - planning
+      - name: implementing
+        prompt: "project implementing"
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil || len(wf.Steps) != 2 {
+		t.Fatalf("want 2 steps, got %+v", wf)
+	}
+	if wf.Steps[0].Prompt != "global file planning" {
+		t.Errorf("want global file planning prompt, got %q", wf.Steps[0].Prompt)
+	}
+	if wf.Steps[1].Prompt != "project implementing" {
+		t.Errorf("want project implementing override, got %q", wf.Steps[1].Prompt)
+	}
+}
+
+// The flat list form supports string refs to global workflows.
+func TestListForm_StringRefResolvesGlobal(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+`,
+		nil,
+		`workflows:
+  - the-work
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil {
+		t.Fatalf("want the-work resolved from global via list form, got nil")
+	}
+	if len(wf.Steps) != 1 || wf.Steps[0].Prompt != "global planning" {
+		t.Errorf("want global planning step, got %+v", wf.Steps)
+	}
+}
+
+// The named-body sugar (`- the-work:` with a nested body) overrides the global
+// workflow and its step refs resolve against the global definition — the exact
+// syntax from the feature request.
+func TestListForm_NamedBodySugarOverridesSteps(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+      - name: implementing
+        prompt: "global implementing"
+`,
+		nil,
+		`workflows:
+  - the-work:
+      steps:
+        - planning
+        - implementing
+        - name: reviewing
+          prompt: "local reviewing"
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil || len(wf.Steps) != 3 {
+		t.Fatalf("want 3 steps, got %+v", wf)
+	}
+	want := []struct{ name, prompt string }{
+		{"planning", "global planning"},
+		{"implementing", "global implementing"},
+		{"reviewing", "local reviewing"},
+	}
+	for i, w := range want {
+		if wf.Steps[i].Name != w.name || wf.Steps[i].Prompt != w.prompt {
+			t.Errorf("step %d: want {%q,%q}, got {%q,%q}", i, w.name, w.prompt, wf.Steps[i].Name, wf.Steps[i].Prompt)
+		}
+	}
+}
+
+// A named-body sugar entry with an empty body (`- the-work:`) is treated as a
+// bare ref, identical to `- the-work`.
+func TestListForm_NamedBodySugarEmptyBodyIsRef(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+`,
+		nil,
+		`workflows:
+  - the-work:
+`,
+		nil,
+	)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("the-work")
+	if wf == nil || len(wf.Steps) != 1 || wf.Steps[0].Prompt != "global planning" {
+		t.Fatalf("want the-work pulled whole from global, got %+v", wf)
+	}
+}
+
 // Diagnose should pick up the global pool so that project configs referencing
 // global workflows validate cleanly (no false-positive "missing file" error).
 func TestDiagnose_ResolvesGlobalRefs(t *testing.T) {
@@ -429,5 +745,46 @@ func TestDiagnose_ResolvesGlobalRefs(t *testing.T) {
 		if strings.Contains(d.Message, "shared-impl") {
 			t.Errorf("did not expect diagnostic about shared-impl, got %q", d.Message)
 		}
+	}
+}
+
+// Diagnose resolves step refs against the global pool so a project that
+// references global workflow steps by name validates cleanly, and flags an
+// unresolvable step ref as an error.
+func TestDiagnose_StepRefs(t *testing.T) {
+	projectDir := setupGlobalAndProject(t,
+		`workflows:
+  - name: the-work
+    steps:
+      - name: planning
+        prompt: "global planning"
+`,
+		nil,
+		`workflows:
+  - name: the-work
+    steps:
+      - planning
+      - name: reviewing
+        prompt: "local reviewing"
+`,
+		nil,
+	)
+
+	if err := ValidateFile(filepath.Join(projectDir, ".sortie.yml")); err != nil {
+		t.Fatalf("ValidateFile on valid step refs: %v", err)
+	}
+
+	// Now break the ref and expect a fatal error.
+	bad := `workflows:
+  - name: the-work
+    steps:
+      - planning
+      - bogus
+`
+	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte(bad), 0644); err != nil {
+		t.Fatalf("rewrite project config: %v", err)
+	}
+	if err := ValidateFile(filepath.Join(projectDir, ".sortie.yml")); err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("want error naming unresolvable step %q, got %v", "bogus", err)
 	}
 }

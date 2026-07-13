@@ -100,19 +100,47 @@ type ProjectConfig struct {
 }
 
 // WorkflowEntry is a single item in the flat workflows: list. It is either
-// a string referencing a workflow file under .sortie/workflows/<name>.yml
-// or an inline WorkflowConfig definition. Exactly one of Ref / Inline is set.
+// a string referencing a workflow (a file under .sortie/workflows/ or a
+// workflow defined in the global ~/.sortie.yml) or an inline WorkflowConfig
+// definition. Exactly one of Ref / Inline is set.
 type WorkflowEntry struct {
-	// Ref, when non-empty, is the name of a file-based workflow under
-	// .sortie/workflows/. The file must exist at config-load time (missing
-	// files surface a hard error), or resolve against the global pool.
+	// Ref, when non-empty, is the name of a referenced workflow, resolved
+	// against the local file pool and then the global pool at load time
+	// (unresolvable refs surface a hard error).
 	Ref string
 
 	// Inline, when non-nil, is an inline workflow definition.
 	Inline *WorkflowConfig
 }
 
-// UnmarshalYAML accepts either a scalar (string ref) or a mapping (inline def).
+// knownWorkflowFields lists the YAML keys of WorkflowConfig. Used to tell the
+// standard inline form (`- name: X`, has a known key) apart from the named-body
+// sugar (`- X: { ... }`, single unknown key) in WorkflowEntry.UnmarshalYAML.
+var knownWorkflowFields = map[string]bool{
+	"name":                    true,
+	"description":             true,
+	"print":                   true,
+	"on_complete":             true,
+	"steps":                   true,
+	"summarizer_prompt":       true,
+	"worktree-sync-paths":     true,
+	"worktree-setup-command":  true,
+	"worktree-setup-commands": true,
+	"tmux-setup-command":      true,
+	"tmux":                    true, // deprecated — routed to the migration error
+}
+
+// UnmarshalYAML accepts three shapes:
+//
+//   - shared-impl              # scalar string ref
+//   - name: the-work           # standard inline definition
+//     steps: [...]
+//   - the-work:                # named-body sugar (key is the workflow name)
+//     steps: [...]
+//
+// The named-body sugar is recognised when the mapping has exactly one key that
+// is not a known WorkflowConfig field. A sugar entry with an empty body
+// (`- the-work:`) is treated as a bare ref, identical to `- the-work`.
 func (e *WorkflowEntry) UnmarshalYAML(value *yaml.Node) error {
 	switch value.Kind {
 	case yaml.ScalarNode:
@@ -124,7 +152,21 @@ func (e *WorkflowEntry) UnmarshalYAML(value *yaml.Node) error {
 		e.Ref = s
 		return nil
 	case yaml.MappingNode:
-		// Inline form: "- name: ...\n  steps: [...]"
+		if name, body, ok := namedBodyEntry(value); ok {
+			// Named-body sugar: the single unknown key is the workflow name.
+			if body == nil || body.Tag == "!!null" {
+				e.Ref = name
+				return nil
+			}
+			var wf WorkflowConfig
+			if err := body.Decode(&wf); err != nil {
+				return err
+			}
+			wf.Name = name // the sugar key is authoritative
+			e.Inline = &wf
+			return nil
+		}
+		// Standard inline form: "- name: ...\n  steps: [...]"
 		var wf WorkflowConfig
 		if err := value.Decode(&wf); err != nil {
 			return err
@@ -134,6 +176,20 @@ func (e *WorkflowEntry) UnmarshalYAML(value *yaml.Node) error {
 	default:
 		return fmt.Errorf("workflow entry must be a string (ref) or mapping (inline), got %v", value.Kind)
 	}
+}
+
+// namedBodyEntry reports whether node is the named-body sugar form — a mapping
+// with exactly one key that is not a known WorkflowConfig field — and if so
+// returns the workflow name (the key) and its body node.
+func namedBodyEntry(node *yaml.Node) (name string, body *yaml.Node, ok bool) {
+	if node.Kind != yaml.MappingNode || len(node.Content) != 2 {
+		return "", nil, false
+	}
+	key := node.Content[0]
+	if key.Kind != yaml.ScalarNode || knownWorkflowFields[key.Value] {
+		return "", nil, false
+	}
+	return key.Value, node.Content[1], true
 }
 
 type VerificationConfig struct {
@@ -303,11 +359,29 @@ type StepConfig struct {
 	// for tmux steps with summarization_strategy "summarize_chat"; ignored
 	// otherwise. Defaults to false (best-effort: warn and proceed).
 	RequireContext bool `yaml:"require_context,omitempty"`
+
+	// ref marks a step parsed from a bare-string list entry (e.g. `- planning`).
+	// A reference step carries only its Name; resolveWorkflowSteps replaces it
+	// with the same-named step from the base (global) workflow during config
+	// resolution. Not serialized — populated by the loader and always false on a
+	// fully-resolved step. Mirrors WorkflowEntry.Ref at the step level.
+	ref bool
 }
 
-// UnmarshalYAML decodes a StepConfig and rejects the legacy `tmux:` field
-// with a migration error.
+// UnmarshalYAML decodes a StepConfig. A bare scalar is a step *reference* — the
+// named step is pulled from the same-named base (global) workflow during
+// resolution (see resolveWorkflowSteps), mirroring how a scalar workflow entry
+// references a workflow by name. A mapping is an inline step definition; the
+// legacy `tmux:` field is rejected with a migration error.
 func (s *StepConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		var name string
+		if err := value.Decode(&name); err != nil {
+			return err
+		}
+		*s = StepConfig{Name: name, ref: true}
+		return nil
+	}
 	if err := checkDeprecatedTmuxField(value, "step"); err != nil {
 		return err
 	}

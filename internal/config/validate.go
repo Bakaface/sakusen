@@ -118,7 +118,11 @@ func loadGlobalPoolForValidation(skipPath string) (*globalWorkflowPool, error) {
 
 	tmpCfg := defaultConfig()
 	if err := loadProjectConfig(globalYml, tmpCfg); err != nil {
-		return nil, err
+		// A malformed or unresolvable global config must not break diagnosis of
+		// the project file. Fall back to no global pool: project refs to global
+		// workflows will then surface as ordinary "unresolved ref" findings
+		// rather than a fatal load error unrelated to the file under validation.
+		return nil, nil
 	}
 	return snapshotGlobalPool(tmpCfg), nil
 }
