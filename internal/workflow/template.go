@@ -46,12 +46,23 @@ type ChildrenVars struct {
 	ByID map[int64]ChildVars
 }
 
+// TrackVars exposes the task's track for explicit prompt interpolation via
+// {{track.id}}, {{track.name}}, {{track.context}}, and {{track.own_context}}.
+// The zero value (trackless task) resolves every {{track.*}} var to "".
+type TrackVars struct {
+	ID         int64
+	Name       string
+	Context    string // full ancestor chain, root-first, "## Track: <name>" headers
+	OwnContext string // leaf track's own context only
+}
+
 type TemplateContext struct {
 	Task     TaskVars
 	Steps    map[string]string // step name -> result text from DB
 	Git      GitVars
 	Loop     LoopVars
 	Children ChildrenVars
+	Track    TrackVars
 	// TaskLookup resolves a task by ID for {{tasks.<id>.<field>}} references.
 	// When nil, such references resolve to "".
 	TaskLookup func(int64) (*task.Task, error)
@@ -96,6 +107,17 @@ func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
 			return ctx.Git.TargetBranch
 		case key == "git.repo_root":
 			return ctx.Git.RepoRoot
+		case key == "track.id":
+			if ctx.Track.ID == 0 {
+				return ""
+			}
+			return fmt.Sprintf("%d", ctx.Track.ID)
+		case key == "track.name":
+			return ctx.Track.Name
+		case key == "track.context":
+			return ctx.Track.Context
+		case key == "track.own_context":
+			return ctx.Track.OwnContext
 		case key == "loop.iteration":
 			return fmt.Sprintf("%d", ctx.Loop.Iteration)
 		case key == "loop.max_iterations":
@@ -123,6 +145,23 @@ func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
 			return match // leave unknown placeholders as-is
 		}
 	})
+}
+
+// FormatTrackChain renders a root-first track chain for {{track.context}}.
+// Each track whose trimmed context is non-empty contributes a
+// "## Track: <name>" header followed by its context; empty-context tracks are
+// skipped entirely so ancestors used purely for grouping add no noise.
+// Segments are joined with blank lines. An empty chain renders as "".
+func FormatTrackChain(chain []*task.Track) string {
+	var segments []string
+	for _, tr := range chain {
+		ctx := strings.TrimSpace(tr.Context)
+		if ctx == "" {
+			continue
+		}
+		segments = append(segments, "## Track: "+tr.Name+"\n\n"+ctx)
+	}
+	return strings.Join(segments, "\n\n")
 }
 
 // childRefFields lists the per-child fields exposed via {{children.<id>.<field>}}.

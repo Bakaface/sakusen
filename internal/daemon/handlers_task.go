@@ -95,6 +95,13 @@ func (s *Server) handleCreateTask(conn net.Conn, req CreateTaskRequest) {
 func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, string, error) {
 	description := strings.TrimSpace(req.Description)
 
+	// Normalize the explicit-none track sentinel ("none" = explicitly
+	// trackless) so it works uniformly from every surface — most importantly
+	// create_tasks_and_wait children opting out of parent-track inheritance.
+	if strings.EqualFold(strings.TrimSpace(req.Track), "none") {
+		req.Track = ""
+	}
+
 	projectPath := req.ProjectPath
 	if projectPath == "" {
 		return nil, "", fmt.Errorf("project_path is required")
@@ -111,7 +118,31 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	if pc, err := s.getProjectContext(proj.ID); err == nil {
 		projCfg = pc.cfg
 	}
-	wf := projCfg.GetWorkflow(req.Workflow)
+
+	// Resolve the track (slug or numeric ID; project shadows global). An
+	// unknown track fails the create — silently dropping a requested track
+	// association would be worse than erroring.
+	var tr *task.Track
+	if req.Track != "" {
+		tr, err = s.resolveTrackRef(&proj.ID, req.Track)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	// Workflow precedence: explicit request > track's workflow field >
+	// project default. When the name came FROM the track, validate it resolves
+	// (GetWorkflow silently falls back to the default workflow, so it cannot
+	// validate); explicit req.Workflow keeps today's silent-fallback behavior.
+	workflowName := req.Workflow
+	if workflowName == "" && tr != nil && tr.Workflow != "" {
+		workflowName = tr.Workflow
+		if projCfg.GetTaskWorkflow(workflowName) == nil {
+			return nil, "", fmt.Errorf("track %q references unknown workflow %q", tr.Slug, workflowName)
+		}
+	}
+
+	wf := projCfg.GetWorkflow(workflowName)
 	tmuxFirst := wf != nil && wf.FirstStepIsTmux()
 
 	// Apply workflow-level pins as fallbacks below explicit request values.
@@ -198,7 +229,11 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		log.Printf("%sFailed to update project defaults for project %d: %v", s.projectLogPrefix(proj.ID), proj.ID, err)
 	}
 
-	t, err := s.database.CreateTaskWithPriority(proj.ID, title, description, slug, req.Workflow, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images)
+	var trackID *int64
+	if tr != nil {
+		trackID = &tr.ID
+	}
+	t, err := s.database.CreateTaskWithPriority(proj.ID, title, description, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create task: %v", err)
 	}

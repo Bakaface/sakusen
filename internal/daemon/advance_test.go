@@ -108,7 +108,7 @@ func TestAdvanceTmuxTask_NoRollbackWhenAgentAlreadyTracked(t *testing.T) {
 
 	tk, err := database.CreateTaskWithPriority(
 		projID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusTmux, task.PriorityMedium, false, nil,
+		task.StatusTmux, task.PriorityMedium, false, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -165,7 +165,7 @@ func TestAdvanceTmuxTask_ConcurrentAdvancesSerialized(t *testing.T) {
 
 	tk, err := database.CreateTaskWithPriority(
 		projID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusTmux, task.PriorityMedium, true, nil,
+		task.StatusTmux, task.PriorityMedium, true, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -215,7 +215,7 @@ func TestOnAgentStateChange_SpuriousPauseStatusFinalizes(t *testing.T) {
 
 	tk, err := database.CreateTaskWithPriority(
 		projID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusTmux, task.PriorityMedium, true, nil,
+		task.StatusTmux, task.PriorityMedium, true, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -245,7 +245,7 @@ func TestOnAgentStateChange_GenuinePauseSkipsFinalization(t *testing.T) {
 
 	tk, err := database.CreateTaskWithPriority(
 		projID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusTmux, task.PriorityMedium, true, nil,
+		task.StatusTmux, task.PriorityMedium, true, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)

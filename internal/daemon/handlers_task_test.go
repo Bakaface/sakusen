@@ -339,6 +339,9 @@ func setupServerWithPinnedWorkflow(t *testing.T, projectPath string, wf config.W
 	s.projects[proj.ID] = &projectContext{
 		cfg:      pinnedCfg,
 		repoRoot: projectPath,
+		// Match the live fingerprint so the tracks-workflows freshness check
+		// doesn't evict this hand-primed entry.
+		tracksFingerprint: tracksFingerprint(projectPath),
 	}
 	s.projectsMu.Unlock()
 

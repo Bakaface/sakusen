@@ -75,7 +75,7 @@ func TestRecoverOrphanedTasks_FinalizingRestartsAgent(t *testing.T) {
 	// no-ops cleanly without invoking claude.
 	tk, err := database.CreateTaskWithPriority(
 		proj.ID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusFinalizing, task.PriorityMedium, false, nil,
+		task.StatusFinalizing, task.PriorityMedium, false, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -146,7 +146,7 @@ func TestRecoverOrphanedTasks_SummarizingRestartsAgent(t *testing.T) {
 
 	tk, err := database.CreateTaskWithPriority(
 		proj.ID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusSummarizing, task.PriorityMedium, false, nil,
+		task.StatusSummarizing, task.PriorityMedium, false, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)

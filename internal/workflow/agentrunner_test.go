@@ -28,6 +28,7 @@ type fakeAgentCall struct {
 	stepName     string
 	prompt       string
 	systemPrompt string
+	env          map[string]string
 }
 
 // fakeAgentRunner is the AGENT-RUNNER seam's test double (see agentRunner in
@@ -63,7 +64,11 @@ func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *tas
 	if len(systemPrompt) > 0 {
 		sp = systemPrompt[0]
 	}
-	f.calls = append(f.calls, fakeAgentCall{stepName: step.Name, prompt: prompt, systemPrompt: sp})
+	envCopy := make(map[string]string, len(envVars))
+	for k, v := range envVars {
+		envCopy[k] = v
+	}
+	f.calls = append(f.calls, fakeAgentCall{stepName: step.Name, prompt: prompt, systemPrompt: sp, env: envCopy})
 
 	queue := f.results[step.Name]
 	if len(queue) == 0 {

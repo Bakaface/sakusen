@@ -9,11 +9,11 @@ import (
 type ProjectType string
 
 const (
-	ProjectTypeNode   ProjectType = "node"
-	ProjectTypeGo     ProjectType = "go"
-	ProjectTypeRuby   ProjectType = "ruby"
-	ProjectTypePython ProjectType = "python"
-	ProjectTypeRust   ProjectType = "rust"
+	ProjectTypeNode    ProjectType = "node"
+	ProjectTypeGo      ProjectType = "go"
+	ProjectTypeRuby    ProjectType = "ruby"
+	ProjectTypePython  ProjectType = "python"
+	ProjectTypeRust    ProjectType = "rust"
 	ProjectTypeUnknown ProjectType = "unknown"
 )
 
@@ -159,5 +159,3 @@ func detectRust(dir string) *DetectedProject {
 		},
 	}
 }
-
-

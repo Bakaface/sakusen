@@ -8,11 +8,11 @@ description: >
 
 # Database & Persistence
 
-SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys enabled. Schema versioned with progressive migrations (currently **v18**).
+SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys enabled. Schema versioned with progressive migrations (currently **v20**).
 
 ## Schema
 
-Read `internal/db/schema.sql` for the canonical table definitions. Core tables: `projects`, `tasks`, `task_dependencies`, `task_steps`, plus `chats` for conversation tracking. Migrations use `if version < N` blocks in `db.go:migrate()` — append the next version check; auto-applied on startup. Fresh databases apply the embedded `schema.sql` directly and stamp version **18**. When adding a migration, bump the fresh-install version literal in `db.go` (currently `INSERT INTO schema_version (version) VALUES (18)`) in the same change.
+Read `internal/db/schema.sql` for the canonical table definitions. Core tables: `projects`, `tasks`, `task_dependencies`, `task_steps`, `task_waits_on`, `tracks`, plus `chats` for conversation tracking. Migrations live in the `migrations` ladder in `db.go` (`migrations[0]` upgrades version 1 → 2, so the last migration's target version is `len(migrations)+1`); auto-applied on startup. Fresh databases apply the embedded `schema.sql` directly and stamp `latestSchemaVersion` (derived as `1 + len(migrations)` — never hardcoded). When adding a migration, append `migrateVN` to the ladder AND mirror the change in `schema.sql` in the same change.
 
 ### `task_steps` Table
 
@@ -55,10 +55,10 @@ UpdateProjectDefaultWorktree(id int64, worktree bool) error
 
 ```go
 CreateTask(projectID int64, title, description, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error)
-CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string) (*task.Task, error)
+CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error)
 ```
 
-`CreateTask` is a convenience wrapper that delegates to `CreateTaskWithPriority` with medium priority and `worktree=true`.
+`CreateTask` is a convenience wrapper that delegates to `CreateTaskWithPriority` with medium priority, `worktree=true`, and no track.
 
 ## Task Query Patterns
 
@@ -122,6 +122,19 @@ DeleteTaskSteps(taskID int64) error                                             
 DeleteTaskStepsFrom(taskID int64, stepNames []string) error                       // Delete specific steps by name
 ```
 
+### Track Operations (`track.go`)
+
+Tracks are named, mutable, hierarchical context containers (`tracks` table; see `internal/task/track.go`). `project_id` NULL = global track; slug uniqueness is per-scope via two partial unique indexes. Tasks reference a track via `tasks.track_id`.
+
+```go
+CreateTrack(projectID *int64, name, slug, workflow, context string, parentID *int64) (*task.Track, error) // validates slug (non-empty, not purely numeric), parent scope, depth cap (maxTrackDepth=10)
+GetTrack(id int64) (*task.Track, error)
+GetTrackBySlug(projectID *int64, slug string) (*task.Track, error) // project shadows global; nil projectID = global only
+ListTracks(projectID int64) ([]*task.Track, error)                 // project + global tracks, project first, slug-ordered
+UpdateTrackContext(id int64, context, mode string) error           // mode "replace" (default) or "append" — append is a single SQL statement (race-free)
+GetTrackChain(id int64) ([]*task.Track, error)                     // track + ancestors, root-first; in-Go loop, errors past maxTrackDepth
+```
+
 ## Patterns
 
 - Parameterized queries only (`?` placeholders), never string interpolation
@@ -129,4 +142,4 @@ DeleteTaskStepsFrom(taskID int64, stepNames []string) error                     
 - Nullable fields use `sql.NullString`, `sql.NullInt64`, `sql.NullTime`
 - `blocked_by` computed from `task_dependencies` table, not stored directly
 - Test with `Open(filepath.Join(t.TempDir(), "test.db"))` using a temp directory
-- New columns: add migration (`if version < N`), handle NULL defaults for existing rows
+- New columns: append a migration to the `migrations` ladder (and mirror in `schema.sql`), handle NULL defaults for existing rows

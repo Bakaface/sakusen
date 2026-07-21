@@ -8,6 +8,7 @@ type TemplateContext struct {
     Steps     map[string]string   // step_name -> step context (from DB task_steps table)
     Git       GitVars
     Loop      LoopVars
+    Track     TrackVars           // zero value (trackless task) resolves every {{track.*}} var to ""
 }
 
 type TaskVars struct {
@@ -22,6 +23,13 @@ type GitVars struct {
 
 type LoopVars struct {
     Iteration, MaxIterations int
+}
+
+type TrackVars struct {
+    ID         int64
+    Name       string
+    Context    string // full ancestor chain, root-first, "## Track: <name>" headers (FormatTrackChain)
+    OwnContext string // leaf track's own context only
 }
 ```
 
@@ -40,6 +48,10 @@ type LoopVars struct {
 | `{{git.repo_root}}` | Repository root path |
 | `{{loop.iteration}}` | Current loop iteration |
 | `{{loop.max_iterations}}` | Max iterations configured |
+| `{{track.id}}` | Attached track's ID ("" for trackless tasks — never "0") |
+| `{{track.name}}` | Attached track's name |
+| `{{track.context}}` | Root-first ancestor-concatenated track context (re-read live at every step launch) |
+| `{{track.own_context}}` | Leaf track's own context only |
 | `{{steps.step_name.context}}` | Step context from DB (captured from Claude's `result` event) |
 | `{{artifacts.step_name}}` | Backward compat alias for `{{steps.step_name.context}}` |
 

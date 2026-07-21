@@ -86,6 +86,10 @@ func createPausedTmuxStep(t *testing.T, s *Server, projID int64, stepName string
 		cfg:      cfg,
 		engine:   workflow.NewEngine(cfg, s.database, s.notifier, repoRoot),
 		repoRoot: repoRoot,
+		// Match the live fingerprint so getProjectContext's tracks-workflows
+		// freshness check doesn't evict this hand-primed entry (a developer
+		// machine may have a real ~/.sortie/tracks tree).
+		tracksFingerprint: tracksFingerprint(repoRoot),
 	}
 	s.projectsMu.Unlock()
 

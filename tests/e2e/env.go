@@ -27,6 +27,7 @@ type Env struct {
 	ResponsesDir string // $E2E_RESPONSES_DIR — points at testdata/<scenario>/
 	StubLog      string // path to per-test stub invocation log
 	StubPath     string // absolute path to stub-claude.sh
+	PromptDir    string // $E2E_PROMPT_CAPTURE_DIR — per-invocation argv capture
 	daemonCmd    *exec.Cmd
 	daemonLog    string // path to daemon stdout+stderr log
 }
@@ -66,6 +67,11 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	t.Setenv("HOME", xdgDir)
 	t.Setenv("E2E_RESPONSES_DIR", responsesDir)
 	t.Setenv("SORTIE_E2E_LOG", stubLog)
+	promptDir := filepath.Join(xdgDir, "prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatalf("mkdir prompt capture dir: %v", err)
+	}
+	t.Setenv("E2E_PROMPT_CAPTURE_DIR", promptDir)
 	// SORTIE_E2E_BIN lets stub hooks (e.g. awaiting_children's spawn hook)
 	// shell out to the same sortie binary the daemon was launched from.
 	// The hooks need to call back into the daemon via CLI commands like
@@ -80,6 +86,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 		ResponsesDir: responsesDir,
 		StubLog:      stubLog,
 		StubPath:     stubPath,
+		PromptDir:    promptDir,
 		daemonLog:    filepath.Join(xdgDir, "daemon.log"),
 	}
 
@@ -243,6 +250,20 @@ func (e *Env) TaskField(id int64, key string) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// CapturedPrompt returns the argv the stub was invoked with for the given
+// task's step (captured via E2E_PROMPT_CAPTURE_DIR — the TSV log deliberately
+// omits argv). Waits briefly for the file, then t.Fatal on missing.
+func (e *Env) CapturedPrompt(taskID int64, step string) string {
+	e.t.Helper()
+	path := filepath.Join(e.PromptDir, fmt.Sprintf("prompt-%d-%s.txt", taskID, step))
+	e.WaitFile(path, 5*time.Second)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		e.t.Fatalf("read captured prompt %s: %v", path, err)
+	}
+	return string(data)
 }
 
 // mustRun runs cmd in dir and calls t.Fatal on failure.

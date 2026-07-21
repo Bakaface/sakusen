@@ -324,6 +324,7 @@ func TaskInfoFromTask(t *task.Task) TaskInfo {
 	return TaskInfo{
 		ID:               t.ID,
 		ProjectID:        t.ProjectID,
+		TrackID:          t.TrackID, // slug enrichment needs a DB handle — see taskToInfo
 		Title:            t.Title,
 		Description:      t.Description,
 		Slug:             t.Slug,
@@ -381,6 +382,14 @@ func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 	if proj, err := s.database.GetProject(t.ProjectID); err == nil {
 		info.ProjectName = proj.Name
 		info.ProjectPath = proj.Path
+	}
+
+	// Track slug enrichment (best-effort: a failed lookup leaves the slug
+	// empty and consumers fall back to "#<track_id>").
+	if t.TrackID != nil {
+		if tr, err := s.database.GetTrack(*t.TrackID); err == nil {
+			info.Track = tr.Slug
+		}
 	}
 
 	// Populate TargetBranch with effective base branch (and StepHuman / a

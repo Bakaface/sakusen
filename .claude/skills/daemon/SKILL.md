@@ -54,6 +54,7 @@ type Server struct {
 | `handlers_agent.go` | Agent ops, subscriptions, logs: list/start/stop agents, get output, subscribe/unsubscribe, get logs |
 | `handlers_continue.go` | Continuation flow: continue/finalize tasks, worktree/branch management, tmux setup, detach/attach branch |
 | `handlers_workflows.go` | `list_workflows` handler — projects → flat workflow listing |
+| `handlers_tracks.go` | Track ops: create/get/list tracks, set track context (CLI), own-track-only context write (MCP), `resolveTrackRef`, `trackToInfo` |
 | `tmux_monitor.go` | Background tmux activity monitoring loop, broadcasts activity changes to subscribers |
 | `broadcast.go` | Event broadcasting, agent state change handling |
 | `protocol.go` | Message types, request/response structs |
@@ -90,6 +91,8 @@ type TaskInfo struct {
     ID, ProjectID                           int64
     ProjectName, ProjectPath                string    // Populated from project lookup
     Title, Description, Slug, Workflow      string
+    TrackID                                 *int64    // Attached track (nil = trackless)
+    Track                                   string    // Track slug (daemon-side enrichment; empty in DB-only fallback)
     Status, Priority                        string
     StepIndex, LoopIteration                int
     CurrentStep, BranchName, Branch         string

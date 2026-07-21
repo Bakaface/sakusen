@@ -142,11 +142,11 @@ func TestBranchViewRendering_NestedTree(t *testing.T) {
 		idx    int
 		prefix string
 	}{
-		{0, "├─feat-d"},        // root, not last
-		{1, "└─feat-a"},        // root, last
-		{2, "  ├─feat-e"},      // child of last root, not last child
-		{3, "  └─feat-c"},      // child of last root, last child
-		{4, "    └─feat-b"},    // grandchild of last root's last child
+		{0, "├─feat-d"},     // root, not last
+		{1, "└─feat-a"},     // root, last
+		{2, "  ├─feat-e"},   // child of last root, not last child
+		{3, "  └─feat-c"},   // child of last root, last child
+		{4, "    └─feat-b"}, // grandchild of last root's last child
 	}
 	for _, c := range checks {
 		rendered := list.treeEntries[c.idx].renderBranchColumn(list.tasks[c.idx].Branch, branchWidth)

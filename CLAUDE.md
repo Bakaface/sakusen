@@ -19,7 +19,9 @@ internal/
   agent/             Agent state management
   task/              Task lifecycle and state transitions
   tmux/              Tmux session management for interactive tasks
-  mcp/               MCP server exposing sortie tools (create_task, get_task, list_workflows)
+  mcp/               MCP server exposing sortie tools (create_task, get_task, list_workflows,
+                     create_tasks_and_wait, wait_for_tasks, update_step_context,
+                     create_track, update_track_context, list_tracks)
   notify/            Notification support
   client/            Client for daemon communication
 tests/e2e/           End-to-end tests (build tag `e2e`; see tests/e2e/README.md)
@@ -32,6 +34,7 @@ claude-code-plugin/  Claude Code plugin with sortie-configurer + worktree-parity
 - **`BuildSystemPrompt()`** in `internal/workflow/system-prompt.go` constructs the system prompt passed to spawned Claude agents via `--system-prompt`
 - **Template resolution** (`internal/workflow/template.go`) interpolates task variables and prior step contexts into prompts
 - **Git worktrees** isolate each task so parallel agents don't conflict
+- **Tracks** (`tracks` table in the global DB) are named, hierarchical context containers; tasks attach at create time and step prompts opt in via `{{track.context}}` / `{{track.own_context}}`; track workflows live under `.sortie/tracks/<slug>/workflows/` (project) and `~/.sortie/tracks/<slug>/workflows/` (global) as hidden `<slug>:<name>` entries
 
 ## Development
 

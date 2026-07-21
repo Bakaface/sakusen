@@ -146,6 +146,10 @@ workflows:
 
 "Kind" is now an emergent property of how completely a workflow pins the New Task form — not a config category. The `n` key (and `:RunTask`) operates over the single flat list; fully-pinned workflows create a task immediately without showing the form.
 
+### Track Workflows
+
+Per-track workflow files live under `.sortie/tracks/<slug>/workflows/*.yml` (project tier) and `~/.sortie/tracks/<slug>/workflows/*.yml` (global tier). `appendTrackWorkflows` (called from `Load()`/`LoadForProject()` AFTER project-level resolution — never inside `loadProjectConfig`) registers them as `Hidden: true` workflows named `<slug>:<name>`; project shadows global on identical namespaced names. They follow the same file rules as `.sortie/workflows/` (flat, kebab-case, no `name:` field) and go through the same pin/loop/step validation. See `internal/config/CLAUDE.md` for the full invariant.
+
 ## StepConfig
 
 ```go

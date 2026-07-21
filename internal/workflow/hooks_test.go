@@ -162,4 +162,3 @@ func TestInstallStopHook_EndToEndDropsSentinel(t *testing.T) {
 		t.Errorf("sentinel content mismatch:\n  got:  %q\n  want: %q", string(content), payload)
 	}
 }
-

@@ -61,6 +61,10 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 		"SORTIE_WORKTREE": t.WorktreePath,
 		"SORTIE_PURPOSE":  "merge_conflict",
 	}
+	if t.TrackID != nil {
+		// Parity with step agents — merge-conflict agents belong to the same task.
+		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
+	}
 
 	exitCode, _, _, outputTail, err := e.runClaudeStep(ctx, t, step, prompt, env, outputFn, conflictSysPrompt)
 	if err != nil {

@@ -118,6 +118,7 @@ func IsValidPriority(s string) bool {
 type Task struct {
 	ID               int64
 	ProjectID        int64
+	TrackID          *int64 // nil = trackless
 	Title            string
 	Description      string
 	Slug             string

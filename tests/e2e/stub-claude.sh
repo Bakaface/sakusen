@@ -86,6 +86,13 @@ if [[ -n "${SORTIE_E2E_LOG:-}" ]]; then
         >> "$SORTIE_E2E_LOG"
 fi
 
+# --- opt-in prompt capture (the TSV log deliberately omits argv because it
+# contains multi-line prompts; tests that need to assert on prompt contents
+# set E2E_PROMPT_CAPTURE_DIR and read prompt-<taskID>-<step>.txt) ---
+if [[ -n "${E2E_PROMPT_CAPTURE_DIR:-}" ]]; then
+    printf '%s\n' "$*" > "$E2E_PROMPT_CAPTURE_DIR/prompt-${SORTIE_TASK_ID:-0}-${STEP_NAME:-none}.txt"
+fi
+
 # --- route to response file ---
 emit_file() {
     local path="$1"

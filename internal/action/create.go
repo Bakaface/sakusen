@@ -25,7 +25,9 @@ type CreateArgs struct {
 	// the daemon then defers to the workflow's worktree pin, falling back to the
 	// project default. A non-nil value (a real user choice) overrides both. Leaving
 	// this nil is what lets a workflow's worktree:false pin actually take effect.
-	Worktree    *bool
+	Worktree *bool
+	// Track attaches the task to a track (slug or numeric ID).
+	Track       string
 	DependsOn   []int64
 	ProjectPath string // set by the caller from cfg.ProjectDir / m.projectPath
 	Images      []string
@@ -61,6 +63,7 @@ func RunCreate(ctx Ctx, args CreateArgs) (Result, error) {
 		CheckoutBranch: args.Checkout,
 		ProjectPath:    args.ProjectPath,
 		Worktree:       args.Worktree,
+		Track:          args.Track,
 		BranchMode:     args.BranchMode,
 		TmuxDirect:     args.TmuxDirect,
 		Images:         args.Images,

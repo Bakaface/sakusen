@@ -61,8 +61,8 @@ type Args interface {
 // Action is the registry entry. Typed entry points live alongside as
 // package-level funcs (e.g. RunStop) for CLI/TUI key dispatch.
 type Action struct {
-	ID    string                              // kebab-case, matches CLI subcommand
-	Help  string                              // one-liner for palette + cobra
-	Run   func(Ctx, Args) (Result, error)     // type-erased — used by palette only
-	Parse func(rawArgs string) (Args, error)  // palette path: parse free-text args
+	ID    string                             // kebab-case, matches CLI subcommand
+	Help  string                             // one-liner for palette + cobra
+	Run   func(Ctx, Args) (Result, error)    // type-erased — used by palette only
+	Parse func(rawArgs string) (Args, error) // palette path: parse free-text args
 }

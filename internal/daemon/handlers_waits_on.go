@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 
 	"github.com/Bakaface/sortie/internal/task"
 )
@@ -45,6 +46,13 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 		// have to discover it.
 		if childReq.ProjectPath == "" {
 			childReq.ProjectPath = parentProj.Path
+		}
+		// Children inherit the parent task's track by default, keeping sprint
+		// fan-outs coherent. An explicit per-child Track overrides; the "none"
+		// sentinel passes through and is normalized to trackless inside
+		// createTaskFromRequest.
+		if childReq.Track == "" && parent.TrackID != nil {
+			childReq.Track = strconv.FormatInt(*parent.TrackID, 10)
 		}
 		child, _, err := s.createTaskFromRequest(childReq)
 		if err != nil {

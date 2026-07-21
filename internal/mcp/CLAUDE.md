@@ -9,14 +9,19 @@ irrecoverably destructive operations**.
 - **No irrecoverable operations**: the surface is `create_task`, `get_task`, `list_tasks`,
   `list_workflows`, `retry_task`, `advance_task`, `update_task_description`,
   `update_task_dependencies`, `create_tasks_and_wait`, `wait_for_tasks`,
-  `update_step_context`. Do not add `delete_task`, `revert_task`, or `cleanup` here without
-  an explicit design decision — every exposed mutation must be recoverable (re-editable DB
-  state or a re-queued task; `retry_task` stops only the task's own agent and preserves
-  worktree/branch). `update_step_context` is admitted because the daemon enforces that it
-  can only write to the calling task's currently-active step (see
-  `handleUpdateActiveStepContext`). `advance_task` is admitted because the daemon only
-  accepts it for tasks in tmux state and a premature advance is recoverable via
-  `retry_task`.
+  `update_step_context`, `create_track`, `update_track_context`, `list_tracks`. Do not add
+  `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision —
+  every exposed mutation must be recoverable (re-editable DB state or a re-queued task;
+  `retry_task` stops only the task's own agent and preserves worktree/branch).
+  `update_step_context` is admitted because the daemon enforces that it can only write to
+  the calling task's currently-active step (see `handleUpdateActiveStepContext`).
+  `advance_task` is admitted because the daemon only accepts it for tasks in tmux state and
+  a premature advance is recoverable via `retry_task`. `update_track_context` is admitted
+  because the daemon enforces it can only write the **calling task's own track** (the task
+  must have a track and an active step — see `handleUpdateTaskTrackContext`). Caveat: track
+  context is a **persistent cross-task prompt-injection surface** — anything written flows
+  verbatim into the prompts of every future task attached to that track or its children;
+  the tool descriptions warn about this.
 - **Project resolution is per-call**: `resolveProjectPath()` in `project.go` falls back to
   `git rev-parse --show-toplevel` against the caller's cwd when `project_path` is omitted,
   matching how the TUI resolves projects so tasks land on the same project row.
@@ -39,6 +44,10 @@ irrecoverably destructive operations**.
 | `tool_update_task_description.go` | `update_task_description` tool definition + handler |
 | `tool_update_task_dependencies.go` | `update_task_dependencies` tool — add/remove blocked_by edges |
 | `tool_update_step_context.go` | `update_step_context` tool definition + handler |
+| `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |
+| `tool_create_track.go` | `create_track` tool definition + handler |
+| `tool_update_track_context.go` | `update_track_context` tool definition + handler (own-track-only) |
+| `tool_list_tracks.go` | `list_tracks` tool definition + handler |
 
 ## Conventions
 

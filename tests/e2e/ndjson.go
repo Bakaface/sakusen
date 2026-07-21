@@ -16,9 +16,9 @@ func ndjsonResult(text string) string {
 		SessionID string `json:"session_id"`
 	}
 	type resultMsg struct {
-		Type        string  `json:"type"`
-		Result      string  `json:"result"`
-		DurationMs  int     `json:"duration_ms"`
+		Type         string  `json:"type"`
+		Result       string  `json:"result"`
+		DurationMs   int     `json:"duration_ms"`
 		TotalCostUSD float64 `json:"total_cost_usd"`
 	}
 

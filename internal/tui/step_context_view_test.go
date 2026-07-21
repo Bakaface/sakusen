@@ -215,8 +215,8 @@ func TestStepSelector_VisualLayout(t *testing.T) {
 
 	wantSubstrings := []string{
 		"Step Context",       // title
-		"✓ plan",              // completed
-		"✓ implement",         // completed
+		"✓ plan",             // completed
+		"✓ implement",        // completed
 		"⟳ review (running)", // running
 		"· verify (pending)", // pending
 		"j/k: navigate",      // hint

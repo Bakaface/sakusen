@@ -75,6 +75,15 @@ GetTaskSteps(taskID int64) ([]daemon.TaskStepDetail, error)     // ordered, incl
 UpdateStepContext(taskID int64, stepName, context string) error // overwrite captured context
 ```
 
+### Track Operations
+```go
+CreateTrack(req daemon.CreateTrackRequest) (*daemon.TrackInfo, error)
+GetTrack(projectPath, ref string) (*daemon.GetTrackResponse, error)      // ref = slug or numeric ID; includes chain + rendered {{track.context}}
+ListTracks(projectPath string) ([]daemon.TrackInfo, error)               // project + global, previews/sizes only
+SetTrackContext(projectPath, ref, context, mode string) error            // CLI surface: arbitrary track by ref
+UpdateTaskTrackContext(taskID int64, context, mode string) error         // MCP surface: calling task's own track only
+```
+
 ### Workflow Discovery
 ```go
 ListWorkflows(projectPath string) (*daemon.ListWorkflowsResponse, error)  // flat list

@@ -176,6 +176,12 @@ func printTaskDetail(t *daemon.TaskInfo) {
 	if t.CurrentStep != "" {
 		fmt.Printf("  Step:        %s (index %d)\n", t.CurrentStep, t.StepIndex)
 	}
+	if t.Track != "" {
+		fmt.Printf("  Track:       %s\n", t.Track)
+	} else if t.TrackID != nil {
+		// DB-only fallback path (TaskInfoFromTask) carries the ID only.
+		fmt.Printf("  Track:       #%d\n", *t.TrackID)
+	}
 	if !t.Worktree {
 		fmt.Printf("  Worktree:    off (runs in current directory)\n")
 	} else if t.WorktreePath != "" {

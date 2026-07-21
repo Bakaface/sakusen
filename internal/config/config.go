@@ -114,6 +114,15 @@ func Load() (*Config, error) {
 	}
 
 	cfg.computePaths()
+
+	// Track workflows register AFTER the project-level config resolves (never
+	// inside loadProjectConfig, which also runs for the global ~/.sortie.yml —
+	// registering there would double-add global track workflows with the wrong
+	// tiering).
+	if err := appendTrackWorkflows(cfg, cfg.ProjectDir); err != nil {
+		return nil, err
+	}
+
 	cfg.Project.AutoDetect = true
 
 	if cfg.ProjectDir != "" {
@@ -141,6 +150,13 @@ func LoadForProject(projectDir string) (*Config, error) {
 
 	cfg.ProjectDir = projectDir
 	cfg.computePaths()
+
+	// See the matching call in Load() for why this lives here and not inside
+	// loadProjectConfig.
+	if err := appendTrackWorkflows(cfg, cfg.ProjectDir); err != nil {
+		return nil, err
+	}
+
 	cfg.Project.AutoDetect = true
 	cfg.ApplyDetectedProject(cfg.ProjectDir)
 
@@ -363,11 +379,19 @@ func (p *workflowFilePool) remainingNames() []string {
 // and returns the discovered workflows. Returns an empty pool when the
 // .sortie/workflows directory doesn't exist (not an error).
 func loadWorkflowFilePool(baseDir string) (*workflowFilePool, error) {
-	pool := newWorkflowFilePool()
 	if baseDir == "" {
-		return pool, nil
+		return newWorkflowFilePool(), nil
 	}
-	root := filepath.Join(baseDir, ".sortie", "workflows")
+	return loadWorkflowDir(filepath.Join(baseDir, ".sortie", "workflows"))
+}
+
+// loadWorkflowDir scans a workflows directory (flat, no subdirs) and returns
+// the discovered workflows. Shared by loadWorkflowFilePool (the classic
+// .sortie/workflows/ tier) and loadTrackWorkflows (per-track
+// .sortie/tracks/<slug>/workflows/ dirs). Returns an empty pool when the
+// directory doesn't exist (not an error).
+func loadWorkflowDir(root string) (*workflowFilePool, error) {
+	pool := newWorkflowFilePool()
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -426,6 +450,124 @@ func loadWorkflowFilePool(baseDir string) (*workflowFilePool, error) {
 	}
 
 	return pool, nil
+}
+
+// loadTrackWorkflows scans tracksDir (a ".sortie/tracks" or "~/.sortie/tracks"
+// directory) and returns each track's workflows — discovered under
+// <tracksDir>/<slug>/workflows/*.yml — as hidden, namespaced "<slug>:<name>"
+// WorkflowConfigs, in slug-alphabetical then name-alphabetical order. Missing
+// tracksDir is not an error. Non-directory entries in tracksDir are skipped;
+// non-kebab-case slug directory names are a hard error. The per-track
+// workflows dirs follow the exact same file rules as .sortie/workflows/
+// (flat, .yml/.yaml only, kebab-case base names, no `name:` field).
+func loadTrackWorkflows(tracksDir string) ([]WorkflowConfig, error) {
+	info, err := os.Stat(tracksDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(tracksDir)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", tracksDir, err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+	var out []WorkflowConfig
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		slug := entry.Name()
+		if !validWorkflowFilename.MatchString(slug) {
+			return nil, fmt.Errorf("tracks: invalid track directory name %q (must be kebab-case)", slug)
+		}
+		pool, err := loadWorkflowDir(filepath.Join(tracksDir, slug, "workflows"))
+		if err != nil {
+			return nil, err
+		}
+		for _, base := range pool.order {
+			wf := pool.byName[base]
+			wf.Name = slug + ":" + base
+			wf.Hidden = true
+			out = append(out, wf)
+		}
+	}
+	return out, nil
+}
+
+// globalTracksDir returns the global track-workflow root (~/.sortie/tracks).
+// Deliberately NOT derived from getGlobalSortieYmlPath(): that helper returns
+// "" when ~/.sortie.yml doesn't exist, and global track workflows must resolve
+// regardless of whether a global config file is present.
+func globalTracksDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".sortie", "tracks"), nil
+}
+
+// appendTrackWorkflows appends project-tier (<projectBaseDir>/.sortie/tracks)
+// then global-tier (~/.sortie/tracks) track workflows to cfg.Workflows as
+// hidden "<slug>:<name>" entries. Project shadows global on identical
+// namespaced names (skipped silently, matching the workflow-config precedence
+// direction); a project-tier collision with an already-resolved workflow is a
+// hard error (practically unreachable — ':' is banned in file-based names).
+// Track workflows go through the same step/loop/pin validation as every other
+// resolved workflow.
+func appendTrackWorkflows(cfg *Config, projectBaseDir string) error {
+	seen := make(map[string]bool, len(cfg.Workflows))
+	for _, wf := range cfg.Workflows {
+		seen[wf.Name] = true
+	}
+
+	appendTier := func(tracksDir string, projectTier bool) error {
+		wfs, err := loadTrackWorkflows(tracksDir)
+		if err != nil {
+			return err
+		}
+		for _, wf := range wfs {
+			if seen[wf.Name] {
+				if projectTier {
+					return fmt.Errorf("tracks: workflow %q collides with an existing workflow", wf.Name)
+				}
+				continue // project shadows global
+			}
+			if err := wf.ValidatePins(); err != nil {
+				return err
+			}
+			if err := wf.ValidateLoops(); err != nil {
+				return fmt.Errorf("workflow %q: %w", wf.Name, err)
+			}
+			if err := wf.ValidateSteps(); err != nil {
+				return fmt.Errorf("workflow %q: %w", wf.Name, err)
+			}
+			if err := wf.ValidateOnComplete(); err != nil {
+				return fmt.Errorf("workflow %q: %w", wf.Name, err)
+			}
+			cfg.Workflows = append(cfg.Workflows, wf)
+			seen[wf.Name] = true
+		}
+		return nil
+	}
+
+	if projectBaseDir != "" {
+		if err := appendTier(filepath.Join(projectBaseDir, ".sortie", "tracks"), true); err != nil {
+			return err
+		}
+	}
+	if globalDir, err := globalTracksDir(); err == nil {
+		if err := appendTier(globalDir, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // assertNoNameField rejects file-based workflow definitions that set a `name:`

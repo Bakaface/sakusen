@@ -25,8 +25,8 @@ type StreamParser struct {
 // Note: the "result" JSON key has different types per event (string for result events,
 // absent for others), so we decode result events separately to avoid type conflicts.
 type streamEvent struct {
-	Type      string     `json:"type"`       // "system", "assistant", "user", "result"
-	Subtype   string     `json:"subtype"`    // for system events: "init"
+	Type      string     `json:"type"`    // "system", "assistant", "user", "result"
+	Subtype   string     `json:"subtype"` // for system events: "init"
 	Message   *streamMsg `json:"message,omitempty"`
 	SessionID string     `json:"session_id"` // session ID present on system init events
 }
@@ -46,12 +46,12 @@ type streamMsg struct {
 }
 
 type contentBlock struct {
-	Type     string          `json:"type"`  // "text", "tool_use", "thinking", "tool_result"
-	Text     string          `json:"text"`  // for text blocks
+	Type     string          `json:"type"`     // "text", "tool_use", "thinking", "tool_result"
+	Text     string          `json:"text"`     // for text blocks
 	Thinking string          `json:"thinking"` // for thinking blocks
-	Name     string          `json:"name"`  // tool name for tool_use blocks
-	Input    json.RawMessage `json:"input"` // raw JSON for tool_use input
-	Content  string          `json:"content"` // for tool_result blocks
+	Name     string          `json:"name"`     // tool name for tool_use blocks
+	Input    json.RawMessage `json:"input"`    // raw JSON for tool_use input
+	Content  string          `json:"content"`  // for tool_result blocks
 }
 
 func NewStreamParser() *StreamParser {

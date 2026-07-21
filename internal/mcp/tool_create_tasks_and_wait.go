@@ -28,6 +28,7 @@ type ChildTaskSpec struct {
 	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive Claude session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this child runs."`
+	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). Empty inherits the parent task's track; pass 'none' to explicitly detach the child from any track."`
 }
 
 // CreateTasksAndWaitArgs is the input schema for create_tasks_and_wait.
@@ -124,6 +125,7 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 			TmuxDirect:     t.TmuxDirect,
 			Images:         t.Images,
 			BlockedBy:      t.BlockedBy,
+			Track:          t.Track,
 		}
 	}
 

@@ -39,6 +39,11 @@ type Message struct {
 | `get_task_steps` | `GetTaskStepsRequest{TaskID}` | Get per-step state (ordered, includes pending placeholders for workflow steps without DB rows) |
 | `update_step_context` | `UpdateStepContextRequest{TaskID, StepName, Context}` | Overwrite the captured context for a named step |
 | `list_workflows` | `ListWorkflowsRequest{ProjectPath}` | List workflows for a project (flat list) |
+| `create_track` | `CreateTrackRequest{Name, ParentTrack, Global, Workflow, Context, ProjectPath}` | Create a track (project-scoped unless `Global`) |
+| `get_track` | `GetTrackRequest{ProjectPath, Track}` | Get a track (slug or numeric ID), its root-first ancestor chain, and the rendered `{{track.context}}` |
+| `list_tracks` | `ListTracksRequest{ProjectPath}` | List tracks visible from a project (own + global) with context previews/sizes |
+| `set_track_context` | `SetTrackContextRequest{ProjectPath, Track, Context, Mode}` | CLI-facing arbitrary-track context write (`Mode` = "replace" default or "append") |
+| `update_task_track_context` | `UpdateTaskTrackContextRequest{TaskID, Context, Mode}` | MCP-facing own-track-only write — task must have a track and an active step |
 | `shutdown` | — | Graceful shutdown |
 
 ## Server -> Client Events
@@ -77,6 +82,8 @@ type TaskInfo struct {
     Description   string     `json:"description"`
     Slug          string     `json:"slug"`
     Workflow      string     `json:"workflow,omitempty"`
+    TrackID       *int64     `json:"track_id,omitempty"`
+    Track         string     `json:"track,omitempty"`   // track slug (daemon-side enrichment)
     Status        string     `json:"status"`
     Priority      string     `json:"priority"`
     StepIndex     int        `json:"step_index"`
@@ -98,6 +105,27 @@ type TaskInfo struct {
     StartedAt        *time.Time `json:"started_at,omitempty"`
     CompletedAt      *time.Time `json:"completed_at,omitempty"`
     TmuxActivity     string     `json:"tmux_activity,omitempty"`
+}
+```
+
+```go
+// TrackInfo is the wire projection of a track. Context population varies by
+// endpoint: create/get carry the full own context; list_tracks clears it and
+// carries ContextPreview (first 200 bytes) instead. ContextLen is always set.
+type TrackInfo struct {
+    ID             int64      `json:"id"`
+    ProjectID      *int64     `json:"project_id,omitempty"`
+    Global         bool       `json:"global,omitempty"`      // project_id NULL
+    ParentID       *int64     `json:"parent_id,omitempty"`
+    ParentSlug     string     `json:"parent_slug,omitempty"`
+    Name           string     `json:"name"`
+    Slug           string     `json:"slug"`
+    Workflow       string     `json:"workflow,omitempty"`
+    Context        string     `json:"context,omitempty"`
+    ContextPreview string     `json:"context_preview,omitempty"`
+    ContextLen     int        `json:"context_len"`
+    CreatedAt      time.Time  `json:"created_at"`
+    UpdatedAt      time.Time  `json:"updated_at"`
 }
 ```
 

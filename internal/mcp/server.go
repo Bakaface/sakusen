@@ -2,9 +2,9 @@
 // (or any MCP client) interact with a running sortie daemon over its Unix
 // socket. The server speaks MCP over stdio and exposes task lifecycle
 // management: creating, listing, retrying, advancing, and editing tasks,
-// managing dependencies, listing workflows, and reading task state.
-// Irrecoverably destructive operations (delete, revert, cleanup) are not
-// exposed.
+// managing dependencies, listing workflows, reading task state, and creating
+// tracks and publishing step/track context. Irrecoverably destructive
+// operations (delete, revert, cleanup) are not exposed.
 package mcp
 
 import (
@@ -80,6 +80,17 @@ func Serve(cfg *config.Config) error {
 // tasks in tmux state, and no work is deleted: the workflow either resumes
 // at the next step or runs the same finalization the TUI's advance/finalize
 // keybind triggers. If it advanced too early, retry_task re-runs the step.
+//
+// create_track and list_tracks are additive/read-only. update_track_context is
+// admitted with the same admission argument as update_step_context: the daemon
+// enforces it can only write the CALLING task's own track (the task must have
+// a track and an active step). Note the trust-model caveat, though: track
+// context is a PERSISTENT, CROSS-TASK prompt-injection surface — anything an
+// agent writes flows verbatim into the prompts of every future task attached
+// to that track or its children. That is the feature (gradual context
+// accumulation across a sprint), but it widens the blast radius of a
+// misbehaving agent from "its own step context" to "future prompts on its
+// track"; the tool descriptions call this out explicitly.
 func registerTools(s *server.MCPServer, c *client.Client) {
 	registerCreateTask(s, c)
 	registerListWorkflows(s, c)
@@ -92,6 +103,9 @@ func registerTools(s *server.MCPServer, c *client.Client) {
 	registerCreateTasksAndWait(s, c)
 	registerWaitForTasks(s, c)
 	registerUpdateStepContext(s, c)
+	registerCreateTrack(s, c)
+	registerUpdateTrackContext(s, c)
+	registerListTracks(s, c)
 }
 
 // resultErr builds an MCP error result without losing the underlying error

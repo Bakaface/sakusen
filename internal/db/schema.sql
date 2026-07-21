@@ -9,9 +9,31 @@ CREATE TABLE IF NOT EXISTS projects (
     default_workflow TEXT NOT NULL DEFAULT ''
 );
 
+-- tracks are named, mutable, hierarchical context containers. Tasks attach to
+-- one at create time; step prompts opt into the ancestor-concatenated context
+-- via {{track.*}} template vars. project_id NULL = global track. Slug
+-- uniqueness is per-scope via the two partial unique indexes below (a plain
+-- UNIQUE(project_id, slug) would treat NULL project_ids as distinct).
+CREATE TABLE IF NOT EXISTS tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER REFERENCES projects(id),
+    parent_id INTEGER REFERENCES tracks(id),
+    name TEXT NOT NULL DEFAULT '',
+    slug TEXT NOT NULL DEFAULT '',
+    workflow TEXT NOT NULL DEFAULT '',
+    context TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_project_slug ON tracks(project_id, slug) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_global_slug ON tracks(slug) WHERE project_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_tracks_project_id ON tracks(project_id);
+
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id),
+    track_id INTEGER REFERENCES tracks(id),
     title TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL,
     slug TEXT NOT NULL DEFAULT '',

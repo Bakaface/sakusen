@@ -36,14 +36,14 @@ type Process struct {
 	OutputFunc func(lines []string) // Callback for parsed log lines
 	cfg        *config.ClaudeConfig
 
-	mu         sync.RWMutex
-	cmd        *exec.Cmd
-	env        []string
-	parser     *StreamParser
+	mu          sync.RWMutex
+	cmd         *exec.Cmd
+	env         []string
+	parser      *StreamParser
 	outputLines []string
-	exitCode   int
-	exited     bool
-	exitErr    error
+	exitCode    int
+	exited      bool
+	exitErr     error
 }
 
 func NewProcess(taskID, workDir string, cfg *config.ClaudeConfig) *Process {

@@ -141,6 +141,13 @@ func (v *taskInfoView) renderMetadata() string {
 		b.WriteString("\n")
 	}
 
+	// Track (read-only; slug enriched by the daemon)
+	if t.Track != "" {
+		b.WriteString(labelStyle.Render("Track:     "))
+		b.WriteString(valueStyle.Render(t.Track))
+		b.WriteString("\n")
+	}
+
 	// Current step
 	if t.CurrentStep != "" {
 		stepText := fmt.Sprintf("%s (%d)", t.CurrentStep, t.StepIndex+1)

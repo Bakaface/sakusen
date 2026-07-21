@@ -33,7 +33,7 @@ type taskStore interface {
 
 	// Task CRUD, lookup, and lifecycle transitions.
 	CreateTask(projectID int64, title, description, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error)
-	CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string) (*task.Task, error)
+	CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error)
 	GetTask(id int64) (*task.Task, error)
 	GetAllTasks() ([]*task.Task, error)
 	GetRunningTasks() ([]*task.Task, error)
@@ -74,6 +74,16 @@ type taskStore interface {
 	AllWaitsOnTerminal(taskID int64) (bool, error)
 	GetTasksAwaitingChildren() ([]*task.Task, error)
 	HasCircularWaitsOn(taskID, newWaitsOnID int64) (bool, error)
+
+	// Tracks (tracks table). GetTrackChain also appears in the "forwarded to
+	// workflow.Engine" group's contract — it is listed here because handlers
+	// (get_track) call it directly too.
+	CreateTrack(projectID *int64, name, slug, workflow, context string, parentID *int64) (*task.Track, error)
+	GetTrack(id int64) (*task.Track, error)
+	GetTrackBySlug(projectID *int64, slug string) (*task.Track, error)
+	ListTracks(projectID int64) ([]*task.Track, error)
+	UpdateTrackContext(id int64, context, mode string) error
+	GetTrackChain(id int64) ([]*task.Track, error)
 
 	// Projects.
 	GetOrCreateProject(projectPath string) (*db.Project, error)

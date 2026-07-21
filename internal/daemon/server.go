@@ -42,6 +42,12 @@ type projectContext struct {
 	repoRoot      string
 	repo          *gitpkg.Repo // git operations scoped to repoRoot / task worktrees
 	configModTime time.Time    // zero = no .sortie.yml at load time
+	// tracksFingerprint is a cheap freshness signal over the project's
+	// .sortie/tracks tree and the global ~/.sortie/tracks tree
+	// ("maxMtimeUnixNano:fileCount", "" when neither exists). Without it,
+	// track workflow files created at runtime would never be picked up —
+	// the config cache invalidates only on .sortie.yml mtime otherwise.
+	tracksFingerprint string
 }
 
 type Server struct {
@@ -197,6 +203,11 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 		case statErr != nil && pc.configModTime.IsZero():
 			fresh = true // was absent, still absent
 		}
+		// Second freshness signal: the track-workflow trees. Either signal
+		// differing evicts and reloads.
+		if fresh && tracksFingerprint(pc.repoRoot) != pc.tracksFingerprint {
+			fresh = false
+		}
 		if fresh {
 			return pc, nil
 		}
@@ -235,11 +246,12 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	engine.SetPauseCallback(s.markEnginePaused)
 
 	pc := &projectContext{
-		cfg:           projCfg,
-		engine:        engine,
-		repoRoot:      proj.Path,
-		repo:          gitpkg.NewRepo(proj.Path),
-		configModTime: modTime,
+		cfg:               projCfg,
+		engine:            engine,
+		repoRoot:          proj.Path,
+		repo:              gitpkg.NewRepo(proj.Path),
+		configModTime:     modTime,
+		tracksFingerprint: tracksFingerprint(proj.Path),
 	}
 
 	s.projectsMu.Lock()
@@ -247,6 +259,74 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	s.projectsMu.Unlock()
 
 	return pc, nil
+}
+
+// tracksFingerprint returns "maxMtimeUnixNano:fileCount" over the project's
+// .sortie/tracks tree and the global ~/.sortie/tracks tree, or "" when neither
+// exists / contains anything. The walk is shallow and deterministic: each
+// tracks dir, each slug-dir entry, each <slug>/workflows dir, and each
+// .yml/.yaml file inside it contribute their mtimes; only workflow files count
+// toward fileCount (so deletions are caught by the count component even when
+// max-mtime doesn't move). Used by getProjectContext as a second config-cache
+// freshness signal alongside the .sortie.yml mtime.
+func tracksFingerprint(repoRoot string) string {
+	var maxMtime int64
+	var fileCount int
+
+	note := func(t time.Time) {
+		if n := t.UnixNano(); n > maxMtime {
+			maxMtime = n
+		}
+	}
+
+	scanTracksDir := func(dir string) {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		note(info.ModTime())
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			wfDir := filepath.Join(dir, entry.Name(), "workflows")
+			wfInfo, err := os.Stat(wfDir)
+			if err != nil || !wfInfo.IsDir() {
+				continue
+			}
+			note(wfInfo.ModTime())
+			files, err := os.ReadDir(wfDir)
+			if err != nil {
+				continue
+			}
+			for _, f := range files {
+				ext := filepath.Ext(f.Name())
+				if ext != ".yml" && ext != ".yaml" {
+					continue
+				}
+				if fi, err := f.Info(); err == nil {
+					note(fi.ModTime())
+				}
+				fileCount++
+			}
+		}
+	}
+
+	if repoRoot != "" {
+		scanTracksDir(filepath.Join(repoRoot, ".sortie", "tracks"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		scanTracksDir(filepath.Join(home, ".sortie", "tracks"))
+	}
+
+	if maxMtime == 0 && fileCount == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", maxMtime, fileCount)
 }
 
 // projectLogPrefix returns a "[projectname] " prefix for log messages.
@@ -605,6 +685,46 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 			return
 		}
 		s.handleWaitForTasks(conn, req)
+
+	case MsgCreateTrack:
+		var req CreateTrackRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleCreateTrack(conn, req)
+
+	case MsgGetTrack:
+		var req GetTrackRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleGetTrack(conn, req)
+
+	case MsgListTracks:
+		var req ListTracksRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleListTracks(conn, req)
+
+	case MsgSetTrackContext:
+		var req SetTrackContextRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleSetTrackContext(conn, req)
+
+	case MsgUpdateTaskTrackContext:
+		var req UpdateTaskTrackContextRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleUpdateTaskTrackContext(conn, req)
 
 	case MsgShutdown:
 		s.mu.RLock()

@@ -27,6 +27,7 @@ type CreateTaskArgs struct {
 	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive Claude session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this task runs."`
+	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). The track's context becomes available to step prompts via {{track.context}}. For create_tasks_and_wait children: empty inherits the parent task's track; pass 'none' to explicitly detach."`
 	WaitForReady   bool     `json:"wait_for_ready,omitempty" jsonschema:"Block until the daemon resolves the task's title and branch (typically a few seconds). Default false returns immediately with a half-initialized task."`
 }
 
@@ -65,6 +66,7 @@ func handleCreateTask(ctx context.Context, c *client.Client, args CreateTaskArgs
 		TmuxDirect:     args.TmuxDirect,
 		Images:         args.Images,
 		BlockedBy:      args.BlockedBy,
+		Track:          args.Track,
 	}
 
 	// Subscribe before issuing the create so we don't miss the post-refinement

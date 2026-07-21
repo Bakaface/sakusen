@@ -10,20 +10,20 @@ import (
 // canned value/error stored on the struct; tests pre-load the field they need
 // and assert on calls via the public counters.
 type fakeClient struct {
-	stopTask        func(int64) (*daemon.TaskInfo, error)
-	retryTask       func(int64, string) (*daemon.TaskInfo, error)
-	revertTask      func(int64) (*daemon.TaskInfo, error)
-	deleteTask      func(int64) error
-	continueTask    func(int64, string, string) (*daemon.TaskInfo, error)
-	createTask      func(daemon.CreateTaskRequest) (*daemon.TaskInfo, error)
-	updateField     func(int64, string, string) (*daemon.TaskInfo, error)
-	updatePriority  func(int64, string) (*daemon.TaskInfo, error)
-	attachBranch    func(int64) (*daemon.TaskInfo, error)
-	detachBranch    func(int64) (*daemon.TaskInfo, error)
-	addDependency   func(int64, int64) (*daemon.TaskInfo, error)
-	rmDependency    func(int64, int64) (*daemon.TaskInfo, error)
-	getLogs         func(int64, int, int) ([]string, int, error)
-	cleanup         func(int64) (int, []daemon.TaskInfo, error)
+	stopTask       func(int64) (*daemon.TaskInfo, error)
+	retryTask      func(int64, string) (*daemon.TaskInfo, error)
+	revertTask     func(int64) (*daemon.TaskInfo, error)
+	deleteTask     func(int64) error
+	continueTask   func(int64, string, string) (*daemon.TaskInfo, error)
+	createTask     func(daemon.CreateTaskRequest) (*daemon.TaskInfo, error)
+	updateField    func(int64, string, string) (*daemon.TaskInfo, error)
+	updatePriority func(int64, string) (*daemon.TaskInfo, error)
+	attachBranch   func(int64) (*daemon.TaskInfo, error)
+	detachBranch   func(int64) (*daemon.TaskInfo, error)
+	addDependency  func(int64, int64) (*daemon.TaskInfo, error)
+	rmDependency   func(int64, int64) (*daemon.TaskInfo, error)
+	getLogs        func(int64, int, int) ([]string, int, error)
+	cleanup        func(int64) (int, []daemon.TaskInfo, error)
 }
 
 var errNotStubbed = errors.New("fakeClient: method not stubbed")

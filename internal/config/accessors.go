@@ -21,7 +21,9 @@ func (c *Config) GetStepTimeout(step StepConfig) time.Duration {
 }
 
 // GetWorkflow returns the workflow with the given name.
-// If name is empty and there are workflows, returns the first one.
+// If name is empty, returns the first non-hidden workflow (hidden workflows —
+// unreferenced files and namespaced track workflows — are only reachable by
+// exact name, never as an implicit default).
 // If the workflow is not found, returns the default workflow.
 func (c *Config) GetWorkflow(name string) *WorkflowConfig {
 	for i := range c.Workflows {
@@ -29,9 +31,12 @@ func (c *Config) GetWorkflow(name string) *WorkflowConfig {
 			return &c.Workflows[i]
 		}
 	}
-	// If name is empty and there are workflows, return first
-	if name == "" && len(c.Workflows) > 0 {
-		return &c.Workflows[0]
+	if name == "" {
+		for i := range c.Workflows {
+			if !c.Workflows[i].Hidden {
+				return &c.Workflows[i]
+			}
+		}
 	}
 	// Return default
 	def := DefaultWorkflow()

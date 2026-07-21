@@ -23,6 +23,7 @@ Cobra-based CLI split across multiple files in `cmd/sortie/`.
 | `backfill_context.go` | `backfill-context` — backfills missing step contexts for older tasks |
 | `version.go` | `version` — prints build version |
 | `depends_on.go` | `depends-on add/rm/list <task_id> [<blocked_by_id>]` — manage task dependencies |
+| `tracks.go` | `tracks create/list/show/set-context` — manage tracks (named, hierarchical context containers) |
 | `helpers.go` | `taskTableRow`, `printTaskTable()`, `truncateStr()`, `completeTaskIDs()` shell completion |
 
 ## Command Registration
@@ -52,12 +53,16 @@ All subcommands registered in `init()`:
 | `attach` | — | Attach to tmux session |
 | `detach` | — | Detach worktree branch so it can be checked out elsewhere |
 | `attach-branch` | — | Reattach branch to worktree after detach |
-| `create` | `--priority/-p`, `--branch/-b`, `--workflow/-w`, `--title`, `--no-worktree`, `--target`, `--checkout` | Create task |
+| `create` | `--priority/-p`, `--branch/-b`, `--workflow/-w`, `--title`, `--no-worktree`, `--target`, `--checkout`, `--track` | Create task |
 | `edit` | `--title/-t`, `--description/-d`, `--context/-c`, `--priority/-p` | Edit task fields |
 | `delete` | `--yes/-y` | Delete task |
 | `depends-on add <task_id> <blocked_by_id>` | — | Add dependency edge |
 | `depends-on rm <task_id> <blocked_by_id>` | — | Remove dependency edge |
 | `depends-on list <task_id>` | — | List task dependencies |
+| `tracks create <name>` | `--parent`, `--global`, `--workflow/-w`, `--context/-c` | Create a track |
+| `tracks list` | `--json/-j` | List tracks visible from this project (project + global) |
+| `tracks show <slug-or-id>` | `--json/-j` | Show track metadata and rendered `{{track.context}}` |
+| `tracks set-context <slug-or-id> [context]` | `--append` | Replace (or append to) a track's own context; reads stdin when no argument |
 
 ## Project Config Enforcement
 

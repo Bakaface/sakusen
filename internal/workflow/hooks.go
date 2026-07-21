@@ -152,7 +152,8 @@ func InstallStopHook(worktreePath, stepName string) error {
 }
 
 // shellSingleQuotePath wraps p in POSIX-safe single quotes, escaping any
-// embedded single quotes via the standard '\'' trick.
+// embedded single quotes via the standard close-escape-reopen sequence (see
+// escapeSingleQuotes).
 func shellSingleQuotePath(p string) string {
 	return "'" + escapeSingleQuotes(p) + "'"
 }

@@ -202,7 +202,7 @@ func TestCreateTaskWithPriority(t *testing.T) {
 	}
 
 	// Create task with explicit priority
-	created, err := database.CreateTaskWithPriority(proj.ID, "Urgent task", "Do it now", "urgent-task", "", "", "", "", "", "pending", task.PriorityUrgent, true, nil)
+	created, err := database.CreateTaskWithPriority(proj.ID, "Urgent task", "Do it now", "urgent-task", "", "", "", "", "", "pending", task.PriorityUrgent, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,19 +310,19 @@ func TestGetClaimableTasks_SortedByPriority(t *testing.T) {
 	}
 
 	// Create tasks with different priorities
-	_, err = database.CreateTaskWithPriority(proj.ID, "Low task", "Low", "low-task", "", "", "", "", "", "pending", task.PriorityLow, true, nil)
+	_, err = database.CreateTaskWithPriority(proj.ID, "Low task", "Low", "low-task", "", "", "", "", "", "pending", task.PriorityLow, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = database.CreateTaskWithPriority(proj.ID, "High task", "High", "high-task", "", "", "", "", "", "pending", task.PriorityHigh, true, nil)
+	_, err = database.CreateTaskWithPriority(proj.ID, "High task", "High", "high-task", "", "", "", "", "", "pending", task.PriorityHigh, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = database.CreateTaskWithPriority(proj.ID, "Urgent task", "Urgent", "urgent-task", "", "", "", "", "", "pending", task.PriorityUrgent, true, nil)
+	_, err = database.CreateTaskWithPriority(proj.ID, "Urgent task", "Urgent", "urgent-task", "", "", "", "", "", "pending", task.PriorityUrgent, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = database.CreateTaskWithPriority(proj.ID, "Medium task", "Medium", "medium-task", "", "", "", "", "", "pending", task.PriorityMedium, true, nil)
+	_, err = database.CreateTaskWithPriority(proj.ID, "Medium task", "Medium", "medium-task", "", "", "", "", "", "pending", task.PriorityMedium, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestCreateTaskWithBranchName(t *testing.T) {
 	// Create task with a branch name template
 	created, err := database.CreateTaskWithPriority(
 		proj.ID, "Task with branch", "Description", "task-slug", "", "feature/{{task.title}}", "", "", "",
-		task.StatusPending, task.PriorityMedium, true, nil,
+		task.StatusPending, task.PriorityMedium, true, nil, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -408,7 +408,7 @@ func TestCreateTaskWithWorktreeDisabled(t *testing.T) {
 	// Create task with worktree disabled
 	created, err := database.CreateTaskWithPriority(
 		proj.ID, "No worktree task", "Run in current dir", "no-wt-task", "", "", "", "", "",
-		task.StatusPending, task.PriorityMedium, false, nil,
+		task.StatusPending, task.PriorityMedium, false, nil, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +431,7 @@ func TestCreateTaskWithWorktreeDisabled(t *testing.T) {
 	// Create task with worktree enabled (default)
 	withWt, err := database.CreateTaskWithPriority(
 		proj.ID, "Worktree task", "Run in worktree", "wt-task", "", "", "", "", "",
-		task.StatusPending, task.PriorityMedium, true, nil,
+		task.StatusPending, task.PriorityMedium, true, nil, nil,
 	)
 	if err != nil {
 		t.Fatal(err)

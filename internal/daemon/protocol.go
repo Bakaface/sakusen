@@ -50,6 +50,11 @@ const (
 	MsgCleanup                 MessageType = "cleanup"
 	MsgCreateTasksAndWait      MessageType = "create_tasks_and_wait"
 	MsgWaitForTasks            MessageType = "wait_for_tasks"
+	MsgCreateTrack             MessageType = "create_track"
+	MsgGetTrack                MessageType = "get_track"
+	MsgListTracks              MessageType = "list_tracks"
+	MsgSetTrackContext         MessageType = "set_track_context"         // CLI: arbitrary track by ref
+	MsgUpdateTaskTrackContext  MessageType = "update_task_track_context" // MCP: own-track-only via task_id
 )
 
 // IsBroadcast reports whether t is a message type the daemon pushes to
@@ -153,6 +158,10 @@ type CreateTaskRequest struct {
 	TmuxDirect     bool     `json:"tmux_direct,omitempty"`  // when true, skip workflow and go straight to tmux
 	Images         []string `json:"images,omitempty"`
 	BlockedBy      []int64  `json:"blocked_by,omitempty"` // task IDs that block this task
+	// Track attaches the task to a track (slug or numeric ID). The sentinel
+	// "none" means explicitly trackless — meaningful for create_tasks_and_wait
+	// children, which otherwise inherit the parent task's track.
+	Track string `json:"track,omitempty"`
 }
 
 type ContinueTaskRequest struct {
@@ -368,6 +377,80 @@ type WaitForTasksResponse struct {
 	Children     []TaskInfo `json:"children"`
 }
 
+// CreateTrackRequest creates a new track. Global tracks (project_id NULL) are
+// attachable from any project; project tracks require ProjectPath.
+type CreateTrackRequest struct {
+	Name        string `json:"name"`
+	ParentTrack string `json:"parent_track,omitempty"` // slug or numeric ID
+	Global      bool   `json:"global,omitempty"`       // true = global track (project_id NULL)
+	Workflow    string `json:"workflow,omitempty"`
+	Context     string `json:"context,omitempty"`      // initial context seed
+	ProjectPath string `json:"project_path,omitempty"` // required unless Global
+}
+
+// TrackInfo is the wire projection of a track. Context population varies by
+// endpoint: create/get carry the full own context, list_tracks clears it and
+// carries ContextPreview/ContextLen instead (sizes stay visible so unbounded
+// append growth is at least observable).
+type TrackInfo struct {
+	ID             int64     `json:"id"`
+	ProjectID      *int64    `json:"project_id,omitempty"`
+	Global         bool      `json:"global,omitempty"`
+	ParentID       *int64    `json:"parent_id,omitempty"`
+	ParentSlug     string    `json:"parent_slug,omitempty"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	Workflow       string    `json:"workflow,omitempty"`
+	Context        string    `json:"context,omitempty"`         // full own context; empty in list_tracks
+	ContextPreview string    `json:"context_preview,omitempty"` // first 200 bytes (rune-aligned); list_tracks only
+	ContextLen     int       `json:"context_len"`               // bytes of own context
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type CreateTrackResponse struct {
+	Track TrackInfo `json:"track"`
+}
+
+type GetTrackRequest struct {
+	ProjectPath string `json:"project_path,omitempty"`
+	Track       string `json:"track"` // slug or numeric ID
+}
+
+type GetTrackResponse struct {
+	Track           TrackInfo   `json:"track"`
+	Chain           []TrackInfo `json:"chain"`            // root-first, contexts populated
+	RenderedContext string      `json:"rendered_context"` // exactly what {{track.context}} yields
+}
+
+type ListTracksRequest struct {
+	ProjectPath string `json:"project_path,omitempty"`
+}
+
+type ListTracksResponse struct {
+	Tracks []TrackInfo `json:"tracks"`
+}
+
+// SetTrackContextRequest is the CLI-facing arbitrary-track context write
+// (sortie tracks set-context). The MCP path uses UpdateTaskTrackContextRequest
+// instead — same split as MsgUpdateStepContext vs MsgUpdateActiveStepContext.
+type SetTrackContextRequest struct {
+	ProjectPath string `json:"project_path,omitempty"`
+	Track       string `json:"track"` // slug or numeric ID
+	Context     string `json:"context"`
+	Mode        string `json:"mode,omitempty"` // "replace" (default) or "append"
+}
+
+// UpdateTaskTrackContextRequest is the agent-facing own-track-only context
+// write: the daemon resolves the task, requires it to have a track AND an
+// active step, and writes only to that track (mirroring the
+// update_step_context enforcement shape).
+type UpdateTaskTrackContextRequest struct {
+	TaskID  int64  `json:"task_id"`
+	Context string `json:"context"`
+	Mode    string `json:"mode,omitempty"` // "replace" (default) or "append"
+}
+
 // CleanupRequest removes worktrees, branches, and log directories for
 // completed or failed tasks. A TaskID of 0 cleans up every eligible task.
 type CleanupRequest struct {
@@ -416,7 +499,11 @@ type TaskInfo struct {
 	Description string `json:"description"`
 	Slug        string `json:"slug"`
 	Workflow    string `json:"workflow,omitempty"`
-	Status      string `json:"status"`
+	TrackID     *int64 `json:"track_id,omitempty"`
+	// Track is the attached track's slug. Daemon-side enrichment (taskToInfo);
+	// the DB-only fallback (TaskInfoFromTask) sets TrackID only.
+	Track  string `json:"track,omitempty"`
+	Status string `json:"status"`
 	// EffectiveStatus is the status clients should render, mapping the
 	// transport-level "tmux" status to what the workflow engine is actually
 	// doing (awaiting-approval / running) based on StepHuman — see taskToInfo.

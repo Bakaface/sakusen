@@ -829,6 +829,72 @@ func (c *Client) UpdateActiveStepContext(taskID int64, stepName, context, mode s
 	})
 }
 
+// CreateTrack creates a new track (project-scoped unless req.Global) and
+// returns its wire projection.
+func (c *Client) CreateTrack(req daemon.CreateTrackRequest) (*daemon.TrackInfo, error) {
+	msg, err := c.request(daemon.MsgCreateTrack, req)
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.CreateTrackResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp.Track, nil
+}
+
+// GetTrack resolves ref (slug or numeric ID) against the project at
+// projectPath (project shadows global) and returns the track, its root-first
+// ancestor chain, and the rendered {{track.context}} value.
+func (c *Client) GetTrack(projectPath, ref string) (*daemon.GetTrackResponse, error) {
+	msg, err := c.request(daemon.MsgGetTrack, daemon.GetTrackRequest{ProjectPath: projectPath, Track: ref})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.GetTrackResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListTracks returns the tracks visible from the project at projectPath (its
+// own plus all global tracks) with context previews and sizes.
+func (c *Client) ListTracks(projectPath string) ([]daemon.TrackInfo, error) {
+	msg, err := c.request(daemon.MsgListTracks, daemon.ListTracksRequest{ProjectPath: projectPath})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.ListTracksResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return resp.Tracks, nil
+}
+
+// SetTrackContext sets or appends (mode "replace"|"append") the context of an
+// arbitrary track resolved by ref. This is the human/CLI surface; agents use
+// UpdateTaskTrackContext instead.
+func (c *Client) SetTrackContext(projectPath, ref, context, mode string) error {
+	return c.requestOK(daemon.MsgSetTrackContext, daemon.SetTrackContextRequest{
+		ProjectPath: projectPath,
+		Track:       ref,
+		Context:     context,
+		Mode:        mode,
+	})
+}
+
+// UpdateTaskTrackContext writes context to the calling task's own track. The
+// daemon rejects tasks with no track or no active step — the own-track-only
+// enforcement backing the update_track_context MCP tool.
+func (c *Client) UpdateTaskTrackContext(taskID int64, context, mode string) error {
+	return c.requestOK(daemon.MsgUpdateTaskTrackContext, daemon.UpdateTaskTrackContextRequest{
+		TaskID:  taskID,
+		Context: context,
+		Mode:    mode,
+	})
+}
+
 // ListWorkflows returns the flat list of workflows configured for the project
 // rooted at projectPath.
 func (c *Client) ListWorkflows(projectPath string) (*daemon.ListWorkflowsResponse, error) {

@@ -25,9 +25,9 @@ func TestLatestSchemaVersionMatchesMigrationLadder(t *testing.T) {
 // TestMigrateReappliesFromOlderRecordedVersion exercises the actual upgrade
 // loop in migrate() (not just the version==0 fresh-install path every other
 // test in this package takes): starting from a fully-migrated fresh
-// database, roll schema_version back and drop the table the last migration
-// creates, then re-run migrate() and confirm it walks forward from the
-// rolled-back version, recreates the table via migrateV19, and re-stamps
+// database, roll schema_version back and undo the schema objects the last
+// migration creates, then re-run migrate() and confirm it walks forward from
+// the rolled-back version, recreates them via migrateV20, and re-stamps
 // schema_version at latestSchemaVersion.
 func TestMigrateReappliesFromOlderRecordedVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -37,12 +37,16 @@ func TestMigrateReappliesFromOlderRecordedVersion(t *testing.T) {
 	}
 	defer database.Close()
 
-	// Simulate a database that was last migrated at version 18: drop the
-	// table migrateV19 creates and roll the recorded version back.
-	if _, err := database.sqlDB.Exec(`DROP TABLE task_waits_on`); err != nil {
-		t.Fatalf("failed to drop task_waits_on: %v", err)
+	// Simulate a database that was last migrated at version 19: drop the
+	// tracks table and the tasks.track_id column migrateV20 adds, and roll
+	// the recorded version back.
+	if _, err := database.sqlDB.Exec(`DROP TABLE tracks`); err != nil {
+		t.Fatalf("failed to drop tracks: %v", err)
 	}
-	if _, err := database.sqlDB.Exec(`UPDATE schema_version SET version = 18`); err != nil {
+	if _, err := database.sqlDB.Exec(`ALTER TABLE tasks DROP COLUMN track_id`); err != nil {
+		t.Fatalf("failed to drop tasks.track_id: %v", err)
+	}
+	if _, err := database.sqlDB.Exec(`UPDATE schema_version SET version = 19`); err != nil {
 		t.Fatalf("failed to roll back schema_version: %v", err)
 	}
 
@@ -60,11 +64,16 @@ func TestMigrateReappliesFromOlderRecordedVersion(t *testing.T) {
 	}
 
 	var count int
-	row = database.sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'task_waits_on'`)
+	row = database.sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'tracks'`)
 	if err := row.Scan(&count); err != nil {
-		t.Fatalf("failed to check task_waits_on existence: %v", err)
+		t.Fatalf("failed to check tracks existence: %v", err)
 	}
 	if count != 1 {
-		t.Errorf("expected migrateV19 to recreate task_waits_on, got count=%d", count)
+		t.Errorf("expected migrateV20 to recreate tracks, got count=%d", count)
+	}
+
+	// The re-applied ALTER TABLE must have restored tasks.track_id too.
+	if _, err := database.sqlDB.Exec(`SELECT track_id FROM tasks LIMIT 1`); err != nil {
+		t.Errorf("expected migrateV20 to restore tasks.track_id: %v", err)
 	}
 }

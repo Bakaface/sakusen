@@ -38,7 +38,11 @@ type fakeTaskStore struct {
 	updateRunningCalls []stepContextWriteCall
 	updatePausedCalls  []stepContextWriteCall
 
+	// trackChains backs GetTrackChain (keyed by leaf track ID, root-first).
+	trackChains map[int64][]*task.Track
+
 	getTaskStepContextErr error
+	getTrackChainErr      error
 }
 
 func newFakeTaskStore() *fakeTaskStore {
@@ -47,7 +51,18 @@ func newFakeTaskStore() *fakeTaskStore {
 		runningStepContexts: make(map[int64]map[string]string),
 		taskContexts:        make(map[int64]string),
 		chats:               make(map[int64]map[string]*db.Chat),
+		trackChains:         make(map[int64][]*task.Track),
 	}
+}
+
+func (f *fakeTaskStore) GetTrackChain(id int64) ([]*task.Track, error) {
+	if f.getTrackChainErr != nil {
+		return nil, f.getTrackChainErr
+	}
+	if chain, ok := f.trackChains[id]; ok {
+		return chain, nil
+	}
+	return nil, errors.New("track not found")
 }
 
 func (f *fakeTaskStore) GetTaskStepContext(taskID int64, stepName string) (string, error) {

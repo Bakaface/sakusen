@@ -459,6 +459,24 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	}, stepContexts, loopVars)
 	tmplCtx.Children = childrenVars
 
+	// Load the task's track chain fresh at every step launch (not once per
+	// task) so context published mid-run — by this task or by sibling tasks on
+	// the same track — is visible to later steps. Trackless tasks leave
+	// tmplCtx.Track at its zero value, resolving every {{track.*}} var to "".
+	if t.TrackID != nil {
+		chain, err := e.database.GetTrackChain(*t.TrackID)
+		if err != nil {
+			return stepResult{}, fmt.Errorf("failed to load track chain for track %d: %w", *t.TrackID, err)
+		}
+		leaf := chain[len(chain)-1]
+		tmplCtx.Track = TrackVars{
+			ID:         leaf.ID,
+			Name:       leaf.Name,
+			Context:    FormatTrackChain(chain),
+			OwnContext: leaf.Context,
+		}
+	}
+
 	resolvedPrompt := ResolveTemplate(step.Prompt, tmplCtx)
 
 	sysPrompt := BuildSystemPrompt(resolvedPrompt, e.cfg.SystemPrompt, ws.imageRelPaths)
@@ -476,6 +494,10 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		// `git rev-parse --show-toplevel` (which in a worktree returns
 		// the worktree path) as a new project row.
 		"SORTIE_PROJECT_PATH": e.repoRoot,
+	}
+	if t.TrackID != nil {
+		// Lets agents target "their" track via the update_track_context MCP tool.
+		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 
 	// Spawn Claude process (tmux or direct)

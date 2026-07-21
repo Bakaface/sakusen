@@ -54,6 +54,11 @@ type taskStore interface {
 	// to correct the recorded session id from the Stop-hook sentinel payload.
 	SetChatSessionID(taskID int64, stepName, sessionID string) error
 
+	// Track chain reads (tracks table). GetTrackChain returns the track and
+	// its ancestors root-first; the engine reads it fresh at each step launch
+	// so mid-run track context updates are visible to later steps.
+	GetTrackChain(id int64) ([]*task.Track, error)
+
 	// Mid-step child-task suspension (task_waits_on table).
 	HasAnyWaitsOn(taskID int64) (bool, error)
 	GetWaitsOnChildren(taskID int64) ([]*task.Task, error)

@@ -711,8 +711,9 @@ func buildClaudeCommand(claudeBin string, yolo bool, resumeSessionID string, ini
 }
 
 // shellSingleQuote wraps s in POSIX-safe single quotes. Single quotes inside
-// the string are escaped via the standard '\” trick so the result is safe to
-// drop into a bash command line.
+// the string are escaped via the standard close-escape-reopen sequence (the
+// replacement string below) so the result is safe to drop into a bash command
+// line.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

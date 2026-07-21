@@ -81,6 +81,7 @@ var migrations = []func(db *DB) error{
 	migrateV17,
 	migrateV18,
 	migrateV19,
+	migrateV20,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -343,6 +344,42 @@ func migrateV19(db *DB) error {
 	}
 	if _, err := db.sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_task_waits_on_waits_on ON task_waits_on(waits_on_id)`); err != nil {
 		return fmt.Errorf("failed to create idx_task_waits_on_waits_on index: %w", err)
+	}
+	return nil
+}
+
+// migrateV20 adds the tracks table and tasks.track_id. A track is a named,
+// mutable, hierarchical context container (see internal/task/track.go); tasks
+// attach to one at create time and step prompts opt into its ancestor-
+// concatenated context via {{track.*}} template vars. project_id NULL = global
+// track (visible from every project). Slug uniqueness is per-scope, which a
+// plain UNIQUE(project_id, slug) cannot express (SQLite treats NULLs as
+// distinct), hence the two partial unique indexes.
+func migrateV20(db *DB) error {
+	if _, err := db.sqlDB.Exec(`CREATE TABLE IF NOT EXISTS tracks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		project_id INTEGER REFERENCES projects(id),
+		parent_id INTEGER REFERENCES tracks(id),
+		name TEXT NOT NULL DEFAULT '',
+		slug TEXT NOT NULL DEFAULT '',
+		workflow TEXT NOT NULL DEFAULT '',
+		context TEXT NOT NULL DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		return fmt.Errorf("failed to create tracks table: %w", err)
+	}
+	if _, err := db.sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_project_slug ON tracks(project_id, slug) WHERE project_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("failed to create idx_tracks_project_slug index: %w", err)
+	}
+	if _, err := db.sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_global_slug ON tracks(slug) WHERE project_id IS NULL`); err != nil {
+		return fmt.Errorf("failed to create idx_tracks_global_slug index: %w", err)
+	}
+	if _, err := db.sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_tracks_project_id ON tracks(project_id)`); err != nil {
+		return fmt.Errorf("failed to create idx_tracks_project_id index: %w", err)
+	}
+	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN track_id INTEGER REFERENCES tracks(id)`); err != nil {
+		return fmt.Errorf("failed to add track_id column: %w", err)
 	}
 	return nil
 }
