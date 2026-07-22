@@ -1512,28 +1512,35 @@ func TestSummarizePreviousTmuxStepSkipsManualContext(t *testing.T) {
 func boolPtr(b bool) *bool { return &b }
 
 // TestEffectiveOnComplete verifies the on_complete resolution precedence:
-// workflow-level override wins, otherwise the project-level setting is used.
+// locality wins. A project-scoped workflow's on_complete beats the project
+// top-level setting; a global workflow's on_complete is only a default that
+// an explicit project-level on_complete overrides.
 func TestEffectiveOnComplete(t *testing.T) {
-	cfg := &config.Config{
-		OnComplete: "merge", // project-level default
-		Workflows: []config.WorkflowConfig{
-			{Name: "inherits", Steps: []config.StepConfig{{Name: "s"}}},
-			{Name: "overrides", OnComplete: "commit", Steps: []config.StepConfig{{Name: "s"}}},
-		},
-	}
-	e := &Engine{cfg: newEngineConfig(cfg)}
-
 	cases := []struct {
-		name     string
-		workflow string
-		want     string
+		name                  string
+		onCompleteFromProject bool
+		workflow              string
+		want                  string
 	}{
-		{"workflow inherits project-level", "inherits", "merge"},
-		{"workflow overrides project-level", "overrides", "commit"},
-		{"unknown workflow falls back to project-level", "nope", "merge"},
+		{"workflow inherits project-level", false, "inherits", "merge"},
+		{"project workflow overrides project-level", false, "overrides", "commit"},
+		{"unknown workflow falls back to project-level", false, "nope", "merge"},
+		{"global workflow wins when project on_complete is inherited", false, "global-none", "none"},
+		{"explicit project on_complete beats global workflow", true, "global-none", "merge"},
+		{"project workflow beats explicit project on_complete", true, "overrides", "commit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				OnComplete:            "merge",
+				OnCompleteFromProject: tc.onCompleteFromProject,
+				Workflows: []config.WorkflowConfig{
+					{Name: "inherits", Steps: []config.StepConfig{{Name: "s"}}},
+					{Name: "overrides", OnComplete: "commit", Steps: []config.StepConfig{{Name: "s"}}},
+					{Name: "global-none", OnComplete: "none", FromGlobal: true, Steps: []config.StepConfig{{Name: "s"}}},
+				},
+			}
+			e := &Engine{cfg: newEngineConfig(cfg)}
 			got := e.effectiveOnComplete(&task.Task{Workflow: tc.workflow})
 			if got != tc.want {
 				t.Errorf("effectiveOnComplete(%q) = %q, want %q", tc.workflow, got, tc.want)

@@ -43,6 +43,28 @@ func (c *Config) GetWorkflow(name string) *WorkflowConfig {
 	return &def
 }
 
+// EffectiveOnComplete resolves the finalization action for a task running the
+// named workflow. Precedence is locality-based — the more locally-defined
+// setting wins:
+//
+//  1. a project-scoped workflow's on_complete (inline in .sortie.yml or a
+//     .sortie/workflows/ file)
+//  2. the project .sortie.yml top-level on_complete (explicitly set)
+//  3. a global workflow's on_complete (~/.sortie.yml inline or
+//     ~/.sortie/workflows/)
+//  4. the inherited top-level on_complete (~/.sortie.yml or built-in default)
+//
+// A workflow adopted from the global pool is a cross-project default; adopting
+// it must not silently defeat a project's explicit on_complete choice (a task
+// completing with "none" strands its work uncommitted in the worktree).
+func (c *Config) EffectiveOnComplete(workflowName string) string {
+	wf := c.GetWorkflow(workflowName)
+	if wf != nil && wf.OnComplete != "" && !(wf.FromGlobal && c.OnCompleteFromProject) {
+		return wf.OnComplete
+	}
+	return c.OnComplete
+}
+
 // ListWorkflowNames returns the names of active (non-hidden) workflows used for
 // new task creation menus. If none configured, returns ["default"]. Use
 // ListAllWorkflowNames for picker surfaces that should expose hidden workflows

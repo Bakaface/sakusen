@@ -261,7 +261,10 @@ type WorkflowConfig struct {
 	Print bool `yaml:"print,omitempty"`
 	// OnComplete, when non-empty, overrides the project-level on_complete action
 	// for tasks running this workflow ("commit" | "merge" | "none"). Empty means
-	// inherit the project-level setting.
+	// inherit the project-level setting. Precedence is locality-based (see
+	// Config.EffectiveOnComplete): a project-scoped workflow's value beats the
+	// project's top-level on_complete, but a GLOBAL workflow's value is only a
+	// default — an explicit project-level on_complete beats it.
 	OnComplete            string                  `yaml:"on_complete,omitempty"`
 	Steps                 []StepConfig            `yaml:"steps"`
 	SummarizerPrompt      string                  `yaml:"summarizer_prompt"`
@@ -281,6 +284,14 @@ type WorkflowConfig struct {
 	//   "<path>"           — file path under .sortie/workflows/
 	// Not serialized to YAML — populated by the loader.
 	Source string `yaml:"-"`
+
+	// FromGlobal marks a workflow whose definition was adopted from the global
+	// scope (~/.sortie.yml inline, ~/.sortie/workflows/, or ~/.sortie/tracks/)
+	// rather than defined by the project. Global workflows carry their settings
+	// along, but locality wins: an explicit project-level on_complete overrides
+	// a FromGlobal workflow's OnComplete (see Config.EffectiveOnComplete).
+	// Not serialized to YAML — populated by the loader.
+	FromGlobal bool `yaml:"-"`
 }
 
 // UnmarshalYAML decodes a WorkflowConfig and rejects the legacy `tmux:` field
@@ -691,9 +702,17 @@ type Config struct {
 	Git             GitConfig
 	// OnComplete is the resolved project-level finalization action
 	// ("commit" | "merge" | "none"). Per-workflow overrides live on
-	// WorkflowConfig.OnComplete and are resolved at finalization time.
+	// WorkflowConfig.OnComplete and are resolved at finalization time via
+	// EffectiveOnComplete.
 	OnComplete string
-	Workflows  []WorkflowConfig // flat resolved workflow list
+
+	// OnCompleteFromProject records that OnComplete was explicitly set by the
+	// project-tier .sortie.yml (as opposed to inherited from ~/.sortie.yml or
+	// the built-in default). When true, the project's OnComplete beats a
+	// FromGlobal workflow's OnComplete in EffectiveOnComplete.
+	// Populated by the loader.
+	OnCompleteFromProject bool
+	Workflows             []WorkflowConfig // flat resolved workflow list
 
 	// System prompt preamble passed via --system-prompt to Claude agents
 	SystemPrompt string

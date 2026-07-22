@@ -143,13 +143,11 @@ func (e *Engine) effectiveBaseBranch(t *task.Task) string {
 	return "main"
 }
 
-// effectiveOnComplete returns the finalization action for a task: the workflow's
-// on_complete override when set, otherwise the project-level on_complete.
+// effectiveOnComplete returns the finalization action for a task. Resolution
+// (locality precedence between workflow-level and project-level on_complete)
+// lives in config.Config.EffectiveOnComplete.
 func (e *Engine) effectiveOnComplete(t *task.Task) string {
-	if wf := e.cfg.GetWorkflow(t.Workflow); wf != nil && wf.OnComplete != "" {
-		return wf.OnComplete
-	}
-	return e.cfg.OnComplete
+	return e.cfg.EffectiveOnComplete(t.Workflow)
 }
 
 // dirExists reports whether path exists and is a directory. Used by

@@ -78,7 +78,7 @@ func loadCommon(cfg *Config) error {
 	// local .sortie/workflows/ — no self-recursion.
 	globalSortieYml := getGlobalSortieYmlPath()
 	if globalSortieYml != "" {
-		if err := loadProjectConfig(globalSortieYml, cfg); err != nil && !os.IsNotExist(err) {
+		if err := loadProjectConfigTier(globalSortieYml, cfg, false); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -206,7 +206,20 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	return nil
 }
 
+// loadProjectConfig loads a .sortie.yml at the project tier. Kept as a thin
+// wrapper so existing callers (and tests) that always load project-scope
+// files keep their signature; loadCommon loads ~/.sortie.yml with
+// projectTier=false via loadProjectConfigTier.
 func loadProjectConfig(path string, cfg *Config) error {
+	return loadProjectConfigTier(path, cfg, true)
+}
+
+// loadProjectConfigTier loads a .sortie.yml-shaped file into cfg. projectTier
+// distinguishes the project ./.sortie.yml (true) from the global ~/.sortie.yml
+// (false), which shares the same format but is a less-local scope: settings
+// explicitly set at the project tier are recorded (OnCompleteFromProject) so
+// finalization can apply locality precedence against global workflows.
+func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -237,6 +250,9 @@ func loadProjectConfig(path string, cfg *Config) error {
 	override(&cfg.Git.BaseBranch, proj.Git.BaseBranch)
 	override(&cfg.Git.BranchTemplate, proj.Git.BranchTemplate)
 	override(&cfg.OnComplete, proj.OnComplete)
+	if projectTier && proj.OnComplete != "" {
+		cfg.OnCompleteFromProject = true
+	}
 	override(&cfg.DefaultPriority, proj.DefaultPriority)
 	overrideFromPtr(&cfg.Claude.Yolo, proj.Yolo)
 	if proj.Claude != nil {
@@ -318,8 +334,13 @@ func (p *globalWorkflowPool) add(wf WorkflowConfig) {
 // project loads can reference global workflows via string refs.
 func snapshotGlobalPool(cfg *Config) *globalWorkflowPool {
 	pool := newGlobalWorkflowPool()
-	for _, wf := range cfg.Workflows {
-		pool.add(wf)
+	for i := range cfg.Workflows {
+		// Everything resolved during the global load is global-scope: both the
+		// in-place cfg.Workflows entries (which survive as-is when the project
+		// defines no workflows of its own) and the pool copies handed to
+		// project-level string refs.
+		cfg.Workflows[i].FromGlobal = true
+		pool.add(cfg.Workflows[i])
 	}
 	return pool
 }
@@ -539,6 +560,7 @@ func appendTrackWorkflows(cfg *Config, projectBaseDir string) error {
 				}
 				continue // project shadows global
 			}
+			wf.FromGlobal = !projectTier
 			if err := wf.ValidatePins(); err != nil {
 				return err
 			}

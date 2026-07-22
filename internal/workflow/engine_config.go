@@ -25,7 +25,6 @@ import (
 // before this change.
 type engineConfig struct {
 	BaseBranch                 string
-	OnComplete                 string
 	SystemPrompt               string
 	AllowedSummarizationModels []string
 	Claude                     config.ClaudeConfig
@@ -42,7 +41,6 @@ type engineConfig struct {
 func newEngineConfig(cfg *config.Config) *engineConfig {
 	return &engineConfig{
 		BaseBranch:                 cfg.Git.BaseBranch,
-		OnComplete:                 cfg.OnComplete,
 		SystemPrompt:               cfg.SystemPrompt,
 		AllowedSummarizationModels: cfg.AllowedSummarizationModels,
 		Claude:                     cfg.Claude,
@@ -54,6 +52,10 @@ func newEngineConfig(cfg *config.Config) *engineConfig {
 
 func (e *engineConfig) GetWorkflow(name string) *config.WorkflowConfig {
 	return e.full.GetWorkflow(name)
+}
+
+func (e *engineConfig) EffectiveOnComplete(workflowName string) string {
+	return e.full.EffectiveOnComplete(workflowName)
 }
 
 func (e *engineConfig) GetStepTimeout(step config.StepConfig) time.Duration {

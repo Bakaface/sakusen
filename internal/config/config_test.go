@@ -2197,3 +2197,93 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// TestEffectiveOnCompleteLocality verifies scope-aware on_complete precedence
+// through the real loader: a workflow adopted from the global pool carries its
+// on_complete only as a default — an explicit project-level on_complete beats
+// it — while a project-defined workflow's on_complete beats the project-level
+// setting.
+func TestEffectiveOnCompleteLocality(t *testing.T) {
+	writeGlobal := func(t *testing.T) string {
+		globalDir := t.TempDir()
+		globalPath := filepath.Join(globalDir, ".sortie.yml")
+		if err := os.WriteFile(globalPath, []byte("workflows:\n  - gwf\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		wfDir := filepath.Join(globalDir, ".sortie", "workflows")
+		if err := os.MkdirAll(wfDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		gwf := "on_complete: none\nsteps:\n  - name: s\n    prompt: p\n"
+		if err := os.WriteFile(filepath.Join(wfDir, "gwf.yml"), []byte(gwf), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return globalPath
+	}
+
+	load := func(t *testing.T, projectYml string) *Config {
+		globalPath := writeGlobal(t)
+		cfg := defaultConfig()
+		if err := loadProjectConfigTier(globalPath, cfg, false); err != nil {
+			t.Fatal(err)
+		}
+		cfg.globalPool = snapshotGlobalPool(cfg)
+
+		projectDir := t.TempDir()
+		projectPath := filepath.Join(projectDir, ".sortie.yml")
+		if err := os.WriteFile(projectPath, []byte(projectYml), 0644); err != nil {
+			t.Fatal(err)
+		}
+		localDir := filepath.Join(projectDir, ".sortie", "workflows")
+		if err := os.MkdirAll(localDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		lwf := "on_complete: commit\nsteps:\n  - name: s\n    prompt: p\n"
+		if err := os.WriteFile(filepath.Join(localDir, "lwf.yml"), []byte(lwf), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := loadProjectConfig(projectPath, cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+
+	t.Run("explicit project on_complete beats global workflow", func(t *testing.T) {
+		cfg := load(t, "on_complete: merge\nworkflows:\n  - gwf\n  - lwf\n")
+
+		if !cfg.OnCompleteFromProject {
+			t.Fatal("OnCompleteFromProject = false, want true")
+		}
+		gwf := cfg.GetWorkflow("gwf")
+		if !gwf.FromGlobal {
+			t.Error("gwf.FromGlobal = false, want true (adopted from global pool)")
+		}
+		lwf := cfg.GetWorkflow("lwf")
+		if lwf.FromGlobal {
+			t.Error("lwf.FromGlobal = true, want false (project-local file)")
+		}
+		if got := cfg.EffectiveOnComplete("gwf"); got != "merge" {
+			t.Errorf("EffectiveOnComplete(gwf) = %q, want %q (project explicit beats global workflow)", got, "merge")
+		}
+		if got := cfg.EffectiveOnComplete("lwf"); got != "commit" {
+			t.Errorf("EffectiveOnComplete(lwf) = %q, want %q (project workflow beats project-level)", got, "commit")
+		}
+		if got := cfg.EffectiveOnComplete("unknown"); got != "merge" {
+			t.Errorf("EffectiveOnComplete(unknown) = %q, want %q", got, "merge")
+		}
+	})
+
+	t.Run("global workflow on_complete applies when project inherits", func(t *testing.T) {
+		cfg := load(t, "workflows:\n  - gwf\n  - lwf\n")
+
+		if cfg.OnCompleteFromProject {
+			t.Fatal("OnCompleteFromProject = true, want false (project never set it)")
+		}
+		if got := cfg.EffectiveOnComplete("gwf"); got != "none" {
+			t.Errorf("EffectiveOnComplete(gwf) = %q, want %q (global workflow default applies)", got, "none")
+		}
+		if got := cfg.EffectiveOnComplete("unknown"); got != "commit" {
+			t.Errorf("EffectiveOnComplete(unknown) = %q, want %q (built-in default)", got, "commit")
+		}
+	})
+}
