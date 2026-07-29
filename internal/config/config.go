@@ -27,11 +27,15 @@ func defaultConfig() *Config {
 		},
 		OnComplete: "commit",
 		Workflows:  nil, // Empty - DefaultWorkflow() handles fallback
+		// Desktop notifications are opt-in: an environment with no sortie
+		// config at all (e.g. the e2e harness, which points HOME/XDG_CONFIG_HOME
+		// at a temp dir) must stay silent rather than posting real OS
+		// notifications for every agent it completes.
 		Notifications: NotificationsConfig{
-			Enabled:        true,
-			OnComplete:     true,
-			OnFailed:       true,
-			OnWaitingInput: true,
+			Enabled:        false,
+			OnComplete:     false,
+			OnFailed:       false,
+			OnWaitingInput: false,
 		},
 		Claude: ClaudeConfig{
 			Command: "claude",
