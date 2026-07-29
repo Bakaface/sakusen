@@ -22,6 +22,11 @@ const (
 	StatusResolvingConflicts Status = "resolving-conflicts"
 	StatusCompleted          Status = "completed"
 	StatusFailed             Status = "failed"
+	// StatusMergeFailed means every workflow step succeeded but finalization
+	// (merge/commit) did not land, so the task's branch is still outstanding.
+	// Distinct from StatusCompleted ("the branch landed") and StatusFailed
+	// ("the agent itself failed").
+	StatusMergeFailed Status = "merge-failed"
 )
 
 func (s Status) String() string {
@@ -34,7 +39,7 @@ func (s Status) String() string {
 // need "not yet done" (e.g. checkProjectTasksDone) should use !IsTerminal()
 // rather than re-enumerating the non-terminal status list.
 func (s Status) IsTerminal() bool {
-	return s == StatusCompleted || s == StatusFailed
+	return s == StatusCompleted || s == StatusFailed || s == StatusMergeFailed
 }
 
 // IsAwaitingChildren reports whether the task is suspended mid-step waiting

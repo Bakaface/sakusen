@@ -23,6 +23,7 @@ func TestStatus_IsActive(t *testing.T) {
 		{StatusResolvingConflicts, true},
 		{StatusCompleted, false},
 		{StatusFailed, false},
+		{StatusMergeFailed, false},
 	}
 
 	for _, tt := range tests {
@@ -50,12 +51,29 @@ func TestStatus_IsTerminal(t *testing.T) {
 		{StatusResolvingConflicts, false},
 		{StatusCompleted, true},
 		{StatusFailed, true},
+		{StatusMergeFailed, true},
 	}
 
 	for _, tt := range tests {
 		if got := tt.status.IsTerminal(); got != tt.want {
 			t.Errorf("Status(%q).IsTerminal() = %v, want %v", tt.status, got, tt.want)
 		}
+	}
+}
+
+func TestStatusMergeFailed_DistinctFromCompletedAndFailed(t *testing.T) {
+	// The wire value is persisted in SQLite and filtered on by list_tasks, so
+	// it is part of the external contract, not an internal detail.
+	if StatusMergeFailed != "merge-failed" {
+		t.Errorf("StatusMergeFailed = %q, want %q", StatusMergeFailed, "merge-failed")
+	}
+	if StatusMergeFailed == StatusCompleted || StatusMergeFailed == StatusFailed {
+		t.Fatalf("StatusMergeFailed must be distinct, got %q", StatusMergeFailed)
+	}
+	// The worktree is preserved for recovery and the coordinator already
+	// cleaned the base repo — nothing for the startup sweep to reset.
+	if StatusMergeFailed.MayHaveDirtyRepoState() {
+		t.Error("StatusMergeFailed.MayHaveDirtyRepoState() = true, want false")
 	}
 }
 

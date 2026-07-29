@@ -62,6 +62,7 @@ var (
 		task.StatusResolvingConflicts: lipgloss.NewStyle().Foreground(lipgloss.Color("#C97054")).Bold(true),
 		task.StatusCompleted:          lipgloss.NewStyle().Foreground(lipgloss.Color("#5BA87A")),
 		task.StatusFailed:             lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F4F")),
+		task.StatusMergeFailed:        lipgloss.NewStyle().Foreground(lipgloss.Color("#D94F4F")).Bold(true),
 	}
 
 	priorityStyles = map[string]lipgloss.Style{

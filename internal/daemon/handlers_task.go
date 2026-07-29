@@ -818,7 +818,7 @@ func (s *Server) generateTitle(ctx context.Context, description string, claude *
 //   - unsupported field name
 //   - referenced task missing
 //   - cross-project reference
-//   - referenced task in failed status
+//   - referenced task in failed or merge-failed status
 //
 // fieldLabel is used in error messages ("description" / "context") to identify
 // where the offending reference lives. selfID is the ID of the task being
@@ -854,8 +854,11 @@ func (s *Server) validateTaskRefs(value string, projectID, selfID int64, fieldLa
 			return nil, fmt.Errorf("task #%d referenced in %s belongs to another project", r.ID, fieldLabel)
 		}
 		switch {
-		case ref.Status == task.StatusFailed:
-			return nil, fmt.Errorf("task #%d referenced in %s is failed", r.ID, fieldLabel)
+		case ref.Status == task.StatusFailed, ref.Status == task.StatusMergeFailed:
+			// Terminal without a landed result: auto-adding these as deps would
+			// deadlock the referencing task forever, since GetClaimableTasks
+			// only unblocks on a `completed` blocker.
+			return nil, fmt.Errorf("task #%d referenced in %s is %s", r.ID, fieldLabel, ref.Status)
 		case ref.Status == task.StatusCompleted:
 			// Already resolved — value will be available at run time.
 		default:

@@ -299,7 +299,7 @@ var retryCmd = &cobra.Command{
 	Short:             "Retry a failed task",
 	Long:              "Retry a task. By default the workflow restarts from the first step. Pass --from-step <name> to restart at a specific step while preserving completed work from earlier steps.",
 	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: completeTaskIDs(task.StatusFailed),
+	ValidArgsFunction: completeTaskIDs(task.StatusFailed, task.StatusMergeFailed),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		taskID, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
@@ -330,9 +330,9 @@ var revertCmd = &cobra.Command{
 
 var continueCmd = &cobra.Command{
 	Use:               "continue <task_id>",
-	Short:             "Continue a task (awaiting-approval, completed, or failed)",
+	Short:             "Continue a task (awaiting-approval, completed, failed, or merge-failed)",
 	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: completeTaskIDs(task.StatusAwaitingApproval, task.StatusTmux, task.StatusCompleted, task.StatusFailed),
+	ValidArgsFunction: completeTaskIDs(task.StatusAwaitingApproval, task.StatusTmux, task.StatusCompleted, task.StatusFailed, task.StatusMergeFailed),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		taskID, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {

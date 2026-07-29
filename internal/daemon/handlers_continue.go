@@ -375,7 +375,6 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 }
 
 func (s *Server) runFinalization(t *task.Task, pc *projectContext) {
-	repoRoot := s.getProjectRepoRoot(t)
 	if err := pc.engine.FinalizeTask(s.ctx, t); err != nil {
 		// A required-context capture failure blocks the task: fail it instead
 		// of merging/completing with an empty step context. Preserve the
@@ -388,12 +387,14 @@ func (s *Server) runFinalization(t *task.Task, pc *projectContext) {
 			s.broadcastTaskUpdate(t.ID)
 			return
 		}
-		log.Printf("%sWarning: finalize failed for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-		// Don't fail the whole operation — still mark as completed.
-		// Best-effort cleanup of worktree and branch so they don't linger.
-		if t.Worktree && repoRoot != "" {
-			s.cleanupWorktreeAndBranch(pc, t)
+		// The branch never landed, so this is not `completed`. Keep the worktree
+		// and branch: they still hold the unmerged work a retry/continue needs.
+		log.Printf("%sError: finalize failed for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+		if dbErr := s.database.UpdateTaskStatusError(t.ID, task.StatusMergeFailed, err.Error()); dbErr != nil {
+			log.Printf("%sError: failed to mark task #%d merge-failed: %v", s.projectLogPrefix(t.ProjectID), t.ID, dbErr)
 		}
+		s.broadcastTaskUpdate(t.ID)
+		return
 	}
 
 	// Mark task as completed

@@ -829,11 +829,18 @@ func (l *listView) renderHelp() string {
 	return help.String()
 }
 
-// hasFailedBlocker checks if any of the task's blockers have failed status.
+// hasFailedBlocker reports whether any of the task's blockers reached a
+// terminal status without landing (failed or merge-failed). Such a blocker
+// never becomes `completed`, so the dependency can never clear — the caller
+// renders this as "pending (deadlocked)" rather than "pending (blocked)".
 func (l *listView) hasFailedBlocker(task daemon.TaskInfo) bool {
 	for _, blockerID := range task.BlockedBy {
 		for _, t := range l.tasks {
-			if t.ID == blockerID && taskpkg.Status(t.Status) == taskpkg.StatusFailed {
+			if t.ID != blockerID {
+				continue
+			}
+			switch taskpkg.Status(t.Status) {
+			case taskpkg.StatusFailed, taskpkg.StatusMergeFailed:
 				return true
 			}
 		}
@@ -877,7 +884,7 @@ func statusIconFor(status taskpkg.Status) string {
 		return "▣"
 	case taskpkg.StatusPending:
 		return "○"
-	case taskpkg.StatusFailed:
+	case taskpkg.StatusFailed, taskpkg.StatusMergeFailed:
 		return "✗"
 	case taskpkg.StatusFinalizing:
 		return "◉"

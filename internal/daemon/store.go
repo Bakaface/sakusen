@@ -54,6 +54,7 @@ type taskStore interface {
 	UpdateTaskBranch(id int64, branch string) error
 	UpdateTaskStep(id int64, stepIndex int, currentStep string) error
 	UpdateTaskError(id int64, errMsg string) error
+	UpdateTaskStatusError(id int64, status task.Status, errMsg string) error
 	UpdateTaskPriority(id int64, priority task.Priority) error
 	UpdateTaskContext(id int64, taskContext string) error
 	UpdateTaskTitle(id int64, title string) error

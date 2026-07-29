@@ -85,6 +85,25 @@ func TestValidateTaskRefs_FailedDep(t *testing.T) {
 	}
 }
 
+// A merge-failed dep is terminal but never becomes `completed`, so auto-adding
+// it as a blocker would leave the referencing task unclaimable forever
+// (GetClaimableTasks only clears deps on `completed`). Reject it up front.
+func TestValidateTaskRefs_MergeFailedDep(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	tk, err := s.database.CreateTask(projID, "merge-failed dep", "", "slug", "default", "main", task.StatusMergeFailed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocked, err := s.validateTaskRefs("dep={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "description")
+	if err == nil {
+		t.Fatalf("expected merge-failed-dep error, got auto-blocked-by %+v", blocked)
+	}
+	if !strings.Contains(err.Error(), "merge-failed") {
+		t.Errorf("error should name the merge-failed status: %v", err)
+	}
+}
+
 func TestValidateTaskRefs_UnsupportedField(t *testing.T) {
 	s, projID := setupServerWithProject(t)
 	tk, err := s.database.CreateTask(projID, "ok", "", "slug", "default", "main", task.StatusPending, nil)

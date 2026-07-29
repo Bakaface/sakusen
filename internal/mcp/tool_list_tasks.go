@@ -15,7 +15,7 @@ import (
 type ListTasksArgs struct {
 	AllProjects bool   `json:"all_projects,omitempty" jsonschema:"List tasks across every project known to the daemon. Default false lists only the resolved project's tasks."`
 	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the git toplevel of the MCP process's cwd. Ignored when all_projects is true."`
-	Status      string `json:"status,omitempty" jsonschema:"Filter to tasks whose status (raw or effective) equals this value, e.g. pending, running, awaiting-approval, merge-blocked, completed, failed."`
+	Status      string `json:"status,omitempty" jsonschema:"Filter to tasks whose status (raw or effective) equals this value, e.g. pending, running, awaiting-approval, merge-blocked, completed, failed, merge-failed."`
 }
 
 // TaskSummary is a compact per-task view for list responses. Heavy fields

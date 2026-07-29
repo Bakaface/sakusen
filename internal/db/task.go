@@ -289,6 +289,17 @@ func (db *DB) UpdateTaskError(id int64, errMsg string) error {
 	return err
 }
 
+// UpdateTaskStatusError records an error message alongside a caller-supplied
+// terminal status in a single write, so a poller can never observe the new
+// status without its reason (or vice versa).
+func (db *DB) UpdateTaskStatusError(id int64, status task.Status, errMsg string) error {
+	_, err := db.sqlDB.Exec(
+		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ? WHERE id = ?",
+		errMsg, status, time.Now(), id,
+	)
+	return err
+}
+
 func (db *DB) UpdateTaskPriority(id int64, priority task.Priority) error {
 	_, err := db.sqlDB.Exec(
 		"UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?",

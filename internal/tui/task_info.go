@@ -223,7 +223,10 @@ func (v *taskInfoView) renderMetadata() string {
 			} else if i == t.StepIndex && (status == task.StatusRunning || status == task.StatusAwaitingApproval || status == task.StatusSummarizingStep) {
 				icon = "●" // active
 				style = stateStyle(status)
-			} else if status == task.StatusCompleted || status == task.StatusFinalizing || status == task.StatusSummarizing || status == task.StatusMergeBlocked || status == task.StatusResolvingConflicts {
+			} else if status == task.StatusCompleted || status == task.StatusFinalizing || status == task.StatusSummarizing || status == task.StatusMergeBlocked || status == task.StatusResolvingConflicts || status == task.StatusMergeFailed {
+				// merge-failed groups here rather than with StatusFailed below:
+				// every workflow step ran, only finalization failed, so marking
+				// a step ✗ would blame the wrong thing.
 				icon = "✓"
 				style = stateStyle(task.StatusCompleted)
 			} else if status == task.StatusFailed && i == t.StepIndex {

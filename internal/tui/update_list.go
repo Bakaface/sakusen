@@ -144,13 +144,13 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Retry):
-		// Retry if selected task is failed, completed, or stale tmux.
-		// Instead of asking yes/no, load the workflow steps and let the user
-		// pick which step to restart from. Single-step workflows skip the
+		// Retry if selected task is failed, merge-failed, completed, or stale
+		// tmux. Instead of asking yes/no, load the workflow steps and let the
+		// user pick which step to restart from. Single-step workflows skip the
 		// picker entirely (handled in the taskStepsLoadedMsg handler).
 		if task := m.list.Selected(); task != nil && m.client != nil {
 			status := taskpkg.Status(task.Status)
-			if status == taskpkg.StatusFailed || status == taskpkg.StatusCompleted || status == taskpkg.StatusTmux {
+			if status == taskpkg.StatusFailed || status == taskpkg.StatusMergeFailed || status == taskpkg.StatusCompleted || status == taskpkg.StatusTmux {
 				return m.openRetryStepSelection(task)
 			}
 		}
@@ -187,7 +187,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.confirmTaskID = task.ID
 				return m, nil
 			}
-			if status == taskpkg.StatusCompleted || status == taskpkg.StatusFailed {
+			if status.IsTerminal() {
 				workflows := m.cfg.ListWorkflowNames()
 				m.continueTaskID = task.ID
 				m.continueSelectedWorkflow = ""
