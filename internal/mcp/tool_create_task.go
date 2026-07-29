@@ -15,10 +15,10 @@ import (
 // drive the MCP tool's input schema generation; jsonschema tags become field
 // descriptions in the schema visible to the LLM.
 type CreateTaskArgs struct {
-	Description    string   `json:"description,omitempty" jsonschema:"What the agent should do. Required unless checkout_branch is set or the chosen workflow's first step is tmux."`
+	Input          string   `json:"input,omitempty" jsonschema:"The task input — what the agent should do. Seeds {{task.input}} in step prompts. Required unless checkout_branch is set or the chosen workflow's first step is tmux."`
 	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the git toplevel of the MCP process's cwd."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
-	Workflow       string   `json:"workflow,omitempty" jsonschema:"Workflow name to run (see list_workflows). Empty selects the project's first workflow (or the built-in default). A workflow may pin fields like description/worktree/branch/target; explicit arguments here override those pins."`
+	Workflow       string   `json:"workflow,omitempty" jsonschema:"Workflow name to run (see list_workflows). Empty selects the project's first workflow (or the built-in default). A workflow may pin fields like input/worktree/branch/target; explicit arguments here override those pins."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent. Defaults to the project's configured priority."`
 	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'. Supports {{task.id}}, {{task.title}}, {{task.slug}}."`
 	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override (defaults to git.base_branch from .sortie.yml)."`
@@ -55,7 +55,7 @@ func handleCreateTask(ctx context.Context, c *client.Client, args CreateTaskArgs
 
 	req := daemon.CreateTaskRequest{
 		Title:          args.Title,
-		Description:    args.Description,
+		Input:          args.Input,
 		Workflow:       args.Workflow,
 		Priority:       args.Priority,
 		BranchName:     args.BranchName,

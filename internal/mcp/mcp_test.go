@@ -171,7 +171,7 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 	}
 	for _, want := range []string{
 		"create_task", "list_workflows", "get_task", "update_step_context",
-		"list_tasks", "retry_task", "update_task_description", "update_task_dependencies",
+		"list_tasks", "retry_task", "update_task_input", "update_task_dependencies",
 		"create_track", "update_track_context", "update_track_description", "list_tracks",
 	} {
 		if !got[want] {
@@ -334,7 +334,7 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 		Params: mcp.CallToolParams{
 			Name: "create_task",
 			Arguments: map[string]any{
-				"description":   "Implement the login page",
+				"input":         "Implement the login page",
 				"project_path":  "/tmp/proj",
 				"workflow":      "implement",
 				"priority":      "high",
@@ -352,8 +352,8 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 		t.Fatalf("tool returned error: %v", textOf(res))
 	}
 
-	if captured.Description != "Implement the login page" {
-		t.Errorf("Description: %q", captured.Description)
+	if captured.Input != "Implement the login page" {
+		t.Errorf("Input: %q", captured.Input)
 	}
 	if captured.ProjectPath != "/tmp/proj" {
 		t.Errorf("ProjectPath: %q", captured.ProjectPath)
@@ -415,7 +415,7 @@ func TestMCP_CreateTask_RejectsCwdOutsideRepo(t *testing.T) {
 	res, err := c.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "create_task",
-			Arguments: map[string]any{"description": "hello"},
+			Arguments: map[string]any{"input": "hello"},
 		},
 	})
 	if err != nil {
@@ -768,14 +768,14 @@ func TestMCP_RetryTask_RejectsInvalidID(t *testing.T) {
 	}
 }
 
-func TestMCP_UpdateTaskDescription_ForwardsField(t *testing.T) {
+func TestMCP_UpdateTaskInput_ForwardsField(t *testing.T) {
 	fake := newFakeDaemon(t)
 
 	var captured daemon.UpdateFieldRequest
 	fake.handle(daemon.MsgUpdateField, func(msg *daemon.Message) *daemon.Message {
 		_ = msg.DecodePayload(&captured)
 		resp, _ := daemon.NewMessage(daemon.MsgUpdateField, daemon.UpdateFieldResponse{
-			Task: daemon.TaskInfo{ID: 7, Description: captured.Value},
+			Task: daemon.TaskInfo{ID: 7, Input: captured.Value},
 		})
 		return resp
 	})
@@ -786,8 +786,8 @@ func TestMCP_UpdateTaskDescription_ForwardsField(t *testing.T) {
 
 	res, err := c.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
-			Name:      "update_task_description",
-			Arguments: map[string]any{"task_id": 7, "description": "new body"},
+			Name:      "update_task_input",
+			Arguments: map[string]any{"task_id": 7, "input": "new body"},
 		},
 	})
 	if err != nil {
@@ -800,7 +800,7 @@ func TestMCP_UpdateTaskDescription_ForwardsField(t *testing.T) {
 	if captured.TaskID != 7 {
 		t.Errorf("TaskID: %d, want 7", captured.TaskID)
 	}
-	if captured.Field != "description" {
+	if captured.Field != "input" {
 		t.Errorf("Field: %q, want description", captured.Field)
 	}
 	if captured.Value != "new body" {
@@ -808,7 +808,7 @@ func TestMCP_UpdateTaskDescription_ForwardsField(t *testing.T) {
 	}
 }
 
-func TestMCP_UpdateTaskDescription_RejectsInvalidArgs(t *testing.T) {
+func TestMCP_UpdateTaskInput_RejectsInvalidArgs(t *testing.T) {
 	fake := newFakeDaemon(t)
 	c := startMCPServer(t, fake)
 
@@ -822,20 +822,20 @@ func TestMCP_UpdateTaskDescription_RejectsInvalidArgs(t *testing.T) {
 	}{
 		{
 			name:      "task_id zero",
-			arguments: map[string]any{"task_id": 0, "description": "x"},
+			arguments: map[string]any{"task_id": 0, "input": "x"},
 			wantErr:   "task_id must be a positive integer",
 		},
 		{
-			name:      "blank description",
-			arguments: map[string]any{"task_id": 1, "description": "   "},
-			wantErr:   "description must not be empty",
+			name:      "blank input",
+			arguments: map[string]any{"task_id": 1, "input": "   "},
+			wantErr:   "input must not be empty",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := c.CallTool(ctx, mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
-					Name:      "update_task_description",
+					Name:      "update_task_input",
 					Arguments: tc.arguments,
 				},
 			})

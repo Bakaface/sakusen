@@ -27,7 +27,7 @@ const (
 var noiseFiles = []string{".claude-output.log", "CLAUDE.md"}
 
 // tmuxFirstTitle returns a placeholder title for a tmux-first workflow task that
-// was created without a description. Falls back to a generic label if the
+// was created without an input. Falls back to a generic label if the
 // workflow is unnamed.
 func tmuxFirstTitle(wf *config.WorkflowConfig) string {
 	if wf != nil && wf.Name != "" {
@@ -93,7 +93,7 @@ func (s *Server) handleCreateTask(conn net.Conn, req CreateTaskRequest) {
 // spawn-and-suspend path uses exactly the same validation, dependency
 // auto-collection, and project-defaults persistence as the single-create path.
 func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, string, error) {
-	description := strings.TrimSpace(req.Description)
+	input := strings.TrimSpace(req.Input)
 
 	// Normalize the explicit-none track sentinel ("none" = explicitly
 	// trackless) so it works uniformly from every surface — most importantly
@@ -113,7 +113,7 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	}
 
 	// Resolve workflow against the project config so we can decide whether
-	// empty descriptions are permitted (tmux-first workflows allow them).
+	// empty inputs are permitted (tmux-first workflows allow them).
 	projCfg := s.cfg
 	if pc, err := s.getProjectContext(proj.ID); err == nil {
 		projCfg = pc.cfg
@@ -147,8 +147,8 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 
 	// Apply workflow-level pins as fallbacks below explicit request values.
 	// Precedence: explicit request value > workflow config pin > project default.
-	if description == "" && wf != nil {
-		description = strings.TrimSpace(wf.Description)
+	if input == "" && wf != nil {
+		input = strings.TrimSpace(wf.Input)
 	}
 
 	// Branch/checkout pins form a mutually-exclusive pair (branch-mode choice).
@@ -166,30 +166,30 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		targetBranch = wf.Target
 	}
 
-	if description == "" && checkoutBranch == "" && !tmuxFirst {
-		return nil, "", fmt.Errorf("description cannot be empty")
+	if input == "" && checkoutBranch == "" && !tmuxFirst {
+		return nil, "", fmt.Errorf("input cannot be empty")
 	}
 
 	// Validate any {{tasks.<id>.<field>}} references and collect auto-blockers.
 	// selfID is 0 — the task row doesn't exist yet, so no self-references are
 	// possible (any future cycle would have to be in req.BlockedBy explicitly).
-	autoBlockedBy, refErr := s.validateTaskRefs(description, proj.ID, 0, "description")
+	autoBlockedBy, refErr := s.validateTaskRefs(input, proj.ID, 0, "input")
 	if refErr != nil {
 		return nil, "", refErr
 	}
 
 	// Caller-supplied title wins. Otherwise: branch-derived for checkout-only,
-	// workflow-derived for tmux-first with no description, else sanitized description.
+	// workflow-derived for tmux-first with no input, else sanitized input.
 	var title string
 	switch {
 	case strings.TrimSpace(req.Title) != "":
 		title = strings.TrimSpace(req.Title)
-	case description == "" && checkoutBranch != "":
+	case input == "" && checkoutBranch != "":
 		title = "⎇ " + checkoutBranch
-	case description == "" && tmuxFirst:
+	case input == "" && tmuxFirst:
 		title = tmuxFirstTitle(wf)
 	default:
-		title = task.SanitizeTitle(description)
+		title = task.SanitizeTitle(input)
 	}
 
 	slug := task.Slugify(title)
@@ -233,7 +233,7 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	if tr != nil {
 		trackID = &tr.ID
 	}
-	t, err := s.database.CreateTaskWithPriority(proj.ID, title, description, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
+	t, err := s.database.CreateTaskWithPriority(proj.ID, title, input, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create task: %v", err)
 	}
@@ -261,15 +261,15 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 // every child without duplicating the branch logic.
 func (s *Server) kickOffPostCreate(t *task.Task, req CreateTaskRequest) {
 	title := t.Title
-	// Use the persisted (resolved) description, not req.Description: a workflow
-	// may have pinned the description when the request left it empty, and title
-	// refinement must see the resolved value (otherwise AI title generation is
-	// wrongly skipped for pinned-description tasks).
-	description := strings.TrimSpace(t.Description)
+	// Use the persisted (resolved) input, not req.Input: a workflow may have
+	// pinned the input when the request left it empty, and title refinement
+	// must see the resolved value (otherwise AI title generation is wrongly
+	// skipped for pinned-input tasks).
+	input := strings.TrimSpace(t.Input)
 	if req.TmuxDirect {
 		go s.setupTmuxDirect(t.ID, t.ProjectID, title)
 	} else {
-		go s.refineTaskTitle(t.ID, t.ProjectID, t.BranchName, t.Worktree, t.CheckoutBranch, description, title, req.Title)
+		go s.refineTaskTitle(t.ID, t.ProjectID, t.BranchName, t.Worktree, t.CheckoutBranch, input, title, req.Title)
 	}
 }
 
@@ -444,11 +444,11 @@ func (s *Server) handleUpdatePriority(conn net.Conn, req UpdatePriorityRequest) 
 }
 
 func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {
-	// For description/context edits, validate any {{tasks.<id>.<field>}} refs
+	// For input/context edits, validate any {{tasks.<id>.<field>}} refs
 	// against the new value and collect newly active references as auto-blockers.
 	// Validation runs before the mutation so a bad ref leaves the field untouched.
 	var autoBlockedBy []int64
-	if req.Field == "description" || req.Field == "context" {
+	if req.Field == "input" || req.Field == "context" {
 		t, err := s.database.GetTask(req.TaskID)
 		if err != nil {
 			s.sendError(conn, fmt.Sprintf("failed to get task: %v", err))
@@ -466,8 +466,8 @@ func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {
 	switch req.Field {
 	case "title":
 		err = s.database.UpdateTaskTitle(req.TaskID, req.Value)
-	case "description":
-		err = s.database.UpdateTaskDescription(req.TaskID, req.Value)
+	case "input":
+		err = s.database.UpdateTaskInput(req.TaskID, req.Value)
 	case "context":
 		err = s.database.UpdateTaskContext(req.TaskID, req.Value)
 	default:
@@ -723,7 +723,7 @@ func (s *Server) handleUpdateActiveStepContext(conn net.Conn, req UpdateActiveSt
 	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated (%s)", req.StepName, mode)})
 }
 
-func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, worktree bool, checkoutBranch string, description string, initialTitle string, manualTitle string) {
+func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, worktree bool, checkoutBranch string, input string, initialTitle string, manualTitle string) {
 	projCfg := s.cfg
 	if pc, err := s.getProjectContext(projectID); err == nil {
 		projCfg = pc.cfg
@@ -734,15 +734,15 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 	// Use manual title if provided, skipping AI generation
 	if manualTitle != "" {
 		title = manualTitle
-	} else if description == "" {
-		// Skip AI title generation when description is empty (existing branch with no prompt)
+	} else if input == "" {
+		// Skip AI title generation when input is empty (existing branch with no prompt)
 		title = initialTitle
 	} else {
 		ctx, cancel := context.WithTimeout(s.ctx, titleGenerationTimeout)
 		defer cancel()
 
 		var err error
-		title, err = s.generateTitle(ctx, description, &projCfg.Claude)
+		title, err = s.generateTitle(ctx, input, &projCfg.Claude)
 		if err != nil {
 			log.Printf("%sFailed to generate AI title for task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
 			if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
@@ -783,10 +783,10 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 	log.Printf("%sAI title for task #%d: %s (branch: %s)", s.projectLogPrefix(projectID), taskID, title, branch)
 }
 
-func (s *Server) generateTitle(ctx context.Context, description string, claude *config.ClaudeConfig) (string, error) {
+func (s *Server) generateTitle(ctx context.Context, input string, claude *config.ClaudeConfig) (string, error) {
 	prompt := fmt.Sprintf(
-		"Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task description:\n\n%s",
-		description,
+		"Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task input:\n\n%s",
+		input,
 	)
 
 	args := []string{"-p", prompt, "--output-format", "text", "--model", "haiku"}

@@ -99,7 +99,7 @@ func registerTools(s *server.MCPServer, c *client.Client) {
 	registerListTasks(s, c)
 	registerRetryTask(s, c)
 	registerAdvanceTask(s, c)
-	registerUpdateTaskDescription(s, c)
+	registerUpdateTaskInput(s, c)
 	registerUpdateTaskDependencies(s, c)
 	registerCreateTasksAndWait(s, c)
 	registerWaitForTasks(s, c)

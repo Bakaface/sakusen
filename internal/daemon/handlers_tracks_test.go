@@ -491,7 +491,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "payments"})
+		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "payments"})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
@@ -506,7 +506,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: strconv.FormatInt(tr.ID, 10)})
+		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: strconv.FormatInt(tr.ID, 10)})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
@@ -517,7 +517,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 
 	t.Run("unknown track fails create", func(t *testing.T) {
 		s, _ := newServer(t)
-		if _, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "nope"}); err == nil {
+		if _, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "nope"}); err == nil {
 			t.Fatal("expected error for unknown track")
 		}
 	})
@@ -532,7 +532,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: strconv.FormatInt(otherTr.ID, 10)}); err == nil {
+		if _, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: strconv.FormatInt(otherTr.ID, 10)}); err == nil {
 			t.Fatal("expected cross-project rejection")
 		}
 	})
@@ -542,7 +542,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
-		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "None"})
+		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "None"})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
@@ -563,7 +563,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		}
 
 		// Track's workflow when request leaves it empty.
-		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "payments"})
+		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "payments"})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
@@ -572,7 +572,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		}
 
 		// Explicit request beats the track's workflow.
-		tk2, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "payments", Workflow: "explicit-flow"})
+		tk2, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "payments", Workflow: "explicit-flow"})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
@@ -596,7 +596,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "ghost-flow", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "payments"})
+		_, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "payments"})
 		if err == nil || !strings.Contains(err.Error(), "unknown workflow") {
 			t.Fatalf("expected unknown-workflow error, got %v", err)
 		}
@@ -625,9 +625,9 @@ func TestCreateTasksAndWait_TrackInheritance(t *testing.T) {
 	go s.handleCreateTasksAndWait(serverConn, CreateTasksAndWaitRequest{
 		ParentTaskID: parent.ID,
 		Tasks: []CreateTaskRequest{
-			{Description: "inherits", Title: "inherits"},                 // inherits parent's track
-			{Description: "override", Title: "override", Track: "other"}, // explicit override
-			{Description: "detached", Title: "detached", Track: "none"},  // explicitly trackless
+			{Input: "inherits", Title: "inherits"},                 // inherits parent's track
+			{Input: "override", Title: "override", Track: "other"}, // explicit override
+			{Input: "detached", Title: "detached", Track: "none"},  // explicitly trackless
 		},
 	})
 	msg := readOneMessage(t, clientConn)

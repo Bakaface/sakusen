@@ -98,7 +98,7 @@ func TestDetailView_ShowsOnlyLogs(t *testing.T) {
 	d.SetTask(&daemon.TaskInfo{
 		ID:           14,
 		Title:        "Test task",
-		Description:  "Some description",
+		Input:        "Some description",
 		Status:       "running",
 		Branch:       "sortie/14-test",
 		CurrentStep:  "implement",

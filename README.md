@@ -82,7 +82,7 @@ sortie tasks                                     # list, or `sortie tasks <id>` 
 
 Workflows live in `.sortie.yml` at the repo root as a flat `workflows:` list. Each entry is either a string ref (resolved to `.sortie/workflows/<name>.yml`) or an inline workflow mapping.
 
-A workflow may **pin** any subset of New Task screen fields (`description`, `worktree`, `branch`, `checkout`, `target`). Pinned fields are pre-filled and hidden from the form. If all fields are pinned the New Task screen is skipped entirely and the task is created immediately.
+A workflow may **pin** any subset of New Task screen fields (`input`, `worktree`, `branch`, `checkout`, `target`). Pinned fields are pre-filled and hidden from the form. If all fields are pinned the New Task screen is skipped entirely and the task is created immediately. (A separate top-level `description:` is human-readable metadata — a one-line summary surfaced in the workflow picker and via MCP `list_workflows`; it is **not** a pin and never becomes the task input.)
 
 Minimal `.sortie.yml`:
 
@@ -103,7 +103,7 @@ workflows:
       - name: implementing
         prompt: |
           Implement task #{{task.id}}: {{task.title}}
-          {{task.description}}
+          {{task.input}}
         timeout: 30m
 
       - name: reviewing
@@ -114,12 +114,13 @@ workflows:
         timeout: 20m
 ```
 
-Workflows with no pins always prompt the New Task screen. Workflows that pin all fields (description + worktree + branch/checkout + target) skip the screen and create the task immediately — useful for predefined maintenance jobs or project bootstrapping pipelines:
+Workflows with no pins always prompt the New Task screen. Workflows that pin all fields (input + worktree + branch/checkout + target) skip the screen and create the task immediately — useful for predefined maintenance jobs or project bootstrapping pipelines:
 
 ```yaml
 workflows:
   - name: housekeeping
-    description: "Run standard maintenance: linting, dead code removal"
+    description: "Run standard maintenance: linting, dead code removal"   # metadata (picker/MCP)
+    input: "Audit and clean the codebase: lint, remove dead code."        # pins the task input
     worktree: true
     branch: sortie/housekeeping-{{task.id}}
     target: main
@@ -164,10 +165,10 @@ Loops must point to an earlier step, can't be `human:` or run in tmux (set `prin
 
 Available in any step `prompt`:
 
-- `{{task.id}}`, `{{task.title}}`, `{{task.description}}`, `{{task.context}}`, `{{task.slug}}`, `{{task.branch}}`
-  — `task.context` is the summary written by the workflow's summarizer after the task completes; empty until then.
-- `{{tasks.<id>.<field>}}` — reference another task's field by ID. Supported fields: `title`, `branch`, `description`, `context`.
-  References inside the task's own `description`/`context` are pre-expanded before being inlined into a step prompt
+- `{{task.id}}`, `{{task.title}}`, `{{task.input}}`, `{{task.context}}`, `{{task.slug}}`, `{{task.branch}}`
+  — `task.input` is the user-supplied task input; `task.context` is the summary written by the workflow's summarizer after the task completes; empty until then.
+- `{{tasks.<id>.<field>}}` — reference another task's field by ID. Supported fields: `title`, `branch`, `input`, `context`.
+  References inside the task's own `input`/`context` are pre-expanded before being inlined into a step prompt
   (single-pass; nested refs in the looked-up task's fields remain verbatim).
   At create or edit time, references are validated:
   - missing task, cross-project, failed dependency, or unsupported field → request is rejected;
@@ -292,11 +293,11 @@ sortie daemon status          # is it running, what PID
 **Tasks**
 
 ```bash
-sortie create <description> [--workflow w] [--priority high] [--title T]
+sortie create <input> [--workflow w] [--priority high] [--title T]
               [--branch tmpl] [--target main] [--checkout existing-branch]
               [--no-worktree]
 sortie tasks [<id>] [--json]  # list, or detail for one
-sortie edit <id> [--title T] [--description D] [--context C] [--priority P]
+sortie edit <id> [--title T] [--input I] [--context C] [--priority P]
 sortie delete <id> [-y]
 sortie start <id>             # manually kick off a pending task
 sortie stop <id>              # stop a running task

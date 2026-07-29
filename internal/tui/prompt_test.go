@@ -621,59 +621,59 @@ func TestPromptView_ResetClearsTitleInput(t *testing.T) {
 	}
 }
 
-func TestUnderlineDInPlaceholder(t *testing.T) {
+func TestUnderlineIInPlaceholder(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
 		want string
 	}{
 		{
-			name: "wraps the first D in CSI 4m / CSI 24m",
-			in:   "prompt Describe the task...",
-			want: "prompt \x1b[4mD\x1b[24mescribe the task...",
+			name: "wraps the first I in CSI 4m / CSI 24m",
+			in:   "prompt Input for the agent...",
+			want: "prompt \x1b[4mI\x1b[24mnput for the agent...",
 		},
 		{
 			name: "preserves surrounding ANSI codes (cursor visible)",
-			in:   "\x1b[40m\x1b[7mD\x1b[0m\x1b[40m\x1b[90mescribe the task...\x1b[0m",
-			want: "\x1b[40m\x1b[7m\x1b[4mD\x1b[24m\x1b[0m\x1b[40m\x1b[90mescribe the task...\x1b[0m",
+			in:   "\x1b[40m\x1b[7mI\x1b[0m\x1b[40m\x1b[90mnput for the agent...\x1b[0m",
+			want: "\x1b[40m\x1b[7m\x1b[4mI\x1b[24m\x1b[0m\x1b[40m\x1b[90mnput for the agent...\x1b[0m",
 		},
 		{
 			name: "preserves surrounding ANSI codes (cursor hidden)",
-			in:   "\x1b[40m\x1b[90mD\x1b[0m\x1b[40m\x1b[90mescribe the task...\x1b[0m",
-			want: "\x1b[40m\x1b[90m\x1b[4mD\x1b[24m\x1b[0m\x1b[40m\x1b[90mescribe the task...\x1b[0m",
+			in:   "\x1b[40m\x1b[90mI\x1b[0m\x1b[40m\x1b[90mnput for the agent...\x1b[0m",
+			want: "\x1b[40m\x1b[90m\x1b[4mI\x1b[24m\x1b[0m\x1b[40m\x1b[90mnput for the agent...\x1b[0m",
 		},
 		{
-			name: "leaves the line untouched when no D is present",
+			name: "leaves the line untouched when no I is present",
 			in:   "no capital here",
 			want: "no capital here",
 		},
 		{
-			name: "wraps only the first D",
-			in:   "Done DD",
-			want: "\x1b[4mD\x1b[24mone DD",
+			name: "wraps only the first I",
+			in:   "Iron II",
+			want: "\x1b[4mI\x1b[24mron II",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := underlineDInPlaceholder(tc.in); got != tc.want {
+			if got := underlineIInPlaceholder(tc.in); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestPromptView_PlaceholderDIsUnderlined(t *testing.T) {
+func TestPromptView_PlaceholderIIsUnderlined(t *testing.T) {
 	p := newPromptView(true, branchModeNew, "")
 	p.SetSize(80, 24)
 
-	// Default focus is description, value is empty — placeholder is showing.
+	// Default focus is input, value is empty — placeholder is showing.
 	view := p.View()
 
 	// The view should embed the underline-on / underline-off ANSI sequence
-	// around the leading "D" of "Describe the task...".
-	if !strings.Contains(view, "\x1b[4mD\x1b[24m") {
-		t.Errorf("expected underline ANSI around D in placeholder, view:\n%q", view)
+	// around the leading "I" of "Input for the agent...".
+	if !strings.Contains(view, "\x1b[4mI\x1b[24m") {
+		t.Errorf("expected underline ANSI around I in placeholder, view:\n%q", view)
 	}
 }
 
@@ -681,34 +681,34 @@ func TestPromptView_PlaceholderUnderlineOnlyWhenEmpty(t *testing.T) {
 	p := newPromptView(true, branchModeNew, "")
 	p.SetSize(80, 24)
 
-	// Type a "D" — placeholder is hidden, no underline injection should happen.
-	p.textarea.SetValue("Done")
+	// Type an "I" — placeholder is hidden, no underline injection should happen.
+	p.textarea.SetValue("Iron")
 	view := p.View()
 
-	if strings.Contains(view, "\x1b[4mD\x1b[24m") {
-		t.Errorf("expected no underline ANSI around D when value is non-empty, view:\n%q", view)
+	if strings.Contains(view, "\x1b[4mI\x1b[24m") {
+		t.Errorf("expected no underline ANSI around I when value is non-empty, view:\n%q", view)
 	}
 }
 
-func TestPromptView_PlaceholderUnderlineOnlyWhenDescriptionFocused(t *testing.T) {
+func TestPromptView_PlaceholderUnderlineOnlyWhenInputFocused(t *testing.T) {
 	p := newPromptView(true, branchModeNew, "")
 	p.SetSize(80, 24)
 
 	// Move focus to the title field — placeholder is still showing on the
-	// blurred textarea but shouldn't be decorated with the alt+d hint.
+	// blurred textarea but shouldn't be decorated with the alt+i hint.
 	p.focusInput(promptFieldTitle)
 	view := p.View()
 
-	if strings.Contains(view, "\x1b[4mD\x1b[24m") {
-		t.Errorf("expected no underline ANSI around D when description is not focused, view:\n%q", view)
+	if strings.Contains(view, "\x1b[4mI\x1b[24m") {
+		t.Errorf("expected no underline ANSI around I when input is not focused, view:\n%q", view)
 	}
 }
 
 func TestPromptView_DefaultFocusIsDescription(t *testing.T) {
 	p := newPromptView(true, branchModeNew, "")
 
-	if p.focusField != promptFieldDescription {
-		t.Errorf("expected default focus to be promptFieldDescription, got %v", p.focusField)
+	if p.focusField != promptFieldInput {
+		t.Errorf("expected default focus to be promptFieldInput, got %v", p.focusField)
 	}
 }
 
@@ -718,7 +718,7 @@ func TestPromptView_SwitchFocusForward(t *testing.T) {
 	p.SetSize(80, 24)
 
 	// Start on description (default)
-	if p.focusField != promptFieldDescription {
+	if p.focusField != promptFieldInput {
 		t.Fatalf("expected starting focus on description, got %v", p.focusField)
 	}
 
@@ -728,7 +728,7 @@ func TestPromptView_SwitchFocusForward(t *testing.T) {
 	}
 
 	p.SwitchFocus(true)
-	if p.focusField != promptFieldDescription {
+	if p.focusField != promptFieldInput {
 		t.Errorf("expected focus back on description after second forward switch, got %v", p.focusField)
 	}
 }
@@ -755,7 +755,7 @@ func TestPromptView_SwitchFocusForwardWithWorktree(t *testing.T) {
 	}
 
 	p.SwitchFocus(true)
-	if p.focusField != promptFieldDescription {
+	if p.focusField != promptFieldInput {
 		t.Errorf("expected focus on description after title, got %v", p.focusField)
 	}
 }
@@ -772,7 +772,7 @@ func TestPromptView_SwitchFocusBackward(t *testing.T) {
 	}
 
 	p.SwitchFocus(false)
-	if p.focusField != promptFieldDescription {
+	if p.focusField != promptFieldInput {
 		t.Errorf("expected focus back on description after second backward switch, got %v", p.focusField)
 	}
 }
@@ -799,7 +799,7 @@ func TestPromptView_SwitchFocusBackwardWithWorktree(t *testing.T) {
 	}
 
 	p.SwitchFocus(false)
-	if p.focusField != promptFieldDescription {
+	if p.focusField != promptFieldInput {
 		t.Errorf("expected focus on description after wrapping backward, got %v", p.focusField)
 	}
 }
@@ -843,8 +843,8 @@ func TestModel_SelectedWorkflowAllowsEmptyDescription(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := Model{cfg: tt.cfg, selectedWorkflow: tt.workflow}
-			if got := m.selectedWorkflowAllowsEmptyDescription(); got != tt.want {
-				t.Errorf("selectedWorkflowAllowsEmptyDescription() = %v, want %v", got, tt.want)
+			if got := m.selectedWorkflowAllowsEmptyInput(); got != tt.want {
+				t.Errorf("selectedWorkflowAllowsEmptyInput() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -858,7 +858,7 @@ func TestApplyPins_NilWorkflow_NoPins(t *testing.T) {
 	p.applyPins(nil)
 
 	// No pins should be set
-	if p.pins.description || p.pins.worktree || p.pins.branch || p.pins.checkout || p.pins.target {
+	if p.pins.input || p.pins.worktree || p.pins.branch || p.pins.checkout || p.pins.target {
 		t.Error("expected no pins when workflow is nil")
 	}
 }
@@ -867,12 +867,12 @@ func TestApplyPins_DescriptionPinned(t *testing.T) {
 	p := newPromptView(true, branchModeNew, "")
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
-		Name:        "desc-wf",
-		Description: "pre-filled description",
+		Name:  "desc-wf",
+		Input: "pre-filled description",
 	}
 	p.applyPins(wf)
 
-	if !p.pins.description {
+	if !p.pins.input {
 		t.Error("expected description pin to be set")
 	}
 	if p.Value() != "pre-filled description" {
@@ -882,7 +882,7 @@ func TestApplyPins_DescriptionPinned(t *testing.T) {
 	// visibleFields must NOT include description when pinned
 	fields := p.visibleFields()
 	for _, f := range fields {
-		if f == promptFieldDescription {
+		if f == promptFieldInput {
 			t.Error("expected description to be absent from visibleFields when pinned")
 		}
 	}
@@ -1062,7 +1062,7 @@ func TestPromptView_RenderVerification(t *testing.T) {
 		mustNotContain []string
 	}
 
-	// Note: the description textarea renders the placeholder "Describe the task..."
+	// Note: the input textarea renders the placeholder "Input for the agent..."
 	// with ANSI codes wrapping the leading "D" — check for "escribe" (sans-D)
 	// or PromptPrefix to confirm the textarea is present.
 	descPresent := PromptPrefix // the textarea prompt char signals description is rendered
@@ -1076,7 +1076,7 @@ func TestPromptView_RenderVerification(t *testing.T) {
 		},
 		{
 			name: "description-only pinned",
-			wf:   &config.WorkflowConfig{Name: "d", Description: "pinned desc"},
+			wf:   &config.WorkflowConfig{Name: "d", Input: "pinned desc"},
 			// Description textarea not rendered; pinned value submitted at create
 			mustNotContain: []string{descPresent},
 			mustContain:    []string{"Title:", "Worktree"},
@@ -1101,11 +1101,11 @@ func TestPromptView_RenderVerification(t *testing.T) {
 		{
 			name: "fully-pinned (all fields)",
 			wf: &config.WorkflowConfig{
-				Name:        "full",
-				Description: "automated",
-				Worktree:    &worktreeTrue,
-				Branch:      "auto/{{task_id}}",
-				Target:      "main",
+				Name:     "full",
+				Input:    "automated",
+				Worktree: &worktreeTrue,
+				Branch:   "auto/{{task_id}}",
+				Target:   "main",
 			},
 			// All git rows and description row are absent
 			mustNotContain: []string{descPresent, "Branch:", "Target:", "Worktree:"},

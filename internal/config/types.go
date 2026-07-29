@@ -119,6 +119,7 @@ type WorkflowEntry struct {
 var knownWorkflowFields = map[string]bool{
 	"name":                    true,
 	"description":             true,
+	"input":                   true,
 	"print":                   true,
 	"on_complete":             true,
 	"steps":                   true,
@@ -235,13 +236,23 @@ func checkRemovedGitOnComplete(node *yaml.Node) error {
 }
 
 type WorkflowConfig struct {
-	Name        string `yaml:"name"`
+	Name string `yaml:"name"`
+
+	// Description is a human-readable, one-line summary of the workflow. It is
+	// PURE METADATA: surfaced via MCP (list_workflows) so agents can choose
+	// workflows sensibly, and shown in the TUI workflow picker. It is NOT a pin
+	// and never seeds the task input. (Historically this field doubled as the
+	// input pin — see Input below — which silently hid the New Task input box;
+	// that overload was removed.)
 	Description string `yaml:"description,omitempty"`
 
-	// The following four fields pre-pin New Task screen fields. When set, the
+	// The following five fields pre-pin New Task screen fields. When set, the
 	// corresponding form field is hidden and its value supplied by the workflow.
 	// See IsFullySpec() and the prompt-screen pin logic.
 	//
+	//   Input pins the task input (task.Input; seeds {{task.input}} and step
+	//     prompts). When set, the New Task input box is hidden and this literal
+	//     is submitted as the task input.
 	//   Worktree pins the worktree toggle (task.Worktree).
 	//   Branch pins a new-branch template (forces branch-mode "new").
 	//   Checkout pins an existing branch to check out (forces branch-mode "existing").
@@ -249,6 +260,7 @@ type WorkflowConfig struct {
 	//
 	// Branch and Checkout are mutually exclusive. Setting branch/checkout/target
 	// while Worktree is pinned false is a config error (the git section is hidden).
+	Input    string `yaml:"input,omitempty"`
 	Worktree *bool  `yaml:"worktree,omitempty"`
 	Branch   string `yaml:"branch,omitempty"`
 	Checkout string `yaml:"checkout,omitempty"`
@@ -328,7 +340,7 @@ func (wf *WorkflowConfig) ValidatePins() error {
 // workflow, so the screen can be skipped entirely. Title is auto-generated and
 // never gates skip.
 func (wf *WorkflowConfig) IsFullySpec() bool {
-	if wf.Description == "" || wf.Worktree == nil {
+	if wf.Input == "" || wf.Worktree == nil {
 		return false
 	}
 	if !*wf.Worktree {
@@ -339,9 +351,13 @@ func (wf *WorkflowConfig) IsFullySpec() bool {
 }
 
 type StepConfig struct {
-	Name   string `yaml:"name"`
-	Prompt string `yaml:"prompt"`
-	Mode   string `yaml:"mode"`
+	Name string `yaml:"name"`
+	// Description is a human-readable, one-line summary of what this step does.
+	// Pure metadata, surfaced via MCP (list_workflows) so agents can reason
+	// about a workflow's shape; it is never interpolated into prompts.
+	Description string `yaml:"description,omitempty"`
+	Prompt      string `yaml:"prompt"`
+	Mode        string `yaml:"mode"`
 	// Print, when non-nil, overrides the workflow-level Print default for this step.
 	//   nil (default):    inherit workflow.Print
 	//   *false:           tmux

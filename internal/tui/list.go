@@ -696,7 +696,7 @@ func (l *listView) renderTask(task daemon.TaskInfo, index int, selected bool) st
 	// Use title or truncated description
 	title := task.Title
 	if title == "" {
-		title = task.Description
+		title = task.Input
 	}
 
 	tw := l.titleWidth()

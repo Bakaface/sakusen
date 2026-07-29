@@ -9,11 +9,11 @@ import (
 	"github.com/Bakaface/sortie/internal/task"
 )
 
-func (db *DB) CreateTask(projectID int64, title, description, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error) {
-	return db.CreateTaskWithPriority(projectID, title, description, slug, workflow, "", branch, "", "", status, task.PriorityMedium, true, images, nil)
+func (db *DB) CreateTask(projectID int64, title, input, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error) {
+	return db.CreateTaskWithPriority(projectID, title, input, slug, workflow, "", branch, "", "", status, task.PriorityMedium, true, images, nil)
 }
 
-func (db *DB) CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error) {
+func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error) {
 	var imagesJSON *string
 	if len(images) > 0 {
 		data, err := json.Marshal(images)
@@ -30,8 +30,8 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, description, slug, 
 	}
 
 	result, err := db.sqlDB.Exec(
-		`INSERT INTO tasks (project_id, title, description, slug, workflow, branch_name, branch, target_branch, checkout_branch, status, priority, worktree, images, track_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		projectID, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch, status, priority, worktreeInt, imagesJSON, trackID,
+		`INSERT INTO tasks (project_id, title, input, slug, workflow, branch_name, branch, target_branch, checkout_branch, status, priority, worktree, images, track_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		projectID, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch, status, priority, worktreeInt, imagesJSON, trackID,
 	)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, description, slug, 
 	return db.GetTask(id)
 }
 
-const taskColumns = `id, project_id, track_id, title, description, slug, workflow, status, priority, step_index, current_step, loop_iteration,
+const taskColumns = `id, project_id, track_id, title, input, slug, workflow, status, priority, step_index, current_step, loop_iteration,
 	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, exit_code, error_message, context, images, commits,
 	created_at, started_at, completed_at, updated_at`
 
@@ -324,10 +324,10 @@ func (db *DB) UpdateTaskTitle(id int64, title string) error {
 	return err
 }
 
-func (db *DB) UpdateTaskDescription(id int64, description string) error {
+func (db *DB) UpdateTaskInput(id int64, input string) error {
 	_, err := db.sqlDB.Exec(
-		"UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?",
-		description, time.Now(), id,
+		"UPDATE tasks SET input = ?, updated_at = ? WHERE id = ?",
+		input, time.Now(), id,
 	)
 	return err
 }
@@ -407,7 +407,7 @@ func (db *DB) ResetTaskForRetryAtStep(id int64, stepIdx int, stepNames []string)
 func (db *DB) ResetTaskForContinue(id int64, workflow, prompt string) error {
 	if prompt != "" {
 		_, err := db.sqlDB.Exec(
-			`UPDATE tasks SET status = ?, workflow = ?, description = ?, step_index = 0, current_step = NULL, loop_iteration = 0,
+			`UPDATE tasks SET status = ?, workflow = ?, input = ?, step_index = 0, current_step = NULL, loop_iteration = 0,
 			 exit_code = NULL, error_message = NULL, started_at = NULL,
 			 completed_at = NULL, updated_at = ? WHERE id = ?`,
 			task.StatusPending, workflow, prompt, time.Now(), id,
@@ -589,7 +589,7 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	var updatedAt sql.NullTime
 
 	err := s.Scan(
-		&t.ID, &projectID, &trackID, &title, &t.Description, &slug, &workflow, &t.Status, &priority,
+		&t.ID, &projectID, &trackID, &title, &t.Input, &slug, &workflow, &t.Status, &priority,
 		&t.StepIndex, &currentStep, &t.LoopIteration,
 		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON,
 		&t.CreatedAt, &startedAt, &completedAt, &updatedAt,

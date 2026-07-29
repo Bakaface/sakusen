@@ -82,7 +82,7 @@ func (s *Server) handleContinueTask(conn net.Conn, req ContinueTaskRequest) {
 	fmt.Fprintf(&claudeMD, "# Continue Task #%d: %s\n\n", t.ID, t.Title)
 	claudeMD.WriteString("You are continuing work on a previously completed task.\n\n")
 	claudeMD.WriteString("## Task Description\n\n")
-	claudeMD.WriteString(t.Description)
+	claudeMD.WriteString(t.Input)
 	claudeMD.WriteString("\n\n")
 	if t.Context != "" {
 		claudeMD.WriteString("## Previous Context\n\n")
@@ -523,7 +523,7 @@ func (s *Server) setupTmuxDirect(taskID, projectID int64, title string) {
 	}
 	scriptFile := filepath.Join(sortieDir, "run-continue.sh")
 
-	initialPrompt := strings.TrimSpace(t.Description)
+	initialPrompt := strings.TrimSpace(t.Input)
 	if err := writeClaudeScript(scriptFile, pc.cfg.Claude.Command, pc.cfg.Claude.Yolo, "", initialPrompt, pc.cfg.Claude.DefaultArgs); err != nil {
 		log.Printf("%sFailed to write claude script for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
 		return

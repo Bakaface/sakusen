@@ -125,7 +125,7 @@ type Task struct {
 	ProjectID        int64
 	TrackID          *int64 // nil = trackless
 	Title            string
-	Description      string
+	Input            string
 	Slug             string
 	Workflow         string
 	Status           Status

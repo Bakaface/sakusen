@@ -14,18 +14,18 @@ import (
 // Validate() keeps the CLI/TUI from issuing the partial UpdateTaskField calls
 // that precede it.
 type EditArgs struct {
-	ID          int64
-	Title       *string
-	Description *string
-	Context     *string
-	Priority    *string
+	ID       int64
+	Title    *string
+	Input    *string
+	Context  *string
+	Priority *string
 }
 
 func (a EditArgs) Validate() error {
 	if a.ID <= 0 {
 		return errors.New("task id is required")
 	}
-	if a.Title == nil && a.Description == nil && a.Context == nil && a.Priority == nil {
+	if a.Title == nil && a.Input == nil && a.Context == nil && a.Priority == nil {
 		return errors.New("at least one field must be set")
 	}
 	if a.Priority != nil && !task.IsValidPriority(*a.Priority) {
@@ -63,8 +63,8 @@ func RunEdit(ctx Ctx, args EditArgs) (Result, error) {
 			return Result{}, err
 		}
 	}
-	if args.Description != nil {
-		if err := apply("description", *args.Description); err != nil {
+	if args.Input != nil {
+		if err := apply("input", *args.Input); err != nil {
 			return Result{}, err
 		}
 	}
@@ -91,7 +91,7 @@ func RunEdit(ctx Ctx, args EditArgs) (Result, error) {
 func init() {
 	Registry["edit"] = Action{
 		ID:   "edit",
-		Help: "Edit a task's title/description/context/priority",
+		Help: "Edit a task's title/input/context/priority",
 		Run: func(ctx Ctx, a Args) (Result, error) {
 			return RunEdit(ctx, a.(EditArgs))
 		},
@@ -123,14 +123,14 @@ func init() {
 				switch key {
 				case "title":
 					args.Title = &val
-				case "description":
-					args.Description = &val
+				case "input":
+					args.Input = &val
 				case "context":
 					args.Context = &val
 				case "priority":
 					args.Priority = &val
 				default:
-					return nil, fmt.Errorf("unknown field %q (allowed: title, description, context, priority)", key)
+					return nil, fmt.Errorf("unknown field %q (allowed: title, input, context, priority)", key)
 				}
 			}
 			return args, nil

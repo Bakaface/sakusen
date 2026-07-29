@@ -28,7 +28,7 @@ type promptField int
 
 const (
 	promptFieldTitle promptField = iota
-	promptFieldDescription
+	promptFieldInput
 	promptFieldBranch
 	promptFieldCheckout
 	promptFieldTargetBranch
@@ -51,23 +51,23 @@ const (
 // promptPins records which New Task fields are pinned by the selected workflow.
 // A pinned field is hidden from the form and its value supplied by the workflow.
 type promptPins struct {
-	description bool // pinned by wf.Description
-	worktree    bool // pinned by wf.Worktree
-	branch      bool // pinned by wf.Branch
-	checkout    bool // pinned by wf.Checkout
-	target      bool // pinned by wf.Target
+	input    bool // pinned by wf.Input
+	worktree bool // pinned by wf.Worktree
+	branch   bool // pinned by wf.Branch
+	checkout bool // pinned by wf.Checkout
+	target   bool // pinned by wf.Target
 }
 
 // promptSaved holds user-entered field values displaced by workflow pins, so
 // switching to another workflow restores them instead of losing typed input.
 // Each entry is only meaningful while the corresponding pin flag is set.
 type promptSaved struct {
-	description string
-	worktree    bool
-	branchMode  branchMode
-	branch      string
-	checkout    string
-	target      string
+	input      string
+	worktree   bool
+	branchMode branchMode
+	branch     string
+	checkout   string
+	target     string
 }
 
 type promptView struct {
@@ -113,7 +113,7 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 	ta.Prompt = PromptPrefix
 	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(promptColor)
 	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(promptColor)
-	ta.Placeholder = "Describe the task..."
+	ta.Placeholder = "Input for the agent..."
 	ta.Focus()
 	ta.CharLimit = 0 // unlimited
 	ta.ShowLineNumbers = false
@@ -146,7 +146,7 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 		branchInput:       bi,
 		checkoutInput:     ci,
 		targetBranchInput: ti,
-		focusField:        promptFieldDescription,
+		focusField:        promptFieldInput,
 		worktree:          defaultWorktree,
 		branchMode:        defaultBranchMode,
 		defaultBaseBranch: defaultBaseBranch,
@@ -253,7 +253,7 @@ func (p *promptView) Reset() {
 	p.saved = promptSaved{}
 	// Restore workflowCursor to the saved default workflow position
 	p.workflowCursor = p.defaultWorkflowCursor()
-	p.focusInput(promptFieldDescription)
+	p.focusInput(promptFieldInput)
 	p.recalcHeight()
 }
 
@@ -269,8 +269,8 @@ func (p *promptView) Reset() {
 func (p *promptView) applyPins(wf *config.WorkflowConfig) {
 	// Undo the previous workflow's pins: restore each displaced user value so
 	// only pin-supplied literals are replaced, never typed input.
-	if p.pins.description {
-		p.textarea.SetValue(p.saved.description)
+	if p.pins.input {
+		p.textarea.SetValue(p.saved.input)
 	}
 	if p.pins.worktree {
 		p.worktree = p.saved.worktree
@@ -291,10 +291,10 @@ func (p *promptView) applyPins(wf *config.WorkflowConfig) {
 	p.saved = promptSaved{}
 
 	if wf != nil {
-		if wf.Description != "" {
-			p.saved.description = p.textarea.Value()
-			p.textarea.SetValue(wf.Description)
-			p.pins.description = true
+		if wf.Input != "" {
+			p.saved.input = p.textarea.Value()
+			p.textarea.SetValue(wf.Input)
+			p.pins.input = true
 		}
 		if wf.Worktree != nil {
 			p.saved.worktree = p.worktree
@@ -399,7 +399,7 @@ func (p *promptView) focusInput(field promptField) {
 	switch field {
 	case promptFieldTitle:
 		p.titleInput.Focus()
-	case promptFieldDescription:
+	case promptFieldInput:
 		p.textarea.Focus()
 	case promptFieldBranch:
 		p.branchInput.Focus()
@@ -414,8 +414,8 @@ func (p *promptView) focusInput(field promptField) {
 // based on the current worktree and branch mode state.
 func (p *promptView) visibleFields() []promptField {
 	fields := []promptField{promptFieldTitle}
-	if !p.pins.description {
-		fields = append(fields, promptFieldDescription)
+	if !p.pins.input {
+		fields = append(fields, promptFieldInput)
 	}
 	if p.worktree {
 		if p.branchMode == branchModeNew {
@@ -439,7 +439,7 @@ func (p *promptView) ToggleWorktree() {
 		return
 	}
 	p.worktree = !p.worktree
-	if !p.worktree && p.focusField != promptFieldDescription && p.focusField != promptFieldTitle {
+	if !p.worktree && p.focusField != promptFieldInput && p.focusField != promptFieldTitle {
 		p.focusFirstVisible()
 	}
 }
@@ -460,8 +460,8 @@ func (p *promptView) ToggleBranchMode() {
 // focusFirstVisible focuses the first unpinned/visible field, preferring the
 // description when it is open.
 func (p *promptView) focusFirstVisible() {
-	if !p.pins.description {
-		p.focusInput(promptFieldDescription)
+	if !p.pins.input {
+		p.focusInput(promptFieldInput)
 		return
 	}
 	if fields := p.visibleFields(); len(fields) > 0 {
@@ -475,7 +475,7 @@ func (p *promptView) Update(msg tea.Msg) tea.Cmd {
 	switch p.focusField {
 	case promptFieldTitle:
 		p.titleInput, cmd = p.titleInput.Update(msg)
-	case promptFieldDescription:
+	case promptFieldInput:
 		// Pre-expand textarea to max height so the internal viewport doesn't
 		// scroll when content grows beyond the current height.
 		maxHeight := p.maxHeight()
@@ -599,7 +599,7 @@ func (p *promptView) hasVisibleGitField() bool {
 // forward=true goes main→git→workflow; forward=false reverses.
 func (p *promptView) CyclePane(forward bool) {
 	isMainField := p.activePane == paneTask &&
-		(p.focusField == promptFieldTitle || p.focusField == promptFieldDescription)
+		(p.focusField == promptFieldTitle || p.focusField == promptFieldInput)
 	isGitField := p.activePane == paneTask &&
 		(p.focusField == promptFieldBranch || p.focusField == promptFieldCheckout || p.focusField == promptFieldTargetBranch)
 	hasGit := p.hasVisibleGitField()
@@ -627,19 +627,19 @@ func (p *promptView) CyclePane(forward bool) {
 			if hasWorkflows {
 				p.FocusWorkflowPane()
 			} else {
-				p.FocusOn(promptFieldDescription)
+				p.FocusOn(promptFieldInput)
 			}
 		} else {
-			p.FocusOn(promptFieldDescription)
+			p.FocusOn(promptFieldInput)
 		}
 	case p.activePane == paneWorkflow:
 		if forward {
-			p.FocusOn(promptFieldDescription)
+			p.FocusOn(promptFieldInput)
 		} else {
 			if hasGit {
 				p.FocusGitSection()
 			} else {
-				p.FocusOn(promptFieldDescription)
+				p.FocusOn(promptFieldInput)
 			}
 		}
 	}
@@ -816,9 +816,9 @@ func (p *promptView) View() string {
 	b.WriteString(p.titleInput.View())
 	b.WriteString("\n\n")
 
-	// Description textarea — skipped entirely when the workflow pins the
-	// description (the pinned text is what gets submitted).
-	if !p.pins.description {
+	// Input textarea — skipped entirely when the workflow pins the input
+	// (the pinned text is what gets submitted).
+	if !p.pins.input {
 		// Pre-expand textarea to max height so its internal viewport doesn't
 		// scroll, then truncate the rendered output to show only the lines
 		// that contain actual content, achieving the auto-grow visual effect.
@@ -835,11 +835,11 @@ func (p *promptView) View() string {
 			lines = lines[:visLines]
 		}
 
-		// When the placeholder is showing, underline the first "D" in
-		// "Describe the task..." to indicate the alt+d shortcut, mirroring the
+		// When the placeholder is showing, underline the first "I" in
+		// "Input for the agent..." to indicate the alt+i shortcut, mirroring the
 		// underlined "G" in "Git" and "W" in "Workflow" labels.
-		if p.textarea.Value() == "" && p.focusField == promptFieldDescription && len(lines) > 0 {
-			lines[0] = underlineDInPlaceholder(lines[0])
+		if p.textarea.Value() == "" && p.focusField == promptFieldInput && len(lines) > 0 {
+			lines[0] = underlineIInPlaceholder(lines[0])
 		}
 
 		taStyle := lipgloss.NewStyle().PaddingLeft(2)
@@ -1030,18 +1030,18 @@ func (p *promptView) renderFramedSection(label string, borderColor lipgloss.Colo
 	return out.String()
 }
 
-// underlineDInPlaceholder injects ANSI underline codes around the first 'D'
-// byte in the textarea's rendered placeholder line. This indicates the alt+d
+// underlineIInPlaceholder injects ANSI underline codes around the first 'I'
+// byte in the textarea's rendered placeholder line. This indicates the alt+i
 // keyboard shortcut, matching the underlined "G" in "Git" and "W" in
 // "Workflow" labels. The injection works regardless of cursor blink state
 // because the underline codes (CSI 4m / CSI 24m) compose with whatever SGR
-// sequence the textarea wraps "D" with.
-func underlineDInPlaceholder(line string) string {
-	idx := strings.IndexByte(line, 'D')
+// sequence the textarea wraps "I" with.
+func underlineIInPlaceholder(line string) string {
+	idx := strings.IndexByte(line, 'I')
 	if idx < 0 {
 		return line
 	}
-	return line[:idx] + "\x1b[4mD\x1b[24m" + line[idx+1:]
+	return line[:idx] + "\x1b[4mI\x1b[24m" + line[idx+1:]
 }
 
 // indentBlock prepends prefix to every line of a multi-line string.

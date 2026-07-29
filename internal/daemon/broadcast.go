@@ -27,7 +27,7 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 	prefix := s.projectLogPrefix(a.Task.ProjectID)
 	taskTitle := a.Task.Title
 	if taskTitle == "" {
-		taskTitle = a.Task.Description
+		taskTitle = a.Task.Input
 	}
 
 	switch newState {
@@ -299,13 +299,13 @@ func (s *Server) sendError(conn net.Conn, message string) {
 
 func agentToInfo(a *agent.Agent) AgentInfo {
 	return AgentInfo{
-		ID:          a.ID,
-		TaskID:      a.Task.ID,
-		Description: a.Task.Description,
-		WorkDir:     a.WorkDir,
-		State:       AgentState(a.GetState()),
-		StartedAt:   a.StartedAt,
-		Error:       a.Error,
+		ID:        a.ID,
+		TaskID:    a.Task.ID,
+		Input:     a.Task.Input,
+		WorkDir:   a.WorkDir,
+		State:     AgentState(a.GetState()),
+		StartedAt: a.StartedAt,
+		Error:     a.Error,
 	}
 }
 
@@ -326,7 +326,7 @@ func TaskInfoFromTask(t *task.Task) TaskInfo {
 		ProjectID:        t.ProjectID,
 		TrackID:          t.TrackID, // slug enrichment needs a DB handle — see taskToInfo
 		Title:            t.Title,
-		Description:      t.Description,
+		Input:            t.Input,
 		Slug:             t.Slug,
 		Workflow:         t.Workflow,
 		Status:           string(t.Status),

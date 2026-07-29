@@ -43,8 +43,8 @@ func TestPerformSearch(t *testing.T) {
 func TestPerformSearchWithDescription(t *testing.T) {
 	l := newListView(false, "")
 	l.SetTasks([]daemon.TaskInfo{
-		{ID: 1, Title: "", Description: "Fix authentication bug", Status: "pending"},
-		{ID: 2, Title: "Add search feature", Description: "Implement vim-style search", Status: "running"},
+		{ID: 1, Title: "", Input: "Fix authentication bug", Status: "pending"},
+		{ID: 2, Title: "Add search feature", Input: "Implement vim-style search", Status: "running"},
 	})
 	// SetTasks sorts by ID descending, so order is: 2, 1
 	// Indices: 0=ID2 "Add search feature", 1=ID1 "" (uses description)

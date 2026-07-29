@@ -32,7 +32,7 @@ func TestRunCreate_WorktreePassthrough(t *testing.T) {
 			}}
 
 			_, err := action.RunCreate(action.Ctx{Client: fc}, action.CreateArgs{
-				Description: "do the thing",
+				Input:       "do the thing",
 				ProjectPath: "/tmp/proj",
 				Worktree:    tc.in,
 			})

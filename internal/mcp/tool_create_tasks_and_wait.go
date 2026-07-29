@@ -16,7 +16,7 @@ import (
 // Kept structurally identical to CreateTaskArgs (sans WaitForReady) so agents
 // can copy-paste a spec between tools without remapping fields.
 type ChildTaskSpec struct {
-	Description    string   `json:"description,omitempty" jsonschema:"What the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
+	Input          string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
 	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
 	Workflow       string   `json:"workflow,omitempty" jsonschema:"Workflow name to run. Empty selects the project's first task workflow."`
@@ -114,7 +114,7 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 		}
 		reqs[i] = daemon.CreateTaskRequest{
 			Title:          t.Title,
-			Description:    t.Description,
+			Input:          t.Input,
 			Workflow:       t.Workflow,
 			Priority:       t.Priority,
 			BranchName:     t.BranchName,

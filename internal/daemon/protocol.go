@@ -149,7 +149,7 @@ type ListTasksRequest struct {
 
 type CreateTaskRequest struct {
 	Title          string   `json:"title,omitempty"`
-	Description    string   `json:"description"`
+	Input          string   `json:"input"`
 	Workflow       string   `json:"workflow,omitempty"`
 	Priority       string   `json:"priority,omitempty"`
 	BranchName     string   `json:"branch_name,omitempty"` // user-provided branch template
@@ -264,19 +264,23 @@ type ListWorkflowsRequest struct {
 // It deliberately omits prompts and timing details — the MCP surface only
 // needs identifying information and execution-mode signals.
 type WorkflowStepSummary struct {
-	Name  string `json:"name"`
-	Mode  string `json:"mode,omitempty"`
-	Tmux  bool   `json:"tmux,omitempty"`
-	Human bool   `json:"human,omitempty"`
-	Loop  bool   `json:"loop,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"` // human-readable step summary (metadata)
+	Mode        string `json:"mode,omitempty"`
+	Tmux        bool   `json:"tmux,omitempty"`
+	Human       bool   `json:"human,omitempty"`
+	Loop        bool   `json:"loop,omitempty"`
 }
 
 // WorkflowSummary describes a single workflow available in a project. It
-// carries the pinnable New Task fields (worktree/branch/checkout/target) and
-// FullySpec so consumers can decide skip-vs-show without re-resolving config.
+// carries the pinnable New Task fields (input/worktree/branch/checkout/target)
+// and FullySpec so consumers can decide skip-vs-show without re-resolving
+// config. Description is human-readable metadata (NOT a pin); Input, when
+// non-empty, is the pinned task input.
 type WorkflowSummary struct {
 	Name            string                `json:"name"`
-	Description     string                `json:"description,omitempty"`
+	Description     string                `json:"description,omitempty"`        // human-readable summary (metadata)
+	Input           string                `json:"input,omitempty"`              // pinned task input (hides the New Task input box)
 	Worktree        *bool                 `json:"worktree,omitempty"`           // pinned worktree toggle (nil = unpinned)
 	Branch          string                `json:"branch,omitempty"`             // pinned new-branch template
 	Checkout        string                `json:"checkout,omitempty"`           // pinned existing branch to check out
@@ -498,13 +502,13 @@ const (
 )
 
 type AgentInfo struct {
-	ID          string     `json:"id"`
-	TaskID      int64      `json:"task_id"`
-	Description string     `json:"description"`
-	WorkDir     string     `json:"work_dir"`
-	State       AgentState `json:"state"`
-	StartedAt   time.Time  `json:"started_at"`
-	Error       string     `json:"error,omitempty"`
+	ID        string     `json:"id"`
+	TaskID    int64      `json:"task_id"`
+	Input     string     `json:"input"`
+	WorkDir   string     `json:"work_dir"`
+	State     AgentState `json:"state"`
+	StartedAt time.Time  `json:"started_at"`
+	Error     string     `json:"error,omitempty"`
 }
 
 type ChatInfo struct {
@@ -519,7 +523,7 @@ type TaskInfo struct {
 	ProjectName string `json:"project_name,omitempty"`
 	ProjectPath string `json:"project_path,omitempty"`
 	Title       string `json:"title"`
-	Description string `json:"description"`
+	Input       string `json:"input"`
 	Slug        string `json:"slug"`
 	Workflow    string `json:"workflow,omitempty"`
 	TrackID     *int64 `json:"track_id,omitempty"`

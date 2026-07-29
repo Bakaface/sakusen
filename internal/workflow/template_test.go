@@ -21,11 +21,11 @@ func makeLookup(tasks map[int64]*task.Task) func(int64) (*task.Task, error) {
 func TestResolveTemplate_TaskRefFields(t *testing.T) {
 	tasks := map[int64]*task.Task{
 		42: {
-			ID:          42,
-			Title:       "Refactor parser",
-			Branch:      "sortie/42-refactor",
-			Description: "Pull tokenizer out of parser.go",
-			Context:     "Done — landed in commit abc123.",
+			ID:      42,
+			Title:   "Refactor parser",
+			Branch:  "sortie/42-refactor",
+			Input:   "Pull tokenizer out of parser.go",
+			Context: "Done — landed in commit abc123.",
 		},
 	}
 
@@ -36,7 +36,7 @@ func TestResolveTemplate_TaskRefFields(t *testing.T) {
 	}{
 		{"title", "title={{tasks.42.title}}", "title=Refactor parser"},
 		{"branch", "branch={{tasks.42.branch}}", "branch=sortie/42-refactor"},
-		{"description", "desc={{tasks.42.description}}", "desc=Pull tokenizer out of parser.go"},
+		{"description", "desc={{tasks.42.input}}", "desc=Pull tokenizer out of parser.go"},
 		{"context", "ctx={{tasks.42.context}}", "ctx=Done — landed in commit abc123."},
 	}
 
@@ -105,9 +105,9 @@ func TestResolveTemplate_UnsupportedField(t *testing.T) {
 
 func TestResolveTemplate_SelfReference(t *testing.T) {
 	// A task can reference itself; it resolves to its own current field value.
-	self := &task.Task{ID: 7, Title: "Self-task", Description: "self desc"}
+	self := &task.Task{ID: 7, Title: "Self-task", Input: "self desc"}
 	ctx := &TemplateContext{
-		Task:       TaskVars{ID: 7, Title: "Self-task", Description: "self desc"},
+		Task:       TaskVars{ID: 7, Title: "Self-task", Input: "self desc"},
 		TaskLookup: makeLookup(map[int64]*task.Task{7: self}),
 	}
 	got := ResolveTemplate("{{tasks.7.title}}", ctx)
@@ -117,24 +117,24 @@ func TestResolveTemplate_SelfReference(t *testing.T) {
 }
 
 func TestResolveTaskRefs_EndToEnd(t *testing.T) {
-	// Simulates the engine's pre-expansion: {{task.description}} contains
+	// Simulates the engine's pre-expansion: {{task.input}} contains
 	// {{tasks.42.title}}, and after pre-resolution the step prompt
-	// "{{task.description}}" expands to the full text.
+	// "{{task.input}}" expands to the full text.
 	tasks := map[int64]*task.Task{
 		42: {ID: 42, Title: "Underlying refactor"},
 	}
 	rawDescription := "Build on top of: {{tasks.42.title}}"
-	resolvedDescription := ResolveTaskRefs(rawDescription, makeLookup(tasks))
-	if resolvedDescription != "Build on top of: Underlying refactor" {
-		t.Fatalf("pre-resolution failed: %q", resolvedDescription)
+	resolvedInput := ResolveTaskRefs(rawDescription, makeLookup(tasks))
+	if resolvedInput != "Build on top of: Underlying refactor" {
+		t.Fatalf("pre-resolution failed: %q", resolvedInput)
 	}
 
 	ctx := &TemplateContext{
-		Task: TaskVars{Description: resolvedDescription},
+		Task: TaskVars{Input: resolvedInput},
 		// TaskLookup intentionally left nil here — pre-resolution should make
 		// the final ResolveTemplate pass independent of the lookup table.
 	}
-	final := ResolveTemplate("{{task.description}}", ctx)
+	final := ResolveTemplate("{{task.input}}", ctx)
 	if final != "Build on top of: Underlying refactor" {
 		t.Errorf("final template got %q", final)
 	}

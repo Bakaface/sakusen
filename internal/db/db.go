@@ -83,6 +83,7 @@ var migrations = []func(db *DB) error{
 	migrateV19,
 	migrateV20,
 	migrateV21,
+	migrateV22,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -392,6 +393,56 @@ func migrateV21(db *DB) error {
 		return fmt.Errorf("failed to add description column to tracks: %w", err)
 	}
 	return nil
+}
+
+// migrateV22 renames the tasks.description column to tasks.input. The field was
+// repurposed: `description` at the workflow/step level is now human-readable
+// metadata, while the task's user-supplied input (formerly stored as
+// "description") is now "input" — seeding {{task.input}} and step prompts.
+// SQLite supports RENAME COLUMN since 3.25 (modernc.org/sqlite is well past it).
+//
+// The rename is guarded by a column-existence check so replaying the ladder on
+// a database that already has the final schema (e.g. a fresh install rolled
+// back to an earlier version) is a no-op rather than an error.
+func migrateV22(db *DB) error {
+	hasDescription, err := db.tasksHasColumn("description")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tasks columns: %w", err)
+	}
+	if !hasDescription {
+		return nil // already renamed (or a fresh schema that never had it)
+	}
+	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks RENAME COLUMN description TO input`); err != nil {
+		return fmt.Errorf("failed to rename tasks.description to input: %w", err)
+	}
+	return nil
+}
+
+// tasksHasColumn reports whether the tasks table has a column with the given
+// name, via PRAGMA table_info.
+func (db *DB) tasksHasColumn(name string) (bool, error) {
+	rows, err := db.sqlDB.Query(`PRAGMA table_info(tasks)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			colName    string
+			colType    string
+			notNull    int
+			dfltValue  sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if colName == name {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (db *DB) Path() string {

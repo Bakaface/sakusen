@@ -204,7 +204,7 @@ func (m Model) addTaskDependency(taskID, blockedByID int64) tea.Cmd {
 	})
 }
 
-func (m Model) createTaskWithPrompt(title, description, branchName string, worktree bool, images []string, targetBranch, checkoutBranch string) tea.Cmd {
+func (m Model) createTaskWithPrompt(title, input, branchName string, worktree bool, images []string, targetBranch, checkoutBranch string) tea.Cmd {
 	return func() tea.Msg {
 		if m.client == nil {
 			return nil
@@ -216,7 +216,7 @@ func (m Model) createTaskWithPrompt(title, description, branchName string, workt
 		worktreeChoice := worktree
 		args := action.CreateArgs{
 			Title:       title,
-			Description: description,
+			Input:       input,
 			Workflow:    m.selectedWorkflow,
 			Branch:      branchName,
 			Target:      targetBranch,
@@ -246,8 +246,8 @@ func (m Model) handleEditorResult(path string) tea.Cmd {
 			return errorMsg(fmt.Errorf("failed to read temp file: %w", err))
 		}
 
-		description := strings.TrimSpace(string(data))
-		if description == "" {
+		input := strings.TrimSpace(string(data))
+		if input == "" {
 			return nil // User cancelled
 		}
 
@@ -256,7 +256,7 @@ func (m Model) handleEditorResult(path string) tea.Cmd {
 		}
 
 		res, err := action.RunCreate(m.actionCtx(), action.CreateArgs{
-			Description: description,
+			Input:       input,
 			Workflow:    m.selectedWorkflow,
 			ProjectPath: m.projectPath,
 		})
@@ -289,8 +289,8 @@ func (m Model) handleFieldEditorResult(msg editorFieldFinishedMsg) tea.Cmd {
 		switch msg.field {
 		case "title":
 			editArgs.Title = &value
-		case "description":
-			editArgs.Description = &value
+		case "input":
+			editArgs.Input = &value
 		case "context":
 			editArgs.Context = &value
 		default:

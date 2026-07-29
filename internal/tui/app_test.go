@@ -2942,7 +2942,7 @@ func TestYDEmptyDescription_NoStatusMessage(t *testing.T) {
 		view:         viewTaskInfo,
 		pendingChord: "y",
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "", Context: "ctx"}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "", Context: "ctx"}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
@@ -2963,7 +2963,7 @@ func TestYCEmptyContext_NoStatusMessage(t *testing.T) {
 		view:         viewTaskInfo,
 		pendingChord: "y",
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "desc", Context: ""}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "desc", Context: ""}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}
@@ -3599,11 +3599,11 @@ func TestExecRunTask_FullyPinned(t *testing.T) {
 		cfg: &config.Config{
 			Workflows: []config.WorkflowConfig{
 				{
-					Name:        "pinned-wf",
-					Description: "Do the thing",
-					Worktree:    &worktreeTrue,
-					Branch:      "sortie/{{task_id}}-auto",
-					Target:      "main",
+					Name:     "pinned-wf",
+					Input:    "Do the thing",
+					Worktree: &worktreeTrue,
+					Branch:   "sortie/{{task_id}}-auto",
+					Target:   "main",
 				},
 			},
 		},
@@ -3628,11 +3628,11 @@ func fullyPinnedConfig() *config.Config {
 	return &config.Config{
 		Workflows: []config.WorkflowConfig{
 			{
-				Name:        "pinned-wf",
-				Description: "Do the thing",
-				Worktree:    &worktreeTrue,
-				Branch:      "sortie/{{task_id}}-auto",
-				Target:      "main",
+				Name:     "pinned-wf",
+				Input:    "Do the thing",
+				Worktree: &worktreeTrue,
+				Branch:   "sortie/{{task_id}}-auto",
+				Target:   "main",
 			},
 		},
 	}
@@ -3878,11 +3878,11 @@ func TestLaunchWorkflow_FullyPinned(t *testing.T) {
 		cfg: &config.Config{
 			Workflows: []config.WorkflowConfig{
 				{
-					Name:        "auto-wf",
-					Description: "Automated task",
-					Worktree:    &worktreeTrue,
-					Branch:      "sortie/{{task_id}}-auto",
-					Target:      "main",
+					Name:     "auto-wf",
+					Input:    "Automated task",
+					Worktree: &worktreeTrue,
+					Branch:   "sortie/{{task_id}}-auto",
+					Target:   "main",
 				},
 			},
 		},
@@ -3914,8 +3914,8 @@ func TestLaunchWorkflow_PartiallyPinned(t *testing.T) {
 		cfg: &config.Config{
 			Workflows: []config.WorkflowConfig{
 				{
-					Name:        "partial-wf",
-					Description: "Pinned description",
+					Name:  "partial-wf",
+					Input: "Pinned description",
 					// Worktree, Branch, Target not pinned → not fully spec
 				},
 			},
@@ -3932,7 +3932,7 @@ func TestLaunchWorkflow_PartiallyPinned(t *testing.T) {
 	// Description is pinned → should NOT appear in visibleFields.
 	fields := updated.prompt.visibleFields()
 	for _, f := range fields {
-		if f == promptFieldDescription {
+		if f == promptFieldInput {
 			t.Error("expected description to be absent from visibleFields (it is pinned)")
 		}
 	}
@@ -3973,7 +3973,7 @@ func TestLaunchWorkflow_Unpinned(t *testing.T) {
 		if f == promptFieldTitle {
 			hasTitle = true
 		}
-		if f == promptFieldDescription {
+		if f == promptFieldInput {
 			hasDesc = true
 		}
 	}
@@ -3981,7 +3981,7 @@ func TestLaunchWorkflow_Unpinned(t *testing.T) {
 		t.Error("expected promptFieldTitle in visibleFields for unpinned workflow")
 	}
 	if !hasDesc {
-		t.Error("expected promptFieldDescription in visibleFields for unpinned workflow")
+		t.Error("expected promptFieldInput in visibleFields for unpinned workflow")
 	}
 	if cmd != nil {
 		t.Error("expected nil cmd for unpinned workflow (prompt opened)")

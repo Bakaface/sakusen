@@ -199,8 +199,8 @@ func TestRefineTaskTitle_ManualTitleSkipsGeneration(t *testing.T) {
 func TestCreateTaskRequest_TitleField(t *testing.T) {
 	// Verify that CreateTaskRequest properly includes the Title field
 	req := CreateTaskRequest{
-		Title:       "My Manual Title",
-		Description: "task description",
+		Title: "My Manual Title",
+		Input: "task description",
 	}
 
 	if req.Title != "My Manual Title" {
@@ -208,7 +208,7 @@ func TestCreateTaskRequest_TitleField(t *testing.T) {
 	}
 
 	// Empty title should be the zero value
-	req2 := CreateTaskRequest{Description: "task description"}
+	req2 := CreateTaskRequest{Input: "task description"}
 	if req2.Title != "" {
 		t.Errorf("expected empty Title, got %q", req2.Title)
 	}

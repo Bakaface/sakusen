@@ -20,7 +20,7 @@ description: >
 ```go
 type Task struct {
     ID, ProjectID             int64
-    Title, Description, Slug  string
+    Title, Input, Slug        string
     Workflow                   string
     Status                     Status    // typed string enum
     Priority                   Priority  // typed string enum
@@ -56,7 +56,7 @@ init -> pending -> running -+-> summarizing_step -> running (next step)
                             +-> failed
 ```
 
-**Title refinement**: During `init`, an async goroutine generates an AI title (haiku model, 30s timeout). On success, `FinalizeTaskIdentity()` updates title/slug/branch before transitioning to `pending`. On failure, the sanitized description is kept as title.
+**Title refinement**: During `init`, an async goroutine generates an AI title (haiku model, 30s timeout). On success, `FinalizeTaskIdentity()` updates title/slug/branch before transitioning to `pending`. On failure, the sanitized input is kept as title.
 
 **Terminal:** `completed`, `failed`
 **Active:** `running`, `awaiting-approval`, `tmux`, `finalizing`, `summarizing`, `summarizing_step`, `merge-blocked`

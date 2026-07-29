@@ -44,8 +44,8 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt.FocusOn(promptFieldTitle)
 		return m, nil
 
-	case key.Matches(msg, pk.FocusDescription):
-		m.prompt.FocusOn(promptFieldDescription)
+	case key.Matches(msg, pk.FocusInput):
+		m.prompt.FocusOn(promptFieldInput)
 		return m, nil
 
 	case key.Matches(msg, pk.FocusGit):
@@ -92,7 +92,7 @@ func (m Model) handleTaskPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePromptSubmit()
 
 	case key.Matches(msg, pk.Editor):
-		if m.prompt.focusField == promptFieldDescription {
+		if m.prompt.focusField == promptFieldInput {
 			return m, m.openEditorForPrompt()
 		}
 		cmd := m.prompt.Update(msg)
@@ -133,7 +133,7 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 
 	// New task mode
 	checkoutBranch := m.prompt.CheckoutBranch()
-	if description == "" && checkoutBranch == "" && !m.selectedWorkflowAllowsEmptyDescription() {
+	if description == "" && checkoutBranch == "" && !m.selectedWorkflowAllowsEmptyInput() {
 		m.prompt.validationError = "description required"
 		return m, nil
 	}
@@ -161,11 +161,11 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 	return m, deferred
 }
 
-// selectedWorkflowAllowsEmptyDescription returns true when the workflow currently
-// selected in the prompt pins a description (the pin supplies it) or has tmux as
+// selectedWorkflowAllowsEmptyInput returns true when the workflow currently
+// selected in the prompt pins an input (the pin supplies it) or has tmux as
 // its first step (the user drives the session manually). Either case lets the
-// user submit without typing a description.
-func (m Model) selectedWorkflowAllowsEmptyDescription() bool {
+// user submit without typing an input.
+func (m Model) selectedWorkflowAllowsEmptyInput() bool {
 	if m.cfg == nil {
 		return false
 	}
@@ -173,7 +173,7 @@ func (m Model) selectedWorkflowAllowsEmptyDescription() bool {
 	if wf == nil {
 		return false
 	}
-	return wf.Description != "" || wf.FirstStepIsTmux()
+	return wf.Input != "" || wf.FirstStepIsTmux()
 }
 
 // animationEnabled returns true if the sortie animation is configured on.

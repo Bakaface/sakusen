@@ -11,11 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// workflowAllowsEmptyDescription returns true when the named workflow can be
-// started without an explicit -d/--description. This holds when the workflow
-// pins a description (the pin supplies it) or when its first step runs in tmux
+// workflowAllowsEmptyInput returns true when the named workflow can be
+// started without an explicit -i/--input. This holds when the workflow
+// pins an input (the pin supplies it) or when its first step runs in tmux
 // (the user drives the session interactively).
-func workflowAllowsEmptyDescription(cfg *config.Config, workflowName string) bool {
+func workflowAllowsEmptyInput(cfg *config.Config, workflowName string) bool {
 	if cfg == nil {
 		return false
 	}
@@ -23,7 +23,7 @@ func workflowAllowsEmptyDescription(cfg *config.Config, workflowName string) boo
 	if wf == nil {
 		return false
 	}
-	return wf.Description != "" || wf.FirstStepIsTmux()
+	return wf.Input != "" || wf.FirstStepIsTmux()
 }
 
 // taskTableRow holds the display fields for a single row in the task list table.
@@ -86,7 +86,7 @@ func completeTaskIDs(statuses ...task.Status) func(*cobra.Command, []string, str
 			}
 			title := t.Title
 			if title == "" {
-				title = truncateStr(t.Description, 40)
+				title = truncateStr(t.Input, 40)
 			}
 			completions = append(completions, fmt.Sprintf("%d\t[%s] %s", t.ID, t.Status, title))
 		}

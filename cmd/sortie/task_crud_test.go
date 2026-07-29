@@ -19,7 +19,7 @@ func TestCreateCmd_MissingDescription(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing description")
 	}
-	if got := err.Error(); got != "description is required (provide as argument or via stdin)" {
+	if got := err.Error(); got != "input is required (provide as argument or via stdin)" {
 		t.Errorf("unexpected error: %s", got)
 	}
 }
@@ -88,7 +88,7 @@ func TestEditCmd_NoFlags(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no field flags provided")
 	}
-	expected := "at least one field flag is required (--title, --description, --context, --priority)"
+	expected := "at least one field flag is required (--title, --input, --context, --priority)"
 	if got := err.Error(); got != expected {
 		t.Errorf("unexpected error: %q, want %q", got, expected)
 	}
@@ -139,10 +139,10 @@ func TestWorkflowAllowsEmptyDescription(t *testing.T) {
 		},
 	}
 	pinned := config.WorkflowConfig{
-		// Description is pre-pinned by the workflow, so no -d flag is needed.
-		Name:        "pinned",
-		Description: "pre-set description",
-		Print:       true,
+		// Input is pre-pinned by the workflow, so no -i flag is needed.
+		Name:  "pinned",
+		Input: "pre-set input",
+		Print: true,
 		Steps: []config.StepConfig{
 			{Name: "implement"},
 		},
@@ -152,22 +152,22 @@ func TestWorkflowAllowsEmptyDescription(t *testing.T) {
 		Workflows: []config.WorkflowConfig{plain, tmuxFirst, pinned},
 	}
 
-	if workflowAllowsEmptyDescription(nil, "anything") {
+	if workflowAllowsEmptyInput(nil, "anything") {
 		t.Error("nil cfg should never allow empty descriptions")
 	}
-	if workflowAllowsEmptyDescription(cfg, "default") {
+	if workflowAllowsEmptyInput(cfg, "default") {
 		t.Error("print workflow should not allow empty descriptions")
 	}
-	if !workflowAllowsEmptyDescription(cfg, "interact") {
+	if !workflowAllowsEmptyInput(cfg, "interact") {
 		t.Error("tmux-first workflow should allow empty descriptions")
 	}
 	// Empty workflow name resolves to the first registered workflow,
 	// which in this fixture is the headless (print=true) workflow.
-	if workflowAllowsEmptyDescription(cfg, "") {
+	if workflowAllowsEmptyInput(cfg, "") {
 		t.Error("empty workflow name should resolve to first workflow (print=true)")
 	}
 	// A workflow that pins its own description allows an empty -d flag.
-	if !workflowAllowsEmptyDescription(cfg, "pinned") {
+	if !workflowAllowsEmptyInput(cfg, "pinned") {
 		t.Error("description-pinned workflow should allow empty descriptions")
 	}
 }

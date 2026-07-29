@@ -7,7 +7,7 @@ irrecoverably destructive operations**.
 ## Critical Invariants
 
 - **No irrecoverable operations**: the surface is `create_task`, `get_task`, `list_tasks`,
-  `list_workflows`, `retry_task`, `advance_task`, `update_task_description`,
+  `list_workflows`, `retry_task`, `advance_task`, `update_task_input`,
   `update_task_dependencies`, `create_tasks_and_wait`, `wait_for_tasks`,
   `update_step_context`, `create_track`, `update_track_context`,
   `update_track_description`, `list_tracks`. Do not add
@@ -44,7 +44,7 @@ irrecoverably destructive operations**.
 | `tool_list_workflows.go` | `list_workflows` tool definition + handler |
 | `tool_retry_task.go` | `retry_task` tool — full or from-step retry |
 | `tool_advance_task.go` | `advance_task` tool — mark a tmux step done (next step or finalize) |
-| `tool_update_task_description.go` | `update_task_description` tool definition + handler |
+| `tool_update_task_input.go` | `update_task_input` tool definition + handler |
 | `tool_update_task_dependencies.go` | `update_task_dependencies` tool — add/remove blocked_by edges |
 | `tool_update_step_context.go` | `update_step_context` tool definition + handler |
 | `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |

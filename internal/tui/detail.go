@@ -134,7 +134,7 @@ func (d *detailView) headerLines() int {
 	if d.task != nil && d.width > 0 {
 		taskTitle := d.task.Title
 		if taskTitle == "" {
-			taskTitle = d.task.Description
+			taskTitle = d.task.Input
 		}
 		titleText := fmt.Sprintf("#%d %s", d.task.ID, taskTitle)
 		rendered := lipgloss.NewStyle().Width(d.width).Render(titleText)
@@ -245,7 +245,7 @@ func (d *detailView) View() string {
 	// Task title with word wrapping
 	taskTitle := d.task.Title
 	if taskTitle == "" {
-		taskTitle = d.task.Description
+		taskTitle = d.task.Input
 	}
 	titleText := fmt.Sprintf("#%d %s", d.task.ID, taskTitle)
 	wrappedTitle := subHeaderStyle.Width(d.width).Render("  " + titleText)

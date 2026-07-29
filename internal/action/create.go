@@ -11,16 +11,16 @@ import (
 
 // CreateArgs collects every option supported by `sortie create` and the TUI
 // new-task prompt. Empty Title is allowed: the daemon falls back to an
-// AI-derived (or branch-derived) title when the description / checkout branch
+// AI-derived (or branch-derived) title when the input / checkout branch
 // makes that meaningful.
 type CreateArgs struct {
-	Title       string
-	Description string
-	Priority    string
-	Branch      string
-	Workflow    string
-	Target      string
-	Checkout    string
+	Title    string
+	Input    string
+	Priority string
+	Branch   string
+	Workflow string
+	Target   string
+	Checkout string
 	// Worktree is the explicit worktree choice. nil means "no explicit choice" —
 	// the daemon then defers to the workflow's worktree pin, falling back to the
 	// project default. A non-nil value (a real user choice) overrides both. Leaving
@@ -55,7 +55,7 @@ func RunCreate(ctx Ctx, args CreateArgs) (Result, error) {
 
 	req := daemon.CreateTaskRequest{
 		Title:          args.Title,
-		Description:    strings.TrimSpace(args.Description),
+		Input:          strings.TrimSpace(args.Input),
 		Workflow:       args.Workflow,
 		Priority:       args.Priority,
 		BranchName:     args.Branch,
@@ -88,14 +88,14 @@ func init() {
 		Run: func(ctx Ctx, a Args) (Result, error) {
 			return RunCreate(ctx, a.(CreateArgs))
 		},
-		// Palette form: ":create <description...>" — flag-bearing forms come
+		// Palette form: ":create <input...>" — flag-bearing forms come
 		// through Cobra in the CLI, not the palette.
 		Parse: func(raw string) (Args, error) {
 			raw = strings.TrimSpace(raw)
 			if raw == "" {
-				return nil, errors.New("expected: create <description>")
+				return nil, errors.New("expected: create <input>")
 			}
-			return CreateArgs{Description: raw}, nil
+			return CreateArgs{Input: raw}, nil
 		},
 	}
 }

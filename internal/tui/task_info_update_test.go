@@ -89,7 +89,7 @@ func TestTaskInfoView_ShowsMetadata(t *testing.T) {
 	v.SetTask(&daemon.TaskInfo{
 		ID:          14,
 		Title:       "Test task",
-		Description: "Some description",
+		Input:       "Some description",
 		Status:      "running",
 		Branch:      "sortie/14-test",
 		CurrentStep: "implement",
@@ -171,7 +171,7 @@ func TestHandleTaskInfoKey_YSetsPendingY(t *testing.T) {
 		taskInfo: newTaskInfoView(),
 		view:     viewTaskInfo,
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "desc", Context: "ctx"}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "desc", Context: "ctx"}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}}
@@ -195,7 +195,7 @@ func TestHandleTaskInfoKey_YDCopiesDescription(t *testing.T) {
 		view:         viewTaskInfo,
 		pendingChord: "y",
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "task description text", Context: "ctx"}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "task description text", Context: "ctx"}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
@@ -210,8 +210,8 @@ func TestHandleTaskInfoKey_YDCopiesDescription(t *testing.T) {
 	}
 	// Clipboard may fail in CI/headless environments — verify either
 	// status message (success) or error (clipboard unavailable) is set.
-	if updated.err == nil && updated.statusMessage != "Copied description to clipboard" {
-		t.Errorf("expected status message 'Copied description to clipboard', got %q", updated.statusMessage)
+	if updated.err == nil && updated.statusMessage != "Copied input to clipboard" {
+		t.Errorf("expected status message 'Copied input to clipboard', got %q", updated.statusMessage)
 	}
 }
 
@@ -224,7 +224,7 @@ func TestHandleTaskInfoKey_YCCopiesContext(t *testing.T) {
 		view:         viewTaskInfo,
 		pendingChord: "y",
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "desc", Context: "task context text"}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "desc", Context: "task context text"}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}
@@ -252,7 +252,7 @@ func TestHandleTaskInfoKey_YResetByOtherKey(t *testing.T) {
 		taskInfo: newTaskInfoView(),
 		view:     viewTaskInfo,
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "desc"}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "desc"}
 	m.taskInfo.SetTask(&task)
 
 	// Press "y" then "j" — should reset pendingY and scroll down
@@ -349,7 +349,7 @@ func TestHandleTaskInfoKey_YDEmptyDescriptionNoOp(t *testing.T) {
 		view:         viewTaskInfo,
 		pendingChord: "y",
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "", Context: "ctx"}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "", Context: "ctx"}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
@@ -373,7 +373,7 @@ func TestHandleTaskInfoKey_YCEmptyContextNoOp(t *testing.T) {
 		view:         viewTaskInfo,
 		pendingChord: "y",
 	}
-	task := daemon.TaskInfo{ID: 1, Title: "Test", Description: "desc", Context: ""}
+	task := daemon.TaskInfo{ID: 1, Title: "Test", Input: "desc", Context: ""}
 	m.taskInfo.SetTask(&task)
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}

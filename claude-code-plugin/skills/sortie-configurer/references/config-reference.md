@@ -325,9 +325,9 @@ steps:
   - name: analyzing
     prompt: |
       Analyze the requirements:
-      <task-description>
-      {{task.description}}
-      </task-description>
+      <task-input>
+      {{task.input}}
+      </task-input>
   - name: implementing
     prompt: |
       Implement based on the analysis:
@@ -371,9 +371,9 @@ steps:
   - name: implementing
     prompt: |
       Implement the following:
-      <task-description>
-      {{task.description}}
-      </task-description>
+      <task-input>
+      {{task.input}}
+      </task-input>
   - name: reviewing
     prompt: |
       Review the implementation:
@@ -407,14 +407,14 @@ steps:
 
 ## Cross-Task References (`{{tasks.<id>.<field>}}`)
 
-Reference another task's fields anywhere templates resolve. Supported fields: `title`, `branch`, `description`, `context`.
+Reference another task's fields anywhere templates resolve. Supported fields: `title`, `branch`, `input`, `context`.
 
 Two places they work, with different semantics:
 
-1. **In a task's description or context** (entered at create/edit time): the daemon validates each ref — missing task, cross-project ref, or ref to a `failed` task is a create/edit **error**. Refs to still-active tasks are **auto-added as `blocked_by` dependencies**, so the referencing task won't start until they finish. Refs are pre-resolved (single-pass, no recursive expansion) before the description/context is inlined into step prompts.
+1. **In a task's input or context** (entered at create/edit time): the daemon validates each ref — missing task, cross-project ref, or ref to a `failed` task is a create/edit **error**. Refs to still-active tasks are **auto-added as `blocked_by` dependencies**, so the referencing task won't start until they finish. Refs are pre-resolved (single-pass, no recursive expansion) before the input/context is inlined into step prompts.
 2. **In workflow step prompts**: resolved at render time with no validation or auto-blocking — a missing task resolves to empty string with a warning log.
 
-`description` and `context` fields are multi-line — wrap them in semantic tags (see SKILL.md).
+`input` and `context` fields are multi-line — wrap them in semantic tags (see SKILL.md).
 
 ---
 
@@ -537,9 +537,9 @@ workflows:
         prompt: |
           Implement task #{{task.id}}: {{task.title}}
 
-          <task-description>
-          {{task.description}}
-          </task-description>
+          <task-input>
+          {{task.input}}
+          </task-input>
         timeout: 45m
       - name: reviewing
         prompt: |
@@ -572,13 +572,14 @@ workflows:
         prompt: |
           Implement task #{{task.id}}: {{task.title}}
 
-          <task-description>
-          {{task.description}}
-          </task-description>
+          <task-input>
+          {{task.input}}
+          </task-input>
 
   # Fully-pinned: New Task screen is skipped; task created immediately
   - name: housekeeping
-    description: "Run standard codebase maintenance: linting, dead code removal, dependency updates"
+    description: "Run standard codebase maintenance: linting, dead code removal, dependency updates"  # metadata only
+    input: "Run standard codebase maintenance: linting, dead code removal, dependency updates"        # pins the task input
     worktree: true
     branch: sortie/housekeeping-{{task.id}}
     target: main

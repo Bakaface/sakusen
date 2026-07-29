@@ -831,7 +831,7 @@ workflows:
   - name: default
     steps:
       - name: implement
-        prompt: "Implement {{task.description}}"
+        prompt: "Implement {{task.input}}"
 `), 0644)
 
 	// Simulate the 3-layer loading: defaults -> global .sortie.yml -> project .sortie.yml
@@ -2032,38 +2032,38 @@ func TestIsFullySpec(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "description missing",
+			name: "input missing",
 			wf:   WorkflowConfig{Name: "w", Worktree: &trueVal, Branch: "b", Target: "t"},
 			want: false,
 		},
 		{
 			name: "worktree nil",
-			wf:   WorkflowConfig{Name: "w", Description: "d", Branch: "b", Target: "t"},
+			wf:   WorkflowConfig{Name: "w", Input: "d", Branch: "b", Target: "t"},
 			want: false,
 		},
 		{
 			name: "worktree=false is fully spec (no git section needed)",
-			wf:   WorkflowConfig{Name: "w", Description: "d", Worktree: &falseVal},
+			wf:   WorkflowConfig{Name: "w", Input: "d", Worktree: &falseVal},
 			want: true,
 		},
 		{
 			name: "worktree=true, branch set, target set",
-			wf:   WorkflowConfig{Name: "w", Description: "d", Worktree: &trueVal, Branch: "feature/x", Target: "develop"},
+			wf:   WorkflowConfig{Name: "w", Input: "d", Worktree: &trueVal, Branch: "feature/x", Target: "develop"},
 			want: true,
 		},
 		{
 			name: "worktree=true, checkout set, target set",
-			wf:   WorkflowConfig{Name: "w", Description: "d", Worktree: &trueVal, Checkout: "main", Target: "main"},
+			wf:   WorkflowConfig{Name: "w", Input: "d", Worktree: &trueVal, Checkout: "main", Target: "main"},
 			want: true,
 		},
 		{
 			name: "worktree=true, branch missing",
-			wf:   WorkflowConfig{Name: "w", Description: "d", Worktree: &trueVal, Target: "develop"},
+			wf:   WorkflowConfig{Name: "w", Input: "d", Worktree: &trueVal, Target: "develop"},
 			want: false,
 		},
 		{
 			name: "worktree=true, target missing",
-			wf:   WorkflowConfig{Name: "w", Description: "d", Worktree: &trueVal, Branch: "feature/x"},
+			wf:   WorkflowConfig{Name: "w", Input: "d", Worktree: &trueVal, Branch: "feature/x"},
 			want: false,
 		},
 	}

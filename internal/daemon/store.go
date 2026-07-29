@@ -58,7 +58,7 @@ type taskStore interface {
 	UpdateTaskPriority(id int64, priority task.Priority) error
 	UpdateTaskContext(id int64, taskContext string) error
 	UpdateTaskTitle(id int64, title string) error
-	UpdateTaskDescription(id int64, description string) error
+	UpdateTaskInput(id int64, input string) error
 	FinalizeTaskIdentity(id int64, title, slug, branch string) error
 	SetWorktreeDetached(id int64, detached bool) error
 	GetTaskCommits(id int64) ([]string, error)

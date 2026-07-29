@@ -74,10 +74,11 @@ Value options: `:set X=N`. See `command.go` `boolOptions`/`intOptions` registrie
 ```go
 type WorkflowConfig struct {
     Name                  string
-    Description           string
+    Description           string                  // human-readable metadata (picker/MCP); NOT a pin
     // Pinnable New Task screen fields — when set, the corresponding field is
     // hidden and pre-filled. IsFullySpec() returns true when all are pinned,
     // allowing the New Task screen to be skipped entirely.
+    Input                 string                  // pins the task input (seeds {{task.input}})
     Worktree              *bool                   // pins the worktree toggle
     Branch                string                  // pins a new-branch template (forces branch-mode "new")
     Checkout              string                  // pins an existing branch to check out (forces branch-mode "existing")
@@ -96,7 +97,7 @@ type WorkflowConfig struct {
 }
 ```
 
-Methods: `IsFullySpec() bool` (true when description + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false).
+Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped — note `description` is metadata and does NOT gate skip); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false).
 
 The legacy `tmux:` field is rejected at parse time with a migration error — the replacement is the inverted `Print` field.
 
@@ -155,6 +156,7 @@ Per-track workflow files live under `.sortie/tracks/<slug>/workflows/*.yml` (pro
 ```go
 type StepConfig struct {
     Name, Prompt, Mode    string
+    Description           string         // human-readable step metadata (surfaced via MCP); never interpolated
     Print                 *bool          // Override workflow-level Print; nil = inherit
     Timeout               string         // Parsed duration, default 30m (DefaultStepTimeout)
     Human                 bool           // Approval gate

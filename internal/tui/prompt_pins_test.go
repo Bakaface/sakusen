@@ -19,7 +19,7 @@ func TestApplyPins_CycleClearsStaleValues(t *testing.T) {
 	p.SetSize(80, 24)
 
 	// Workflow A pins description + a new-branch template.
-	wfA := &config.WorkflowConfig{Name: "a", Description: "descA", Branch: "feat/a", Target: "main"}
+	wfA := &config.WorkflowConfig{Name: "a", Input: "descA", Branch: "feat/a", Target: "main"}
 	p.applyPins(wfA)
 	if got := p.branchInput.Value(); got != "feat/a" {
 		t.Fatalf("after applyPins(A): branch = %q, want %q", got, "feat/a")
@@ -27,7 +27,7 @@ func TestApplyPins_CycleClearsStaleValues(t *testing.T) {
 	if got := p.textarea.Value(); got != "descA" {
 		t.Fatalf("after applyPins(A): description = %q, want %q", got, "descA")
 	}
-	if !p.pins.branch || !p.pins.description || !p.pins.target {
+	if !p.pins.branch || !p.pins.input || !p.pins.target {
 		t.Fatalf("after applyPins(A): expected branch/description/target pinned, got %+v", p.pins)
 	}
 
@@ -93,7 +93,7 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 		p.targetBranchInput.SetValue("develop")
 
 		// Workflow A pins description + branch + target: pinned literals take over.
-		wfA := &config.WorkflowConfig{Name: "a", Description: "descA", Branch: "feat/a", Target: "main"}
+		wfA := &config.WorkflowConfig{Name: "a", Input: "descA", Branch: "feat/a", Target: "main"}
 		p.applyPins(wfA)
 		if got := p.textarea.Value(); got != "descA" {
 			t.Fatalf("after applyPins(A): description = %q, want %q", got, "descA")
@@ -127,8 +127,8 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 
 		p.textarea.SetValue("my prompt text")
 
-		p.applyPins(&config.WorkflowConfig{Name: "a", Description: "descA"})
-		p.applyPins(&config.WorkflowConfig{Name: "b", Description: "descB"})
+		p.applyPins(&config.WorkflowConfig{Name: "a", Input: "descA"})
+		p.applyPins(&config.WorkflowConfig{Name: "b", Input: "descB"})
 		if got := p.textarea.Value(); got != "descB" {
 			t.Fatalf("after applyPins(B): description = %q, want %q", got, "descB")
 		}
@@ -172,10 +172,10 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 		}
 
 		// Focused field pinned away → focus moves to the first visible field.
-		p.focusInput(promptFieldDescription)
-		p.applyPins(&config.WorkflowConfig{Name: "b", Description: "pinned"})
-		if p.focusField == promptFieldDescription {
-			t.Error("focusField still promptFieldDescription after it was pinned away")
+		p.focusInput(promptFieldInput)
+		p.applyPins(&config.WorkflowConfig{Name: "b", Input: "pinned"})
+		if p.focusField == promptFieldInput {
+			t.Error("focusField still promptFieldInput after it was pinned away")
 		}
 	})
 }
@@ -290,7 +290,7 @@ func TestPromptView_PinnedGitLayoutRenders(t *testing.T) {
 	t.Run("description textarea omitted", func(t *testing.T) {
 		p := newPromptView(true, branchModeNew, "")
 		p.SetSize(80, 24)
-		p.applyPins(&config.WorkflowConfig{Name: "a", Description: "pinned body"})
+		p.applyPins(&config.WorkflowConfig{Name: "a", Input: "pinned body"})
 
 		view := p.View()
 		if strings.Contains(view, "pinned body") {

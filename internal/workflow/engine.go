@@ -440,20 +440,20 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		}
 	}
 	// Pre-resolve any {{tasks.X.field}} refs inside this task's own
-	// description / context so step prompts that inline {{task.description}}
+	// input / context so step prompts that inline {{task.input}}
 	// or {{task.context}} see the expanded text. Single-pass — nested refs
 	// in the looked-up task's fields remain verbatim.
-	resolvedDescription := ResolveTaskRefs(t.Description, e.database.GetTask)
+	resolvedInput := ResolveTaskRefs(t.Input, e.database.GetTask)
 	resolvedContext := ResolveTaskRefs(t.Context, e.database.GetTask)
 
 	tmplCtx := e.buildTemplateContext(t, TaskVars{
-		ID:          t.ID,
-		Title:       t.Title,
-		Description: resolvedDescription,
-		Context:     resolvedContext,
-		Slug:        t.Slug,
-		Branch:      t.Branch,
-		Images:      ws.imageRelPaths,
+		ID:      t.ID,
+		Title:   t.Title,
+		Input:   resolvedInput,
+		Context: resolvedContext,
+		Slug:    t.Slug,
+		Branch:  t.Branch,
+		Images:  ws.imageRelPaths,
 	}, stepContexts, loopVars)
 	tmplCtx.Children = childrenVars
 

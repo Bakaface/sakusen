@@ -36,9 +36,9 @@ workflows:
         prompt: |
           Implement task #{{task.id}}: {{task.title}}
 
-          <task-description>
-          {{task.description}}
-          </task-description>
+          <task-input>
+          {{task.input}}
+          </task-input>
 ```
 
 ## Top-Level Fields
@@ -106,7 +106,8 @@ workflows:
       - name: do
         prompt: "fix it"
   - name: housekeeping   # all fields pinned → skips New Task screen immediately
-    description: "Run standard maintenance"
+    description: "Run standard maintenance"   # metadata (workflow picker / MCP); NOT a pin
+    input: "Audit and clean the codebase."    # pins the task input
     worktree: true
     branch: sortie/housekeeping-{{task.id}}
     target: main
@@ -116,7 +117,7 @@ workflows:
         print: true
 ```
 
-"Kind" is an emergent property of pinning: the `n` key (and `:RunTask`) operates over the single flat list. Workflows that have all fields pinned (`description` + `worktree` + `branch`/`checkout` + `target`) create a task immediately without showing the New Task form. Two shortcuts: when `worktree: false` is pinned, `description` alone suffices (the git fields are N/A); workflows whose **first step runs in tmux** may be created without a description at all — the user drives the session interactively.
+"Kind" is an emergent property of pinning: the `n` key (and `:RunTask`) operates over the single flat list. Workflows that have all fields pinned (`input` + `worktree` + `branch`/`checkout` + `target`) create a task immediately without showing the New Task form. Two shortcuts: when `worktree: false` is pinned, `input` alone suffices (the git fields are N/A); workflows whose **first step runs in tmux** may be created without an input at all — the user drives the session interactively. (`description` is separate human-readable metadata, never a pin.)
 
 ### Pinnable fields
 
@@ -124,7 +125,7 @@ A workflow may pin any subset of New Task screen fields:
 
 | Field | Type | Effect |
 |---|---|---|
-| `description` | string | Pins the description; hides that field from the form |
+| `input` | string | Pins the task input; hides the input box from the form |
 | `worktree` | bool | Pins the worktree on/off toggle |
 | `branch` | string | Pins a new-branch template; forces branch-mode "new" |
 | `checkout` | string | Pins an existing branch to check out; forces branch-mode "existing" |
@@ -173,7 +174,8 @@ Splitting trades single-file readability for per-workflow editability. For tiny 
 
 ```yaml
 - name: my-workflow          # unique name (required)
-  description: "..."         # human-readable; also pins description when set
+  description: "..."         # human-readable metadata (workflow picker / MCP); NOT a pin
+  input: "..."               # optional: pins the task input (hides the New Task input box)
   print: false               # workflow-level default: false = tmux (default), true = headless claude -p
   summarizer_prompt: "..."   # custom prompt for post-completion summarizer
   worktree-sync-paths: {...} # optional per-workflow override of the project-level value
@@ -230,16 +232,16 @@ Prompt fields (`prompt`, `summarization_prompt`, `summarizer_prompt`, `system_pr
 
 ### Wrapping multi-line interpolations
 
-Several template variables expand to **multi-line** content at render time (a step's full output, a transcript, a task description). When inlined raw, the boundary between fixed prompt text and interpolated content vanishes — paragraphs of step context blend into the next instruction, and the receiving agent cannot tell where one ends and the other begins.
+Several template variables expand to **multi-line** content at render time (a step's full output, a transcript, a task input). When inlined raw, the boundary between fixed prompt text and interpolated content vanishes — paragraphs of step context blend into the next instruction, and the receiving agent cannot tell where one ends and the other begins.
 
 **Rule: wrap every multi-line interpolation in a semantic XML-style tag named after the variable.** Place the opening tag, the variable, and the closing tag each on their own line so the captured content sits between two clean boundaries:
 
 ```yaml
 prompt: |
   Implement the following:
-  <task-description>
-  {{task.description}}
-  </task-description>
+  <task-input>
+  {{task.input}}
+  </task-input>
 
   Earlier review feedback:
   <step-context name="reviewing">
@@ -251,12 +253,12 @@ Canonical tag for each multi-line variable:
 
 | Variable | Wrapping tag |
 |---|---|
-| `{{task.description}}` | `<task-description>...</task-description>` |
+| `{{task.input}}` | `<task-input>...</task-input>` |
 | `{{task.context}}` | `<task-context>...</task-context>` |
 | `{{task.images}}` | `<task-images>...</task-images>` |
 | `{{steps.<name>.context}}` | `<step-context name="<name>">...</step-context>` |
 | `{{artifacts.<name>}}` | `<step-context name="<name>">...</step-context>` (alias of the above) |
-| `{{tasks.<id>.description}}` | `<task-description id="<id>">...</task-description>` |
+| `{{tasks.<id>.input}}` | `<task-input id="<id>">...</task-input>` |
 | `{{tasks.<id>.context}}` | `<task-context id="<id>">...</task-context>` |
 | `{{children.summary}}` | `<children-summary>...</children-summary>` |
 | `{{children.<id>.context}}` | `<child-context id="<id>">...</child-context>` |
@@ -276,7 +278,7 @@ Variables marked **multi-line** must be wrapped in a semantic tag — see [Wrapp
 |---|---|
 | `{{task.id}}` | Numeric task ID |
 | `{{task.title}}` | Task title |
-| `{{task.description}}` | Full task description **(multi-line — wrap in `<task-description>`)** |
+| `{{task.input}}` | Full task input **(multi-line — wrap in `<task-input>`)** |
 | `{{task.context}}` | Task's accumulated context summary (from a prior run / continuation) **(multi-line — wrap in `<task-context>`)** |
 | `{{task.slug}}` | URL-safe slug from title |
 | `{{task.branch}}` | Resolved branch name |
@@ -288,7 +290,7 @@ Variables marked **multi-line** must be wrapped in a semantic tag — see [Wrapp
 | `{{loop.max_iterations}}` | Max loop iterations (in loops) |
 | `{{steps.<step_name>.context}}` | Context captured from a prior step's result **(multi-line — wrap in `<step-context name="<step_name>">`)** |
 | `{{artifacts.<step_name>}}` | Backward compat alias for `{{steps.<step_name>.context}}` **(multi-line — same wrapping)** |
-| `{{tasks.<id>.<field>}}` | Field of **another task** by numeric ID. Fields: `title`, `branch`, `description`, `context`. Missing task / lookup error resolves to empty. See reference: Cross-Task References. |
+| `{{tasks.<id>.<field>}}` | Field of **another task** by numeric ID. Fields: `title`, `branch`, `input`, `context`. Missing task / lookup error resolves to empty. See reference: Cross-Task References. |
 | `{{children.summary}}` | Digest of all child tasks after a `create_tasks_and_wait` resume **(multi-line — wrap in `<children-summary>`)** |
 | `{{children.<id>.<field>}}` | Field of a specific child task. Fields: `id`, `title`, `status` (`completed`/`failed`), `context`. See reference: Child Task Orchestration. |
 
@@ -322,14 +324,14 @@ When the user describes what they want, follow this:
 3. **"Interactive tmux session"** → This is the default — omit `print` (or set `print: false`). Set `print: true` only to opt a step into headless `claude -p`.
 4. **"Multi-step pipeline"** → Multiple steps with step context passing results between steps
 5. **"Iterative review loop"** → Use `loop` config on a fix step pointing back to review
-6. **"Predefined maintenance job (no user prompt)"** → Pin all fields (`description`, `worktree`, `branch`, `target`) so the New Task screen is skipped
+6. **"Predefined maintenance job (no user prompt)"** → Pin all fields (`input`, `worktree`, `branch`, `target`) so the New Task screen is skipped
 7. **"Bootstrap from PRD (run immediately)"** → Same as above — pin all fields so the task is created immediately
 8. **"Share files/dirs across worktrees"** ("symlink X into worktrees", ".env should be available", "docs/configs visible to agents") → Use `worktree-sync-paths` (`link:` for shared/synced files, `copy:` for per-worktree isolated copies). Note this is hard-link, not symlink.
 9. **"Run something after worktree creation"** (install deps, generate files, create symlinks) → Use `worktree-setup-command` (single) or `worktree-setup-commands` (multiple)
 10. **"Summarize a tmux/conversational step"** → Set `summarization_strategy: summarize_chat` and provide a `summarization_prompt` using `{{chat}}`
 11. **"Fan out subtasks / orchestrate child tasks from a step"** → Prompt the step's agent to call the sortie MCP tool `create_tasks_and_wait` (or `wait_for_tasks` for pre-existing tasks). The step suspends at `awaiting-children` and re-runs with `{{children.summary}}` / `{{children.<id>.<field>}}` populated — see reference: Child Task Orchestration
 12. **"Later steps depend on this step's output"** (grilling/planning feeding implementation) → Set `require_context: true` on the producing step so a failed context capture fails the task loudly
-13. **"Reference another task's output"** ("build on task 42", "after #17 merges") → Use `{{tasks.<id>.<field>}}` in the task description — active refs auto-block until the referenced task completes
+13. **"Reference another task's output"** ("build on task 42", "after #17 merges") → Use `{{tasks.<id>.<field>}}` in the task input — active refs auto-block until the referenced task completes
 
 For complete field reference with validation rules and examples, read `references/config-reference.md`.
 
@@ -353,7 +355,7 @@ This lists every YAML field name the binary will accept. Cross-reference unknown
 - Never emit the removed `tmux:` field — use `print:` (inverted). The daemon hard-rejects `tmux:` at load.
 - `git.branch_template` supports: `{{task_id}}`, `{{task_slug}}`, `{{task.id}}`, `{{task.title}}`, `{{task.slug}}`
 - The file goes at the project root as `.sortie.yml`
-- The `description` pin doubles as the task description when the New Task screen is skipped
+- The `input` pin supplies the task input when the New Task screen is skipped; `description` is separate metadata
 - If both `worktree-setup-command` and `worktree-setup-commands` are set, **both run** (singular first, then the list, in order); any non-zero exit fails the task. `worktree-sync-paths` failures, by contrast, only log a warning.
 
 ## Validating a config

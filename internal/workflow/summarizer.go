@@ -221,12 +221,12 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 	if wf.SummarizerPrompt != "" {
 		// Use the configured summarizer prompt with template resolution
 		tmplCtx := e.buildTemplateContext(t, TaskVars{
-			ID:          t.ID,
-			Title:       t.Title,
-			Description: ResolveTaskRefs(t.Description, e.database.GetTask),
-			Context:     ResolveTaskRefs(t.Context, e.database.GetTask),
-			Slug:        t.Slug,
-			Branch:      t.Branch,
+			ID:      t.ID,
+			Title:   t.Title,
+			Input:   ResolveTaskRefs(t.Input, e.database.GetTask),
+			Context: ResolveTaskRefs(t.Context, e.database.GetTask),
+			Slug:    t.Slug,
+			Branch:  t.Branch,
 		}, stepContexts, LoopVars{})
 		prompt = ResolveTemplate(wf.SummarizerPrompt, tmplCtx)
 		var names []string
@@ -253,7 +253,7 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 		logMsg("%s", summarizationDescription(t.ID, false, contextNames, false))
 	} else {
 		// No artifacts — use git diff stat and instruct Claude to read the actual changes
-		prompt = BuildDiffStatSummaryPrompt(t.ID, t.Title, t.Description, diffStat)
+		prompt = BuildDiffStatSummaryPrompt(t.ID, t.Title, t.Input, diffStat)
 		logMsg("%s", summarizationDescription(t.ID, false, nil, true))
 	}
 
@@ -289,11 +289,11 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 // prompt: the prompt used when no step contexts are available and only the
 // list of changed files is known. Exported so the backfill CLI can reuse the
 // exact prompt shape used by live finalization.
-func BuildDiffStatSummaryPrompt(taskID int64, title, description, diffStat string) string {
+func BuildDiffStatSummaryPrompt(taskID int64, title, input, diffStat string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Summarize the progress made on task #%d: %s\n\n", taskID, title))
-	sb.WriteString("The task description was:\n")
-	sb.WriteString(description)
+	sb.WriteString("The task input was:\n")
+	sb.WriteString(input)
 	sb.WriteString("\n\nThe following files were changed:\n\n```\n")
 	sb.WriteString(diffStat)
 	sb.WriteString("\n```\n\n")
@@ -712,12 +712,12 @@ func (e *Engine) summarizeChatLog(ctx context.Context, t *task.Task, stepName, c
 func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chatContent string) string {
 	if customPrompt != "" {
 		tmplCtx := e.buildTemplateContext(t, TaskVars{
-			ID:          t.ID,
-			Title:       t.Title,
-			Description: ResolveTaskRefs(t.Description, e.database.GetTask),
-			Context:     ResolveTaskRefs(t.Context, e.database.GetTask),
-			Slug:        t.Slug,
-			Branch:      t.Branch,
+			ID:      t.ID,
+			Title:   t.Title,
+			Input:   ResolveTaskRefs(t.Input, e.database.GetTask),
+			Context: ResolveTaskRefs(t.Context, e.database.GetTask),
+			Slug:    t.Slug,
+			Branch:  t.Branch,
 		}, nil, LoopVars{})
 		resolved := ResolveTemplate(customPrompt, tmplCtx)
 

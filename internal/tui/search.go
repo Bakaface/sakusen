@@ -21,7 +21,7 @@ func (l *listView) performSearch(query string) {
 		// Search in title, or description if title is empty
 		searchText := task.Title
 		if searchText == "" {
-			searchText = task.Description
+			searchText = task.Input
 		}
 		searchTextLower := strings.ToLower(searchText)
 

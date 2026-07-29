@@ -88,7 +88,7 @@ func (v *taskInfoView) renderMetadata() string {
 	// Task title
 	taskTitle := t.Title
 	if taskTitle == "" {
-		taskTitle = t.Description
+		taskTitle = t.Input
 	}
 	b.WriteString(subHeaderStyle.Render(
 		fmt.Sprintf("#%d %s", t.ID, taskTitle)))
@@ -247,12 +247,12 @@ func (v *taskInfoView) renderMetadata() string {
 		}
 	}
 
-	// Description
-	if t.Description != "" {
+	// Input
+	if t.Input != "" {
 		b.WriteString("\n")
-		b.WriteString(labelStyle.Render("Description"))
+		b.WriteString(labelStyle.Render("Input"))
 		b.WriteString("\n")
-		b.WriteString(valueStyle.Render(t.Description))
+		b.WriteString(valueStyle.Render(t.Input))
 		b.WriteString("\n")
 	}
 

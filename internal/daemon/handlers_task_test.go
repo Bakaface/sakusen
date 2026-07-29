@@ -34,7 +34,7 @@ func setupServerWithProject(t *testing.T) (*Server, int64) {
 
 func TestValidateTaskRefs_NoRefs(t *testing.T) {
 	s, projID := setupServerWithProject(t)
-	got, err := s.validateTaskRefs("plain description with no refs", projID, 0, "description")
+	got, err := s.validateTaskRefs("plain description with no refs", projID, 0, "input")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestValidateTaskRefs_NoRefs(t *testing.T) {
 
 func TestValidateTaskRefs_MissingTaskID(t *testing.T) {
 	s, projID := setupServerWithProject(t)
-	_, err := s.validateTaskRefs("see {{tasks.99.title}}", projID, 0, "description")
+	_, err := s.validateTaskRefs("see {{tasks.99.title}}", projID, 0, "input")
 	if err == nil || !strings.Contains(err.Error(), "#99") {
 		t.Fatalf("expected error mentioning task #99, got %v", err)
 	}
@@ -66,7 +66,7 @@ func TestValidateTaskRefs_DifferentProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = s.validateTaskRefs("ref={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "description")
+	_, err = s.validateTaskRefs("ref={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "input")
 	if err == nil || !strings.Contains(err.Error(), "another project") {
 		t.Fatalf("expected cross-project error, got %v", err)
 	}
@@ -79,7 +79,7 @@ func TestValidateTaskRefs_FailedDep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = s.validateTaskRefs("dep={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "description")
+	_, err = s.validateTaskRefs("dep={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "input")
 	if err == nil || !strings.Contains(err.Error(), "failed") {
 		t.Fatalf("expected failed-dep error, got %v", err)
 	}
@@ -111,7 +111,7 @@ func TestValidateTaskRefs_UnsupportedField(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = s.validateTaskRefs("x={{tasks."+itoa(tk.ID)+".slug}}", projID, 0, "description")
+	_, err = s.validateTaskRefs("x={{tasks."+itoa(tk.ID)+".slug}}", projID, 0, "input")
 	if err == nil || !strings.Contains(err.Error(), "slug") {
 		t.Fatalf("expected unsupported-field error, got %v", err)
 	}
@@ -135,7 +135,7 @@ func TestValidateTaskRefs_ActiveDepAutoBlocks(t *testing.T) {
 		"foo {{tasks."+itoa(tk1.ID)+".title}} bar {{tasks."+itoa(tk2.ID)+".branch}}",
 		projID,
 		0,
-		"description",
+		"input",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -145,10 +145,10 @@ func TestValidateTaskRefs_ActiveDepAutoBlocks(t *testing.T) {
 	}
 	// Dedup: repeating the same id should still only produce one entry.
 	auto2, err := s.validateTaskRefs(
-		"a {{tasks."+itoa(tk1.ID)+".title}} a again {{tasks."+itoa(tk1.ID)+".description}}",
+		"a {{tasks."+itoa(tk1.ID)+".title}} a again {{tasks."+itoa(tk1.ID)+".input}}",
 		projID,
 		0,
-		"description",
+		"input",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -165,7 +165,7 @@ func TestValidateTaskRefs_CompletedDepNoAutoBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	auto, err := s.validateTaskRefs("x={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "description")
+	auto, err := s.validateTaskRefs("x={{tasks."+itoa(tk.ID)+".title}}", projID, 0, "input")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -229,11 +229,11 @@ func TestHandleUpdateField_DescriptionAutoAddsDep(t *testing.T) {
 
 	// Run the validation+merge logic the handler performs.
 	newValue := "now references {{tasks." + itoa(dep.ID) + ".title}}"
-	auto, err := s.validateTaskRefs(newValue, projID, host.ID, "description")
+	auto, err := s.validateTaskRefs(newValue, projID, host.ID, "input")
 	if err != nil {
 		t.Fatalf("validation failed: %v", err)
 	}
-	if err := s.database.UpdateTaskDescription(host.ID, newValue); err != nil {
+	if err := s.database.UpdateTaskInput(host.ID, newValue); err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range auto {
@@ -263,7 +263,7 @@ func TestHandleUpdateField_RejectsBadField(t *testing.T) {
 	}
 
 	bad := "see {{tasks." + itoa(other.ID) + ".slug}}"
-	_, err = s.validateTaskRefs(bad, projID, host.ID, "description")
+	_, err = s.validateTaskRefs(bad, projID, host.ID, "input")
 	if err == nil {
 		t.Fatal("expected error for unsupported field")
 	}
@@ -273,8 +273,8 @@ func TestHandleUpdateField_RejectsBadField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Description != "ok" {
-		t.Errorf("description should be unchanged after rejection, got %q", got.Description)
+	if got.Input != "ok" {
+		t.Errorf("description should be unchanged after rejection, got %q", got.Input)
 	}
 }
 
@@ -292,7 +292,7 @@ func TestValidateTaskRefs_SelfReferenceNotBlocker(t *testing.T) {
 		"refers to itself {{tasks."+itoa(self.ID)+".title}}",
 		projID,
 		self.ID,
-		"description",
+		"input",
 	)
 	if err != nil {
 		t.Fatalf("self-ref should not error: %v", err)
@@ -315,7 +315,7 @@ func TestValidateTaskRefs_InitStatusAutoBlocks(t *testing.T) {
 		"refs {{tasks."+itoa(tk.ID)+".title}}",
 		projID,
 		0,
-		"description",
+		"input",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -423,25 +423,25 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 
 	t.Run("description branch and target pins applied when request leaves them empty", func(t *testing.T) {
 		wf := config.WorkflowConfig{
-			Name:        "pinned",
-			Description: "Do the thing",
-			Branch:      "feat/pinned-{{task.id}}",
-			Target:      "main",
-			Worktree:    &worktreeTrue,
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			Name:     "pinned",
+			Input:    "Do the thing",
+			Branch:   "feat/pinned-{{task.id}}",
+			Target:   "main",
+			Worktree: &worktreeTrue,
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
 		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test", wf)
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
 			ProjectPath: "/tmp/sortie-pin-test",
 			Workflow:    "pinned",
-			// No Description, BranchName, TargetBranch, or Worktree.
+			// No Input, BranchName, TargetBranch, or Worktree.
 		})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
-		if tk.Description != "Do the thing" {
-			t.Errorf("description: got %q, want %q (from workflow pin)", tk.Description, "Do the thing")
+		if tk.Input != "Do the thing" {
+			t.Errorf("description: got %q, want %q (from workflow pin)", tk.Input, "Do the thing")
 		}
 		if tk.TargetBranch != "main" {
 			t.Errorf("target_branch: got %q, want %q (from workflow pin)", tk.TargetBranch, "main")
@@ -457,12 +457,12 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 
 	t.Run("explicit request target overrides workflow pin", func(t *testing.T) {
 		wf := config.WorkflowConfig{
-			Name:        "pinned",
-			Description: "Do the thing",
-			Branch:      "feat/pinned-{{task.id}}",
-			Target:      "main",
-			Worktree:    &worktreeTrue,
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			Name:     "pinned",
+			Input:    "Do the thing",
+			Branch:   "feat/pinned-{{task.id}}",
+			Target:   "main",
+			Worktree: &worktreeTrue,
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
 		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-2", wf)
 
@@ -481,36 +481,36 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 
 	t.Run("explicit request description overrides workflow pin", func(t *testing.T) {
 		wf := config.WorkflowConfig{
-			Name:        "pinned",
-			Description: "Pinned description",
-			Branch:      "feat/x",
-			Target:      "main",
-			Worktree:    &worktreeTrue,
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			Name:     "pinned",
+			Input:    "Pinned description",
+			Branch:   "feat/x",
+			Target:   "main",
+			Worktree: &worktreeTrue,
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
 		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-3", wf)
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
 			ProjectPath: "/tmp/sortie-pin-test-3",
 			Workflow:    "pinned",
-			Description: "Override description",
+			Input:       "Override description",
 		})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}
-		if tk.Description != "Override description" {
-			t.Errorf("description: got %q, want %q (explicit request should win over pin)", tk.Description, "Override description")
+		if tk.Input != "Override description" {
+			t.Errorf("description: got %q, want %q (explicit request should win over pin)", tk.Input, "Override description")
 		}
 	})
 
 	t.Run("explicit worktree=false overrides workflow pin worktree=true", func(t *testing.T) {
 		wf := config.WorkflowConfig{
-			Name:        "pinned",
-			Description: "Do the thing",
-			Branch:      "feat/x",
-			Target:      "main",
-			Worktree:    &worktreeTrue,
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			Name:     "pinned",
+			Input:    "Do the thing",
+			Branch:   "feat/x",
+			Target:   "main",
+			Worktree: &worktreeTrue,
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
 		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-4", wf)
 
@@ -534,10 +534,10 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 		// when the request leaves worktree unset.
 		worktreeFalse := false
 		wf := config.WorkflowConfig{
-			Name:        "no-worktree",
-			Description: "Run in place",
-			Worktree:    &worktreeFalse,
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			Name:     "no-worktree",
+			Input:    "Run in place",
+			Worktree: &worktreeFalse,
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
 		s, projID := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-5", wf)
 		if err := s.database.UpdateProjectDefaultWorktree(projID, true); err != nil {
@@ -572,7 +572,7 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 		tk, title, err := s.createTaskFromRequest(CreateTaskRequest{
 			ProjectPath: "/tmp/sortie-pin-test-6",
 			Workflow:    "review",
-			// No Description, BranchName, or CheckoutBranch — checkout pin satisfies
+			// No Input, BranchName, or CheckoutBranch — checkout pin satisfies
 			// the empty-description gate and supplies the checkout branch.
 		})
 		if err != nil {
@@ -581,8 +581,8 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 		if tk.CheckoutBranch != "release/x" {
 			t.Errorf("checkout_branch: got %q, want %q (from workflow pin)", tk.CheckoutBranch, "release/x")
 		}
-		if tk.Description != "" {
-			t.Errorf("description: got %q, want empty (checkout pin allows empty description)", tk.Description)
+		if tk.Input != "" {
+			t.Errorf("description: got %q, want empty (checkout pin allows empty description)", tk.Input)
 		}
 		if tk.BranchName != "" {
 			t.Errorf("branch_name: got %q, want empty (checkout pin must not also set a new-branch template)", tk.BranchName)
@@ -597,12 +597,12 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 		// never overwrite the project's saved DefaultWorktree — only an explicit
 		// request value (a real user choice) may persist.
 		wf := config.WorkflowConfig{
-			Name:        "pinned",
-			Description: "Do the thing",
-			Branch:      "feat/x",
-			Target:      "main",
-			Worktree:    &worktreeTrue, // pin worktree=true
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			Name:     "pinned",
+			Input:    "Do the thing",
+			Branch:   "feat/x",
+			Target:   "main",
+			Worktree: &worktreeTrue, // pin worktree=true
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
 		s, projID := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-7", wf)
 		// Seed the saved project default to the OPPOSITE of the pin.

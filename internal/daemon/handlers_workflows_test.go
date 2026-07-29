@@ -47,19 +47,19 @@ func TestSummarizeWorkflows_PinFieldsAndFullySpec(t *testing.T) {
 	worktreeTrue := true
 	in := []config.WorkflowConfig{
 		{
-			// Fully specified: description + worktree + new-branch + target.
-			Name:        "pinned",
-			Description: "Pinned body",
-			Worktree:    &worktreeTrue,
-			Branch:      "sortie/{{task_id}}",
-			Target:      "main",
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			// Fully specified: input + worktree + new-branch + target.
+			Name:     "pinned",
+			Input:    "Pinned body",
+			Worktree: &worktreeTrue,
+			Branch:   "sortie/{{task_id}}",
+			Target:   "main",
+			Steps:    []config.StepConfig{{Name: "implement"}},
 		},
 		{
-			// Not fully specified: only a description pin, no worktree decision.
-			Name:        "partial",
-			Description: "Partial body",
-			Steps:       []config.StepConfig{{Name: "implement"}},
+			// Not fully specified: only an input pin, no worktree decision.
+			Name:  "partial",
+			Input: "Partial body",
+			Steps: []config.StepConfig{{Name: "implement"}},
 		},
 	}
 

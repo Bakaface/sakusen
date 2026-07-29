@@ -89,7 +89,7 @@ func TestRunEdit_AppliesAllFields(t *testing.T) {
 		},
 	}
 	title, desc, ctxF, pri := "t", "d", "c", "high"
-	args := action.EditArgs{ID: 1, Title: &title, Description: &desc, Context: &ctxF, Priority: &pri}
+	args := action.EditArgs{ID: 1, Title: &title, Input: &desc, Context: &ctxF, Priority: &pri}
 	res, err := action.RunEdit(action.Ctx{Client: fc}, args)
 	if err != nil {
 		t.Fatal(err)

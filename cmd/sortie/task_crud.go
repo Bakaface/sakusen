@@ -13,17 +13,17 @@ import (
 )
 
 var createCmd = &cobra.Command{
-	Use:   "create <description>",
+	Use:   "create <input>",
 	Short: "Create a new task",
-	Long: `Create a new task with the given description.
+	Long: `Create a new task with the given input.
 
-The description can be provided as a positional argument or via stdin.
+The input can be provided as a positional argument or via stdin.
 The daemon must be running.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var description string
+		var input string
 		if len(args) == 1 {
-			description = args[0]
+			input = args[0]
 		} else {
 			// Read from stdin if no argument provided
 			stat, err := os.Stdin.Stat()
@@ -33,11 +33,11 @@ The daemon must be running.`,
 				for scanner.Scan() {
 					lines = append(lines, scanner.Text())
 				}
-				description = strings.Join(lines, "\n")
+				input = strings.Join(lines, "\n")
 			}
 		}
 
-		description = strings.TrimSpace(description)
+		input = strings.TrimSpace(input)
 
 		priority, _ := cmd.Flags().GetString("priority")
 		branch, _ := cmd.Flags().GetString("branch")
@@ -64,13 +64,13 @@ The daemon must be running.`,
 			return fmt.Errorf("invalid priority %q (allowed: low, medium, high, urgent)", priority)
 		}
 
-		if description == "" && checkout == "" && !workflowAllowsEmptyDescription(cfg, workflow) {
-			return fmt.Errorf("description is required (provide as argument or via stdin)")
+		if input == "" && checkout == "" && !workflowAllowsEmptyInput(cfg, workflow) {
+			return fmt.Errorf("input is required (provide as argument or via stdin)")
 		}
 
 		createArgs := action.CreateArgs{
 			Title:       title,
-			Description: description,
+			Input:       input,
 			Priority:    priority,
 			Branch:      branch,
 			Workflow:    workflow,
@@ -90,7 +90,7 @@ The daemon must be running.`,
 var editCmd = &cobra.Command{
 	Use:   "edit <task_id>",
 	Short: "Edit a task's fields",
-	Long: `Edit a task's title, description, context, or priority.
+	Long: `Edit a task's title, input, context, or priority.
 
 At least one field flag must be provided.`,
 	Args:              cobra.ExactArgs(1),
@@ -106,20 +106,20 @@ At least one field flag must be provided.`,
 		// guard here to preserve the CLI contract that an empty edit is a
 		// usage error rather than a no-op patch.
 		title, _ := cmd.Flags().GetString("title")
-		description, _ := cmd.Flags().GetString("description")
+		input, _ := cmd.Flags().GetString("input")
 		ctxStr, _ := cmd.Flags().GetString("context")
 		priority, _ := cmd.Flags().GetString("priority")
 
-		if title == "" && description == "" && ctxStr == "" && priority == "" {
-			return fmt.Errorf("at least one field flag is required (--title, --description, --context, --priority)")
+		if title == "" && input == "" && ctxStr == "" && priority == "" {
+			return fmt.Errorf("at least one field flag is required (--title, --input, --context, --priority)")
 		}
 
 		editArgs := action.EditArgs{ID: taskID}
 		if title != "" {
 			editArgs.Title = &title
 		}
-		if description != "" {
-			editArgs.Description = &description
+		if input != "" {
+			editArgs.Input = &input
 		}
 		if ctxStr != "" {
 			editArgs.Context = &ctxStr

@@ -52,7 +52,7 @@ var tasksCmd = &cobra.Command{
 		for i, t := range tasks {
 			title := t.Title
 			if title == "" {
-				title = truncateStr(t.Description, 50)
+				title = truncateStr(t.Input, 50)
 			}
 			step := t.CurrentStep
 			if step == "" {
@@ -98,7 +98,7 @@ func listTasksFromDB(jsonOut bool) error {
 	for i, t := range tasks {
 		title := t.Title
 		if title == "" {
-			title = truncateStr(t.Description, 50)
+			title = truncateStr(t.Input, 50)
 		}
 		step := t.CurrentStep
 		if step == "" {
@@ -203,7 +203,7 @@ func printTaskDetail(t *daemon.TaskInfo) {
 	if t.CompletedAt != nil {
 		fmt.Printf("  Completed:   %s\n", t.CompletedAt.Format(time.RFC3339))
 	}
-	fmt.Printf("\n  Description:\n    %s\n", t.Description)
+	fmt.Printf("\n  Input:\n    %s\n", t.Input)
 }
 
 var startCmd = &cobra.Command{
@@ -267,7 +267,7 @@ var listCmd = &cobra.Command{
 			fmt.Fprintf(w, "%s\t#%d\t%s\t%s\t%s\n",
 				agent.ID,
 				agent.TaskID,
-				truncateStr(agent.Description, 40),
+				truncateStr(agent.Input, 40),
 				agent.State,
 				duration,
 			)

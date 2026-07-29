@@ -512,22 +512,22 @@ func (k taskInfoKeyMap) FullHelp() [][]key.Binding {
 }
 
 type promptKeyMap struct {
-	Submit           key.Binding
-	SwitchField      key.Binding
-	SwitchFieldPrev  key.Binding
-	Newline          key.Binding
-	Cancel           key.Binding
-	RemoveImage      key.Binding
-	FocusTitle       key.Binding
-	FocusDescription key.Binding
-	FocusGit         key.Binding
-	FocusWorkflow    key.Binding
-	Worktree         key.Binding
-	BranchMode       key.Binding
-	SwitchPane       key.Binding
-	SwitchPanePrev   key.Binding
-	Editor           key.Binding
-	Help             key.Binding
+	Submit          key.Binding
+	SwitchField     key.Binding
+	SwitchFieldPrev key.Binding
+	Newline         key.Binding
+	Cancel          key.Binding
+	RemoveImage     key.Binding
+	FocusTitle      key.Binding
+	FocusInput      key.Binding
+	FocusGit        key.Binding
+	FocusWorkflow   key.Binding
+	Worktree        key.Binding
+	BranchMode      key.Binding
+	SwitchPane      key.Binding
+	SwitchPanePrev  key.Binding
+	Editor          key.Binding
+	Help            key.Binding
 }
 
 func newPromptKeyMap() promptKeyMap {
@@ -560,9 +560,9 @@ func newPromptKeyMap() promptKeyMap {
 			key.WithKeys("alt+t"),
 			key.WithHelp("alt+t", "title"),
 		),
-		FocusDescription: key.NewBinding(
-			key.WithKeys("alt+d", "alt+enter"),
-			key.WithHelp("alt+d/⏎", "description"),
+		FocusInput: key.NewBinding(
+			key.WithKeys("alt+i", "alt+enter"),
+			key.WithHelp("alt+i/⏎", "input"),
 		),
 		FocusGit: key.NewBinding(
 			key.WithKeys("alt+g"),
@@ -606,7 +606,7 @@ func (k promptKeyMap) ShortHelp() []key.Binding {
 func (k promptKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.Cancel, k.SwitchField, k.Newline},
-		{k.FocusTitle, k.FocusDescription, k.FocusGit, k.FocusWorkflow},
+		{k.FocusTitle, k.FocusInput, k.FocusGit, k.FocusWorkflow},
 		{k.SwitchPane, k.Worktree, k.BranchMode, k.Editor, k.RemoveImage, k.Help},
 	}
 }

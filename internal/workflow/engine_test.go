@@ -238,10 +238,10 @@ func TestCopyImagesToWorktreeEmpty(t *testing.T) {
 func TestTemplateTaskImages(t *testing.T) {
 	ctx := &TemplateContext{
 		Task: TaskVars{
-			ID:          1,
-			Title:       "Test task",
-			Description: "A test",
-			Images:      []string{".sortie/images/screenshot.png", ".sortie/images/diagram.jpg"},
+			ID:     1,
+			Title:  "Test task",
+			Input:  "A test",
+			Images: []string{".sortie/images/screenshot.png", ".sortie/images/diagram.jpg"},
 		},
 	}
 
@@ -481,7 +481,7 @@ func TestSummarizerDiffStatPromptIncludesReadInstruction(t *testing.T) {
 
 func TestTemplateLoopVars(t *testing.T) {
 	ctx := &TemplateContext{
-		Task: TaskVars{ID: 1, Title: "Test task", Description: "A test"},
+		Task: TaskVars{ID: 1, Title: "Test task", Input: "A test"},
 		Loop: LoopVars{Iteration: 3, MaxIterations: 5},
 	}
 
@@ -494,7 +494,7 @@ func TestTemplateLoopVars(t *testing.T) {
 
 func TestTemplateLoopVarsZero(t *testing.T) {
 	ctx := &TemplateContext{
-		Task: TaskVars{ID: 1, Title: "Test task", Description: "A test"},
+		Task: TaskVars{ID: 1, Title: "Test task", Input: "A test"},
 		Loop: LoopVars{Iteration: 0, MaxIterations: 0},
 	}
 

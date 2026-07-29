@@ -52,7 +52,7 @@ func (s *Server) checkPendingTasks() {
 
 		title := t.Title
 		if title == "" {
-			title = t.Description
+			title = t.Input
 		}
 		log.Printf("%sStarting agent for task #%d: %s", s.projectLogPrefix(t.ProjectID), t.ID, title)
 		if err := s.startTaskAgent(t); err != nil {

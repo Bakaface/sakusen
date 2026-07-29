@@ -132,7 +132,7 @@ func runBackfillContext(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		prompt := workflow.BuildDiffStatSummaryPrompt(t.ID, t.Title, t.Description, diffStat)
+		prompt := workflow.BuildDiffStatSummaryPrompt(t.ID, t.Title, t.Input, diffStat)
 
 		fmt.Printf("[#%d] %s (project=%s, commits=%d, prompt=%d bytes)\n",
 			t.ID, t.Title, projectPath, len(t.Commits), len(prompt))

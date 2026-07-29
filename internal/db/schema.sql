@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     project_id INTEGER NOT NULL REFERENCES projects(id),
     track_id INTEGER REFERENCES tracks(id),
     title TEXT NOT NULL DEFAULT '',
-    description TEXT NOT NULL,
+    input TEXT NOT NULL,
     slug TEXT NOT NULL DEFAULT '',
     workflow TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',

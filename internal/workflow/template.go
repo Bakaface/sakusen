@@ -11,13 +11,13 @@ import (
 )
 
 type TaskVars struct {
-	ID          int64
-	Title       string
-	Description string
-	Context     string
-	Slug        string
-	Branch      string
-	Images      []string // worktree-relative paths to attached images
+	ID      int64
+	Title   string
+	Input   string
+	Context string
+	Slug    string
+	Branch  string
+	Images  []string // worktree-relative paths to attached images
 }
 
 type GitVars struct {
@@ -71,7 +71,7 @@ type TemplateContext struct {
 var templatePattern = regexp.MustCompile(`\{\{([a-zA-Z0-9_.]+)\}\}`)
 
 // supportedTaskRefFields lists the fields valid in {{tasks.<id>.<field>}} refs.
-var supportedTaskRefFields = []string{"title", "branch", "description", "context"}
+var supportedTaskRefFields = []string{"title", "branch", "input", "context"}
 
 // TaskRef captures a parsed {{tasks.<id>.<field>}} reference.
 type TaskRef struct {
@@ -91,8 +91,8 @@ func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
 			return fmt.Sprintf("%d", ctx.Task.ID)
 		case key == "task.title":
 			return ctx.Task.Title
-		case key == "task.description":
-			return ctx.Task.Description
+		case key == "task.input":
+			return ctx.Task.Input
 		case key == "task.context":
 			return ctx.Task.Context
 		case key == "task.slug":
@@ -287,8 +287,8 @@ func resolveTaskRef(key, match string, ctx *TemplateContext) string {
 		return t.Title
 	case "branch":
 		return t.Branch
-	case "description":
-		return t.Description
+	case "input":
+		return t.Input
 	case "context":
 		return t.Context
 	default:
@@ -363,7 +363,7 @@ func ValidateTaskRefs(refs []TaskRef) error {
 
 // ResolveTaskRefs replaces every {{tasks.<id>.<field>}} reference in s with
 // the field value of the looked-up task. Used to pre-expand a task's own
-// description / context before they are inlined into a step prompt — keeps the
+// input / context before they are inlined into a step prompt — keeps the
 // substitution single-pass (no recursive expansion into other tasks' refs).
 // Behaviour on lookup miss matches resolveTaskRef: empty string + warning.
 func ResolveTaskRefs(s string, lookup func(int64) (*task.Task, error)) string {

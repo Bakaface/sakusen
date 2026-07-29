@@ -39,7 +39,7 @@ type TrackVars struct {
 |-------------|--------|
 | `{{task.id}}` | Task ID |
 | `{{task.title}}` | Task title |
-| `{{task.description}}` | Task description |
+| `{{task.input}}` | Task input (user-supplied) |
 | `{{task.slug}}` | URL-safe slug from title |
 | `{{task.branch}}` | Resolved branch name |
 | `{{task.images}}` | Newline-joined image paths |

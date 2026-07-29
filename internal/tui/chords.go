@@ -130,7 +130,7 @@ func chordEditArtifact(m Model) (tea.Model, tea.Cmd) {
 
 func chordEditDesc(m Model) (tea.Model, tea.Cmd) {
 	if task := m.selectedTask(); task != nil {
-		return m, m.openEditorForField(task.ID, "description", task.Description)
+		return m, m.openEditorForField(task.ID, "input", task.Input)
 	}
 	return m, nil
 }
@@ -150,11 +150,11 @@ func chordEditContext(m Model) (tea.Model, tea.Cmd) {
 }
 
 func chordYankDesc(m Model) (tea.Model, tea.Cmd) {
-	if task := m.selectedTask(); task != nil && task.Description != "" {
-		if err := clipboard.WriteAll(task.Description); err != nil {
+	if task := m.selectedTask(); task != nil && task.Input != "" {
+		if err := clipboard.WriteAll(task.Input); err != nil {
 			m.err = fmt.Errorf("clipboard: %w", err)
 		} else {
-			m.statusMessage = "Copied description to clipboard"
+			m.statusMessage = "Copied input to clipboard"
 			m.statusMessageTTL = 2
 		}
 	}

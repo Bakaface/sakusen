@@ -86,7 +86,7 @@ func init() {
 	createCmd.Flags().String("checkout", "", "Check out an existing branch instead of creating a new one")
 	createCmd.Flags().String("track", "", "Attach the task to a track (slug or numeric ID)")
 	editCmd.Flags().StringP("title", "t", "", "New title")
-	editCmd.Flags().StringP("description", "d", "", "New description")
+	editCmd.Flags().StringP("input", "i", "", "New task input")
 	editCmd.Flags().StringP("context", "c", "", "New context")
 	editCmd.Flags().StringP("priority", "p", "", "New priority (low, medium, high, urgent)")
 	deleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")

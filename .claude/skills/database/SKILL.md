@@ -54,8 +54,8 @@ UpdateProjectDefaultWorktree(id int64, worktree bool) error
 ## Task Creation
 
 ```go
-CreateTask(projectID int64, title, description, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error)
-CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error)
+CreateTask(projectID int64, title, input, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error)
+CreateTaskWithPriority(projectID int64, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error)
 ```
 
 `CreateTask` is a convenience wrapper that delegates to `CreateTaskWithPriority` with medium priority, `worktree=true`, and no track.
@@ -84,7 +84,7 @@ UpdateTaskError(id int64, errMsg string) error
 UpdateTaskPriority(id int64, priority task.Priority) error
 UpdateTaskContext(id int64, taskContext string) error
 UpdateTaskTitle(id int64, title string) error
-UpdateTaskDescription(id int64, description string) error
+UpdateTaskInput(id int64, input string) error
 FinalizeTaskIdentity(id int64, title, slug, branch string) error
 UpdateTaskLoopIteration(id int64, iteration int) error
 SetWorktreeDetached(id int64, detached bool) error
@@ -99,7 +99,7 @@ GetTaskCommits(id int64) ([]string, error)            // Read commit hashes from
 ### Reset Operations
 - `ResetTaskForRetry(id int64)` — reset to pending, clear step/error/timing, delete task_steps via `DeleteTaskSteps()`
 - `ResetTaskForRetryFromStep(id int64)` — reset to pending, clear current_step/error but **keep step_index**, delete task_steps via `DeleteTaskSteps()`
-- `ResetTaskForContinue(id int64, workflow, prompt string)` — reset to pending, update workflow and description prompt, delete task_steps via `DeleteTaskSteps()`
+- `ResetTaskForContinue(id int64, workflow, prompt string)` — reset to pending, update workflow and input prompt, delete task_steps via `DeleteTaskSteps()`
 - `DeleteTask(id int64)` — hard delete (also removes task_dependencies)
 
 ### Dependency Management

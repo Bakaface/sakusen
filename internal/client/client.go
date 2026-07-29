@@ -529,9 +529,9 @@ func (c *Client) RetryTask(id int64, stepName string) (*daemon.TaskInfo, error) 
 	return &resp.Task, nil
 }
 
-func (c *Client) CreateTask(description, workflow, branchName, projectPath string, worktree bool, images []string) (*daemon.TaskInfo, error) {
+func (c *Client) CreateTask(input, workflow, branchName, projectPath string, worktree bool, images []string) (*daemon.TaskInfo, error) {
 	msg, err := c.request(daemon.MsgCreateTask, daemon.CreateTaskRequest{
-		Description: description,
+		Input:       input,
 		Workflow:    workflow,
 		BranchName:  branchName,
 		ProjectPath: projectPath,
