@@ -126,6 +126,7 @@ func init() {
 	tracksCreateCmd.Flags().Bool("global", false, "Create a global track (attachable from any project)")
 	tracksCreateCmd.Flags().StringP("workflow", "w", "", "Workflow to run for tasks attached to this track")
 	tracksCreateCmd.Flags().StringP("context", "c", "", "Initial context seed")
+	tracksCreateCmd.Flags().String("description", "", "Stable one-liner describing the track's purpose (primes track selection)")
 	tracksListCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 	tracksShowCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 	tracksSetContextCmd.Flags().Bool("append", false, "Append to the existing context instead of replacing it")
@@ -133,6 +134,7 @@ func init() {
 	tracksCmd.AddCommand(tracksListCmd)
 	tracksCmd.AddCommand(tracksShowCmd)
 	tracksCmd.AddCommand(tracksSetContextCmd)
+	tracksCmd.AddCommand(tracksSetDescriptionCmd)
 	rootCmd.AddCommand(tracksCmd)
 }
 

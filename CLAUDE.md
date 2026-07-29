@@ -21,7 +21,8 @@ internal/
   tmux/              Tmux session management for interactive tasks
   mcp/               MCP server exposing sortie tools (create_task, get_task, list_workflows,
                      create_tasks_and_wait, wait_for_tasks, update_step_context,
-                     create_track, update_track_context, list_tracks)
+                     create_track, update_track_context, update_track_description,
+                     list_tracks)
   notify/            Notification support
   client/            Client for daemon communication
 tests/e2e/           End-to-end tests (build tag `e2e`; see tests/e2e/README.md)

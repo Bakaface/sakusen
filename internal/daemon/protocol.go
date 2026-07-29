@@ -55,6 +55,9 @@ const (
 	MsgListTracks              MessageType = "list_tracks"
 	MsgSetTrackContext         MessageType = "set_track_context"         // CLI: arbitrary track by ref
 	MsgUpdateTaskTrackContext  MessageType = "update_task_track_context" // MCP: own-track-only via task_id
+
+	MsgSetTrackDescription        MessageType = "set_track_description"         // CLI: arbitrary track by ref
+	MsgUpdateTaskTrackDescription MessageType = "update_task_track_description" // MCP: own-track-only via task_id
 )
 
 // IsBroadcast reports whether t is a message type the daemon pushes to
@@ -385,13 +388,15 @@ type CreateTrackRequest struct {
 	Global      bool   `json:"global,omitempty"`       // true = global track (project_id NULL)
 	Workflow    string `json:"workflow,omitempty"`
 	Context     string `json:"context,omitempty"`      // initial context seed
+	Description string `json:"description,omitempty"`  // stable one-liner stating the track's purpose
 	ProjectPath string `json:"project_path,omitempty"` // required unless Global
 }
 
 // TrackInfo is the wire projection of a track. Context population varies by
 // endpoint: create/get carry the full own context, list_tracks clears it and
 // carries ContextPreview/ContextLen instead (sizes stay visible so unbounded
-// append growth is at least observable).
+// append growth is at least observable). Description, unlike Context, is
+// always carried in full — it is the stable field routing agents select on.
 type TrackInfo struct {
 	ID             int64     `json:"id"`
 	ProjectID      *int64    `json:"project_id,omitempty"`
@@ -400,6 +405,7 @@ type TrackInfo struct {
 	ParentSlug     string    `json:"parent_slug,omitempty"`
 	Name           string    `json:"name"`
 	Slug           string    `json:"slug"`
+	Description    string    `json:"description,omitempty"` // always populated (create/get/list)
 	Workflow       string    `json:"workflow,omitempty"`
 	Context        string    `json:"context,omitempty"`         // full own context; empty in list_tracks
 	ContextPreview string    `json:"context_preview,omitempty"` // first 200 bytes (rune-aligned); list_tracks only
@@ -449,6 +455,23 @@ type UpdateTaskTrackContextRequest struct {
 	TaskID  int64  `json:"task_id"`
 	Context string `json:"context"`
 	Mode    string `json:"mode,omitempty"` // "replace" (default) or "append"
+}
+
+// SetTrackDescriptionRequest is the CLI-facing arbitrary-track description
+// write (sortie tracks set-description). Replace-only — there is no append
+// mode, that concept belongs to the context accumulator.
+type SetTrackDescriptionRequest struct {
+	ProjectPath string `json:"project_path,omitempty"`
+	Track       string `json:"track"` // slug or numeric ID
+	Description string `json:"description"`
+}
+
+// UpdateTaskTrackDescriptionRequest is the agent-facing own-track-only
+// description write, with the same enforcement shape as
+// UpdateTaskTrackContextRequest: the task must have a track AND an active step.
+type UpdateTaskTrackDescriptionRequest struct {
+	TaskID      int64  `json:"task_id"`
+	Description string `json:"description"`
 }
 
 // CleanupRequest removes worktrees, branches, and log directories for

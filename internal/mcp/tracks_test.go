@@ -35,6 +35,7 @@ func TestMCP_CreateTrack_ForwardsFields(t *testing.T) {
 				"scope":        "global",
 				"workflow":     "payments-api:impl",
 				"context":      "seed",
+				"description":  "Owns the payments API surface",
 			},
 		},
 	})
@@ -46,7 +47,8 @@ func TestMCP_CreateTrack_ForwardsFields(t *testing.T) {
 	}
 
 	if captured.Name != "Payments API" || captured.ParentTrack != "sprint-12" ||
-		!captured.Global || captured.Workflow != "payments-api:impl" || captured.Context != "seed" {
+		!captured.Global || captured.Workflow != "payments-api:impl" || captured.Context != "seed" ||
+		captured.Description != "Owns the payments API surface" {
 		t.Errorf("captured request = %+v", captured)
 	}
 	if !strings.Contains(textOf(res), "payments-api") {
@@ -163,6 +165,79 @@ func TestMCP_UpdateTrackContext_RejectsInvalidArgs(t *testing.T) {
 
 	for _, mt := range fake.requestTypes() {
 		if mt == daemon.MsgUpdateTaskTrackContext {
+			t.Errorf("invalid arg call leaked to daemon")
+		}
+	}
+}
+
+func TestMCP_UpdateTrackDescription_Forwards(t *testing.T) {
+	fake := newFakeDaemon(t)
+
+	var captured daemon.UpdateTaskTrackDescriptionRequest
+	fake.handle(daemon.MsgUpdateTaskTrackDescription, func(msg *daemon.Message) *daemon.Message {
+		_ = msg.DecodePayload(&captured)
+		resp, _ := daemon.NewMessage(daemon.MsgOK, daemon.OKResponse{Message: "ok"})
+		return resp
+	})
+
+	c := startMCPServer(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "update_track_description",
+			Arguments: map[string]any{
+				"task_id":     7,
+				"description": "Owns the payments API surface",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", textOf(res))
+	}
+
+	if captured.TaskID != 7 || captured.Description != "Owns the payments API surface" {
+		t.Errorf("captured = %+v", captured)
+	}
+}
+
+func TestMCP_UpdateTrackDescription_RejectsInvalidArgs(t *testing.T) {
+	fake := newFakeDaemon(t)
+	c := startMCPServer(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cases := []struct {
+		name      string
+		arguments map[string]any
+		wantErr   string
+	}{
+		{"zero task_id", map[string]any{"task_id": 0, "description": "x"}, "task_id must be a positive integer"},
+		{"blank description", map[string]any{"task_id": 7, "description": "   "}, "description must not be empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := c.CallTool(ctx, mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Name: "update_track_description", Arguments: tc.arguments},
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if !res.IsError {
+				t.Fatalf("expected tool error, got success: %s", textOf(res))
+			}
+			if !strings.Contains(textOf(res), tc.wantErr) {
+				t.Errorf("error should contain %q, got %q", tc.wantErr, textOf(res))
+			}
+		})
+	}
+
+	for _, mt := range fake.requestTypes() {
+		if mt == daemon.MsgUpdateTaskTrackDescription {
 			t.Errorf("invalid arg call leaked to daemon")
 		}
 	}

@@ -102,11 +102,11 @@ func newTrackedFakeRunnerTestEngine(t *testing.T, wf config.WorkflowConfig) (*En
 	if err != nil {
 		t.Fatalf("GetOrCreateProject: %v", err)
 	}
-	root, err := database.CreateTrack(nil, "Sprint 12", "sprint-12", "", "sprint goal", nil)
+	root, err := database.CreateTrack(nil, "Sprint 12", "sprint-12", "", "sprint goal", "", nil)
 	if err != nil {
 		t.Fatalf("CreateTrack root: %v", err)
 	}
-	leaf, err := database.CreateTrack(&proj.ID, "Payments API", "payments-api", "", "leaf seed", &root.ID)
+	leaf, err := database.CreateTrack(&proj.ID, "Payments API", "payments-api", "", "leaf seed", "", &root.ID)
 	if err != nil {
 		t.Fatalf("CreateTrack leaf: %v", err)
 	}

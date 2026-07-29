@@ -82,6 +82,7 @@ var migrations = []func(db *DB) error{
 	migrateV18,
 	migrateV19,
 	migrateV20,
+	migrateV21,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -380,6 +381,15 @@ func migrateV20(db *DB) error {
 	}
 	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN track_id INTEGER REFERENCES tracks(id)`); err != nil {
 		return fmt.Errorf("failed to add track_id column: %w", err)
+	}
+	return nil
+}
+
+// migrateV21 adds the description column to tracks: a stable one-liner
+// describing the track's purpose, distinct from the accumulating context.
+func migrateV21(db *DB) error {
+	if _, err := db.sqlDB.Exec(`ALTER TABLE tracks ADD COLUMN description TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("failed to add description column to tracks: %w", err)
 	}
 	return nil
 }

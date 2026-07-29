@@ -81,10 +81,11 @@ func Serve(cfg *config.Config) error {
 // at the next step or runs the same finalization the TUI's advance/finalize
 // keybind triggers. If it advanced too early, retry_task re-runs the step.
 //
-// create_track and list_tracks are additive/read-only. update_track_context is
-// admitted with the same admission argument as update_step_context: the daemon
-// enforces it can only write the CALLING task's own track (the task must have
-// a track and an active step). Note the trust-model caveat, though: track
+// create_track and list_tracks are additive/read-only. update_track_context
+// and update_track_description are admitted with the same admission argument
+// as update_step_context: the daemon enforces they can only write the CALLING
+// task's own track (the task must have a track and an active step), and both
+// are plain re-editable DB updates. Note the trust-model caveat, though: track
 // context is a PERSISTENT, CROSS-TASK prompt-injection surface — anything an
 // agent writes flows verbatim into the prompts of every future task attached
 // to that track or its children. That is the feature (gradual context
@@ -105,6 +106,7 @@ func registerTools(s *server.MCPServer, c *client.Client) {
 	registerUpdateStepContext(s, c)
 	registerCreateTrack(s, c)
 	registerUpdateTrackContext(s, c)
+	registerUpdateTrackDescription(s, c)
 	registerListTracks(s, c)
 }
 

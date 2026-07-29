@@ -92,7 +92,7 @@ func (s *Server) handleCreateTrack(conn net.Conn, req CreateTrackRequest) {
 		parentID = &parent.ID
 	}
 
-	tr, err := s.database.CreateTrack(projectID, name, slug, req.Workflow, req.Context, parentID)
+	tr, err := s.database.CreateTrack(projectID, name, slug, req.Workflow, req.Context, req.Description, parentID)
 	if err != nil {
 		s.sendError(conn, fmt.Sprintf("failed to create track: %v", err))
 		return
@@ -203,11 +203,38 @@ func (s *Server) handleSetTrackContext(conn net.Conn, req SetTrackContextRequest
 	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track %q context updated (%s)", tr.Slug, mode)})
 }
 
-// handleUpdateTaskTrackContext is the own-track-only track context write for
-// agents (the update_track_context MCP tool), mirroring
+// resolveOwnTrackID returns the track a task is allowed to write, mirroring
 // handleUpdateActiveStepContext's enforcement shape: the task must have a
 // track AND an active step (running, or paused at a tmux gate) — only a task
 // actively in a step may write its track.
+func (s *Server) resolveOwnTrackID(taskID int64) (int64, error) {
+	t, err := s.database.GetTask(taskID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get task #%d: %v", taskID, err)
+	}
+	if t.TrackID == nil {
+		return 0, fmt.Errorf("task #%d has no track", taskID)
+	}
+	// current_step is not cleared on normal completion, so ResolveActiveStep
+	// alone would still resolve a step for a finished task. Require the task
+	// itself to be actively executing (unlike update_step_context, these writes
+	// have no second running-row guard at the DB layer).
+	if !t.Status.IsActive() {
+		return 0, fmt.Errorf("task #%d has no active step (status %s)", taskID, t.Status)
+	}
+
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get project context for task #%d: %v", taskID, err)
+	}
+	if activeStep, _ := pc.engine.ResolveActiveStep(t); activeStep == "" {
+		return 0, fmt.Errorf("task #%d has no active step", taskID)
+	}
+	return *t.TrackID, nil
+}
+
+// handleUpdateTaskTrackContext is the own-track-only track context write for
+// agents (the update_track_context MCP tool).
 func (s *Server) handleUpdateTaskTrackContext(conn net.Conn, req UpdateTaskTrackContextRequest) {
 	if req.TaskID <= 0 {
 		s.sendError(conn, "task_id is required")
@@ -219,35 +246,13 @@ func (s *Server) handleUpdateTaskTrackContext(conn net.Conn, req UpdateTaskTrack
 		return
 	}
 
-	t, err := s.database.GetTask(req.TaskID)
+	trackID, err := s.resolveOwnTrackID(req.TaskID)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to get task #%d: %v", req.TaskID, err))
-		return
-	}
-	if t.TrackID == nil {
-		s.sendError(conn, fmt.Sprintf("task #%d has no track", req.TaskID))
-		return
-	}
-	// current_step is not cleared on normal completion, so ResolveActiveStep
-	// alone would still resolve a step for a finished task. Require the task
-	// itself to be actively executing (unlike update_step_context, this write
-	// has no second running-row guard at the DB layer).
-	if !t.Status.IsActive() {
-		s.sendError(conn, fmt.Sprintf("task #%d has no active step (status %s)", req.TaskID, t.Status))
+		s.sendError(conn, err.Error())
 		return
 	}
 
-	pc, err := s.getProjectContext(t.ProjectID)
-	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to get project context for task #%d: %v", req.TaskID, err))
-		return
-	}
-	if activeStep, _ := pc.engine.ResolveActiveStep(t); activeStep == "" {
-		s.sendError(conn, fmt.Sprintf("task #%d has no active step", req.TaskID))
-		return
-	}
-
-	if err := s.database.UpdateTrackContext(*t.TrackID, req.Context, mode); err != nil {
+	if err := s.database.UpdateTrackContext(trackID, req.Context, mode); err != nil {
 		s.sendError(conn, fmt.Sprintf("failed to update track context: %v", err))
 		return
 	}
@@ -255,21 +260,72 @@ func (s *Server) handleUpdateTaskTrackContext(conn net.Conn, req UpdateTaskTrack
 	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track context updated (%s)", mode)})
 }
 
+// handleSetTrackDescription is the CLI-facing arbitrary-track description
+// write (sortie tracks set-description). Replace-only.
+func (s *Server) handleSetTrackDescription(conn net.Conn, req SetTrackDescriptionRequest) {
+	var projectID *int64
+	if req.ProjectPath != "" {
+		proj, err := s.database.GetOrCreateProject(req.ProjectPath)
+		if err != nil {
+			s.sendError(conn, fmt.Sprintf("failed to resolve project: %v", err))
+			return
+		}
+		projectID = &proj.ID
+	}
+
+	tr, err := s.resolveTrackRef(projectID, req.Track)
+	if err != nil {
+		s.sendError(conn, err.Error())
+		return
+	}
+
+	if err := s.database.UpdateTrackDescription(tr.ID, req.Description); err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to update track description: %v", err))
+		return
+	}
+
+	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track %q description updated", tr.Slug)})
+}
+
+// handleUpdateTaskTrackDescription is the own-track-only track description
+// write for agents (the update_track_description MCP tool).
+func (s *Server) handleUpdateTaskTrackDescription(conn net.Conn, req UpdateTaskTrackDescriptionRequest) {
+	if req.TaskID <= 0 {
+		s.sendError(conn, "task_id is required")
+		return
+	}
+
+	trackID, err := s.resolveOwnTrackID(req.TaskID)
+	if err != nil {
+		s.sendError(conn, err.Error())
+		return
+	}
+
+	if err := s.database.UpdateTrackDescription(trackID, req.Description); err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to update track description: %v", err))
+		return
+	}
+
+	s.sendMessage(conn, MsgOK, OKResponse{Message: "track description updated"})
+}
+
 // trackToInfo converts a *task.Track to its wire projection. includeContext
 // controls whether the full own context is carried (create/get) or cleared
-// (list — the caller sets ContextPreview instead). ContextLen is always set.
+// (list — the caller sets ContextPreview instead). ContextLen and Description
+// are always set.
 func (s *Server) trackToInfo(tr *task.Track, includeContext bool) TrackInfo {
 	info := TrackInfo{
-		ID:         tr.ID,
-		ProjectID:  tr.ProjectID,
-		Global:     tr.ProjectID == nil,
-		ParentID:   tr.ParentID,
-		Name:       tr.Name,
-		Slug:       tr.Slug,
-		Workflow:   tr.Workflow,
-		ContextLen: len(tr.Context),
-		CreatedAt:  tr.CreatedAt,
-		UpdatedAt:  tr.UpdatedAt,
+		ID:          tr.ID,
+		ProjectID:   tr.ProjectID,
+		Global:      tr.ProjectID == nil,
+		ParentID:    tr.ParentID,
+		Name:        tr.Name,
+		Slug:        tr.Slug,
+		Description: tr.Description,
+		Workflow:    tr.Workflow,
+		ContextLen:  len(tr.Context),
+		CreatedAt:   tr.CreatedAt,
+		UpdatedAt:   tr.UpdatedAt,
 	}
 	if includeContext {
 		info.Context = tr.Context

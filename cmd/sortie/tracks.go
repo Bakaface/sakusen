@@ -37,6 +37,7 @@ var tracksCreateCmd = &cobra.Command{
 		global, _ := cmd.Flags().GetBool("global")
 		workflow, _ := cmd.Flags().GetString("workflow")
 		context, _ := cmd.Flags().GetString("context")
+		description, _ := cmd.Flags().GetString("description")
 
 		c, err := trackClient()
 		if err != nil {
@@ -50,6 +51,7 @@ var tracksCreateCmd = &cobra.Command{
 			Global:      global,
 			Workflow:    workflow,
 			Context:     context,
+			Description: description,
 			ProjectPath: cfg.ProjectDir,
 		})
 		if err != nil {
@@ -89,8 +91,8 @@ var tracksListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSLUG\tSCOPE\tPARENT\tWORKFLOW\tSIZE")
-		fmt.Fprintln(w, "--\t----\t-----\t------\t--------\t----")
+		fmt.Fprintln(w, "ID\tSLUG\tSCOPE\tPARENT\tWORKFLOW\tDESCRIPTION\tSIZE")
+		fmt.Fprintln(w, "--\t----\t-----\t------\t--------\t-----------\t----")
 		for _, tr := range tracks {
 			scope := "project"
 			if tr.Global {
@@ -107,7 +109,14 @@ var tracksListCmd = &cobra.Command{
 			if workflow == "" {
 				workflow = "-"
 			}
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%d\n", tr.ID, tr.Slug, scope, parent, workflow, tr.ContextLen)
+			// Descriptions are free-form and may be multi-line (set-description
+			// reads stdin), so collapse whitespace before printing — a raw
+			// newline would break the row into two mis-aligned ones.
+			description := truncateStr(strings.Join(strings.Fields(tr.Description), " "), 40)
+			if description == "" {
+				description = "-"
+			}
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%d\n", tr.ID, tr.Slug, scope, parent, workflow, description, tr.ContextLen)
 		}
 		w.Flush()
 		return nil
@@ -142,20 +151,23 @@ var tracksShowCmd = &cobra.Command{
 			scope = "global"
 		}
 		fmt.Printf("Track #%d\n", tr.ID)
-		fmt.Printf("  Name:     %s\n", tr.Name)
-		fmt.Printf("  Slug:     %s\n", tr.Slug)
-		fmt.Printf("  Scope:    %s\n", scope)
+		fmt.Printf("  Name:        %s\n", tr.Name)
+		fmt.Printf("  Slug:        %s\n", tr.Slug)
+		fmt.Printf("  Scope:       %s\n", scope)
+		if tr.Description != "" {
+			fmt.Printf("  Description: %s\n", tr.Description)
+		}
 		if tr.ParentSlug != "" {
-			fmt.Printf("  Parent:   %s\n", tr.ParentSlug)
+			fmt.Printf("  Parent:      %s\n", tr.ParentSlug)
 		} else if tr.ParentID != nil {
-			fmt.Printf("  Parent:   #%d\n", *tr.ParentID)
+			fmt.Printf("  Parent:      #%d\n", *tr.ParentID)
 		}
 		if tr.Workflow != "" {
-			fmt.Printf("  Workflow: %s\n", tr.Workflow)
+			fmt.Printf("  Workflow:    %s\n", tr.Workflow)
 		}
-		fmt.Printf("  Size:     %d bytes\n", tr.ContextLen)
-		fmt.Printf("  Created:  %s\n", tr.CreatedAt.Format(time.RFC3339))
-		fmt.Printf("  Updated:  %s\n", tr.UpdatedAt.Format(time.RFC3339))
+		fmt.Printf("  Size:        %d bytes\n", tr.ContextLen)
+		fmt.Printf("  Created:     %s\n", tr.CreatedAt.Format(time.RFC3339))
+		fmt.Printf("  Updated:     %s\n", tr.UpdatedAt.Format(time.RFC3339))
 		if resp.RenderedContext != "" {
 			// The daemon-rendered chain — exactly what {{track.context}} yields.
 			fmt.Printf("\n%s\n", resp.RenderedContext)
@@ -209,6 +221,47 @@ argument or via stdin. By default the existing context is replaced; pass
 		}
 
 		fmt.Printf("Track %s context updated (%s)\n", args[0], mode)
+		return nil
+	},
+}
+
+var tracksSetDescriptionCmd = &cobra.Command{
+	Use:   "set-description <slug-or-id> [description]",
+	Short: "Replace a track's description",
+	Long: `Set a track's description — the stable one-liner stating what the track is
+for, which routing agents read when picking a track. The description can be
+provided as a positional argument or via stdin, and always replaces the
+existing one (an empty value clears it). Use set-context for the accumulating
+working context instead.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var description string
+		if len(args) == 2 {
+			description = args[1]
+		} else {
+			// Read from stdin if no argument provided (mirrors sortie create).
+			stat, err := os.Stdin.Stat()
+			if err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
+				scanner := bufio.NewScanner(os.Stdin)
+				var lines []string
+				for scanner.Scan() {
+					lines = append(lines, scanner.Text())
+				}
+				description = strings.Join(lines, "\n")
+			}
+		}
+
+		c, err := trackClient()
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		if err := c.SetTrackDescription(cfg.ProjectDir, args[0], description); err != nil {
+			return fmt.Errorf("failed to set track description: %w", err)
+		}
+
+		fmt.Printf("Track %s description updated\n", args[0])
 		return nil
 	},
 }

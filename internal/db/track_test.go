@@ -31,7 +31,7 @@ func TestCreateTrackRoundTrip(t *testing.T) {
 	database := openTrackTestDB(t)
 	projID := trackTestProject(t, database, "/tmp/track-proj")
 
-	created, err := database.CreateTrack(&projID, "Payments API", "payments-api", "pay:impl", "seed context", nil)
+	created, err := database.CreateTrack(&projID, "Payments API", "payments-api", "pay:impl", "seed context", "", nil)
 	if err != nil {
 		t.Fatalf("CreateTrack: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestCreateTrackRoundTrip(t *testing.T) {
 func TestCreateTrackEmptySlugRejected(t *testing.T) {
 	database := openTrackTestDB(t)
 	projID := trackTestProject(t, database, "/tmp/track-proj")
-	if _, err := database.CreateTrack(&projID, "x", "", "", "", nil); err == nil {
+	if _, err := database.CreateTrack(&projID, "x", "", "", "", "", nil); err == nil {
 		t.Fatal("expected error for empty slug")
 	}
 }
@@ -85,7 +85,7 @@ func TestCreateTrackEmptySlugRejected(t *testing.T) {
 func TestCreateTrackNumericSlugRejected(t *testing.T) {
 	database := openTrackTestDB(t)
 	projID := trackTestProject(t, database, "/tmp/track-proj")
-	if _, err := database.CreateTrack(&projID, "2024", "2024", "", "", nil); err == nil || !strings.Contains(err.Error(), "numeric") {
+	if _, err := database.CreateTrack(&projID, "2024", "2024", "", "", "", nil); err == nil || !strings.Contains(err.Error(), "numeric") {
 		t.Fatalf("expected numeric-slug rejection, got %v", err)
 	}
 }
@@ -95,26 +95,26 @@ func TestTrackSlugUniquenessPerScope(t *testing.T) {
 	projA := trackTestProject(t, database, "/tmp/proj-a")
 	projB := trackTestProject(t, database, "/tmp/proj-b")
 
-	if _, err := database.CreateTrack(&projA, "Sprint", "sprint", "", "", nil); err != nil {
+	if _, err := database.CreateTrack(&projA, "Sprint", "sprint", "", "", "", nil); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 	// Duplicate slug in the same project → error with friendly message.
-	if _, err := database.CreateTrack(&projA, "Sprint", "sprint", "", "", nil); err == nil {
+	if _, err := database.CreateTrack(&projA, "Sprint", "sprint", "", "", "", nil); err == nil {
 		t.Fatal("expected duplicate slug error in same project")
 	} else if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("expected friendly duplicate error, got %v", err)
 	}
 	// Same slug in another project → OK.
-	if _, err := database.CreateTrack(&projB, "Sprint", "sprint", "", "", nil); err != nil {
+	if _, err := database.CreateTrack(&projB, "Sprint", "sprint", "", "", "", nil); err != nil {
 		t.Fatalf("same slug in other project should succeed: %v", err)
 	}
 	// Same slug as a global track → OK (coexists with project tracks).
-	globalTr, err := database.CreateTrack(nil, "Sprint", "sprint", "", "global ctx", nil)
+	globalTr, err := database.CreateTrack(nil, "Sprint", "sprint", "", "global ctx", "", nil)
 	if err != nil {
 		t.Fatalf("global track with same slug should succeed: %v", err)
 	}
 	// Duplicate GLOBAL slug → error (proves the partial index on project_id IS NULL).
-	if _, err := database.CreateTrack(nil, "Sprint", "sprint", "", "", nil); err == nil {
+	if _, err := database.CreateTrack(nil, "Sprint", "sprint", "", "", "", nil); err == nil {
 		t.Fatal("expected duplicate global slug error")
 	}
 
@@ -141,15 +141,15 @@ func TestGetTrackChainRootFirst(t *testing.T) {
 	database := openTrackTestDB(t)
 	projID := trackTestProject(t, database, "/tmp/track-proj")
 
-	root, err := database.CreateTrack(nil, "Root", "root", "", "root ctx", nil)
+	root, err := database.CreateTrack(nil, "Root", "root", "", "root ctx", "", nil)
 	if err != nil {
 		t.Fatalf("create root: %v", err)
 	}
-	mid, err := database.CreateTrack(&projID, "Mid", "mid", "", "mid ctx", &root.ID)
+	mid, err := database.CreateTrack(&projID, "Mid", "mid", "", "mid ctx", "", &root.ID)
 	if err != nil {
 		t.Fatalf("create mid: %v", err)
 	}
-	leaf, err := database.CreateTrack(&projID, "Leaf", "leaf", "", "leaf ctx", &mid.ID)
+	leaf, err := database.CreateTrack(&projID, "Leaf", "leaf", "", "leaf ctx", "", &mid.ID)
 	if err != nil {
 		t.Fatalf("create leaf: %v", err)
 	}
@@ -173,14 +173,14 @@ func TestCreateTrackDepthCap(t *testing.T) {
 
 	var parentID *int64
 	for i := 0; i < maxTrackDepth; i++ {
-		tr, err := database.CreateTrack(&projID, "T", trackDepthSlug(i), "", "", parentID)
+		tr, err := database.CreateTrack(&projID, "T", trackDepthSlug(i), "", "", "", parentID)
 		if err != nil {
 			t.Fatalf("create depth %d: %v", i, err)
 		}
 		parentID = &tr.ID
 	}
 	// Depth is now maxTrackDepth; one more child must be rejected.
-	if _, err := database.CreateTrack(&projID, "T", "too-deep", "", "", parentID); err == nil {
+	if _, err := database.CreateTrack(&projID, "T", "too-deep", "", "", "", parentID); err == nil {
 		t.Fatal("expected depth-cap error")
 	} else if !strings.Contains(err.Error(), "depth") {
 		t.Errorf("expected depth error, got %v", err)
@@ -196,34 +196,34 @@ func TestCreateTrackScopeRules(t *testing.T) {
 	projA := trackTestProject(t, database, "/tmp/proj-a")
 	projB := trackTestProject(t, database, "/tmp/proj-b")
 
-	globalParent, err := database.CreateTrack(nil, "Global Parent", "global-parent", "", "", nil)
+	globalParent, err := database.CreateTrack(nil, "Global Parent", "global-parent", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("create global parent: %v", err)
 	}
-	projParent, err := database.CreateTrack(&projA, "Proj Parent", "proj-parent", "", "", nil)
+	projParent, err := database.CreateTrack(&projA, "Proj Parent", "proj-parent", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("create project parent: %v", err)
 	}
 
 	// Project child → global parent: OK.
-	if _, err := database.CreateTrack(&projA, "Child", "child-1", "", "", &globalParent.ID); err != nil {
+	if _, err := database.CreateTrack(&projA, "Child", "child-1", "", "", "", &globalParent.ID); err != nil {
 		t.Errorf("project child under global parent should succeed: %v", err)
 	}
 	// Project child → same-project parent: OK.
-	if _, err := database.CreateTrack(&projA, "Child", "child-2", "", "", &projParent.ID); err != nil {
+	if _, err := database.CreateTrack(&projA, "Child", "child-2", "", "", "", &projParent.ID); err != nil {
 		t.Errorf("project child under same-project parent should succeed: %v", err)
 	}
 	// Global child → project parent: forbidden.
-	if _, err := database.CreateTrack(nil, "Child", "child-3", "", "", &projParent.ID); err == nil {
+	if _, err := database.CreateTrack(nil, "Child", "child-3", "", "", "", &projParent.ID); err == nil {
 		t.Error("global child under project parent should fail")
 	}
 	// Cross-project parent: forbidden.
-	if _, err := database.CreateTrack(&projB, "Child", "child-4", "", "", &projParent.ID); err == nil {
+	if _, err := database.CreateTrack(&projB, "Child", "child-4", "", "", "", &projParent.ID); err == nil {
 		t.Error("cross-project parent should fail")
 	}
 	// Missing parent: error.
 	missing := int64(9999)
-	if _, err := database.CreateTrack(&projA, "Child", "child-5", "", "", &missing); err == nil {
+	if _, err := database.CreateTrack(&projA, "Child", "child-5", "", "", "", &missing); err == nil {
 		t.Error("missing parent should fail")
 	}
 }
@@ -232,7 +232,7 @@ func TestUpdateTrackContext(t *testing.T) {
 	database := openTrackTestDB(t)
 	projID := trackTestProject(t, database, "/tmp/track-proj")
 
-	tr, err := database.CreateTrack(&projID, "T", "t", "", "", nil)
+	tr, err := database.CreateTrack(&projID, "T", "t", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("CreateTrack: %v", err)
 	}
@@ -277,6 +277,50 @@ func TestUpdateTrackContext(t *testing.T) {
 	}
 }
 
+func TestTrackDescription(t *testing.T) {
+	database := openTrackTestDB(t)
+	projID := trackTestProject(t, database, "/tmp/track-proj")
+
+	created, err := database.CreateTrack(&projID, "Payments API", "payments-api", "", "seed context", "Owns the payments API surface", nil)
+	if err != nil {
+		t.Fatalf("CreateTrack: %v", err)
+	}
+	if created.Description != "Owns the payments API surface" {
+		t.Errorf("created description = %q", created.Description)
+	}
+	got, err := database.GetTrack(created.ID)
+	if err != nil {
+		t.Fatalf("GetTrack: %v", err)
+	}
+	if got.Description != "Owns the payments API surface" {
+		t.Errorf("round-tripped description = %q", got.Description)
+	}
+	if got.Context != "seed context" {
+		t.Errorf("description write must not disturb context, got %q", got.Context)
+	}
+
+	before := got.UpdatedAt
+	if err := database.UpdateTrackDescription(created.ID, "Now covers refunds too"); err != nil {
+		t.Fatalf("UpdateTrackDescription: %v", err)
+	}
+	got, _ = database.GetTrack(created.ID)
+	if got.Description != "Now covers refunds too" {
+		t.Errorf("description = %q, want %q", got.Description, "Now covers refunds too")
+	}
+	if got.Context != "seed context" {
+		t.Errorf("context = %q, want it untouched by a description write", got.Context)
+	}
+	if !got.UpdatedAt.After(before) {
+		t.Errorf("UpdatedAt = %v, want it bumped past %v", got.UpdatedAt, before)
+	}
+
+	if err := database.UpdateTrackDescription(9999, "x"); err == nil {
+		t.Error("expected 'track not found' for unknown id")
+	} else if !strings.Contains(err.Error(), "track not found") {
+		t.Errorf("expected 'track not found', got %v", err)
+	}
+}
+
 func TestListTracksVisibility(t *testing.T) {
 	database := openTrackTestDB(t)
 	projA := trackTestProject(t, database, "/tmp/proj-a")
@@ -284,7 +328,7 @@ func TestListTracksVisibility(t *testing.T) {
 
 	mustCreate := func(projectID *int64, name, slug string) {
 		t.Helper()
-		if _, err := database.CreateTrack(projectID, name, slug, "", "", nil); err != nil {
+		if _, err := database.CreateTrack(projectID, name, slug, "", "", "", nil); err != nil {
 			t.Fatalf("CreateTrack(%s): %v", slug, err)
 		}
 	}
@@ -317,7 +361,7 @@ func TestTaskTrackIDRoundTrip(t *testing.T) {
 	database := openTrackTestDB(t)
 	projID := trackTestProject(t, database, "/tmp/track-proj")
 
-	tr, err := database.CreateTrack(&projID, "T", "t", "", "", nil)
+	tr, err := database.CreateTrack(&projID, "T", "t", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("CreateTrack: %v", err)
 	}

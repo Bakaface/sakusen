@@ -78,11 +78,12 @@ type taskStore interface {
 	// Tracks (tracks table). GetTrackChain also appears in the "forwarded to
 	// workflow.Engine" group's contract — it is listed here because handlers
 	// (get_track) call it directly too.
-	CreateTrack(projectID *int64, name, slug, workflow, context string, parentID *int64) (*task.Track, error)
+	CreateTrack(projectID *int64, name, slug, workflow, context, description string, parentID *int64) (*task.Track, error)
 	GetTrack(id int64) (*task.Track, error)
 	GetTrackBySlug(projectID *int64, slug string) (*task.Track, error)
 	ListTracks(projectID int64) ([]*task.Track, error)
 	UpdateTrackContext(id int64, context, mode string) error
+	UpdateTrackDescription(id int64, description string) error
 	GetTrackChain(id int64) ([]*task.Track, error)
 
 	// Projects.

@@ -9,13 +9,14 @@ import "time"
 // ParentID nil = root track. Parents must be same-or-broader scope: a project
 // track may have a global parent, but not vice versa.
 type Track struct {
-	ID        int64
-	ProjectID *int64
-	ParentID  *int64
-	Name      string
-	Slug      string
-	Workflow  string // optional workflow name (often namespaced "<slug>:<name>")
-	Context   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          int64
+	ProjectID   *int64
+	ParentID    *int64
+	Name        string
+	Slug        string
+	Workflow    string // optional workflow name (often namespaced "<slug>:<name>")
+	Context     string
+	Description string // stable one-liner stating the track's purpose; replace-only, never injected into prompts
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

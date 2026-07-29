@@ -15,7 +15,7 @@ import (
 // this is also the only cycle guard the chain walk needs.
 const maxTrackDepth = 10
 
-const trackColumns = `id, project_id, parent_id, name, slug, workflow, context, created_at, updated_at`
+const trackColumns = `id, project_id, parent_id, name, slug, workflow, context, description, created_at, updated_at`
 
 // CreateTrack inserts a new track after validating slug, parent scope, and
 // chain depth. projectID nil creates a global track (visible from every
@@ -23,7 +23,7 @@ const trackColumns = `id, project_id, parent_id, name, slug, workflow, context, 
 // track may have a global parent or a parent in the same project, but a global
 // track may never have a project-scoped parent, and cross-project parents are
 // forbidden.
-func (db *DB) CreateTrack(projectID *int64, name, slug, workflow, context string, parentID *int64) (*task.Track, error) {
+func (db *DB) CreateTrack(projectID *int64, name, slug, workflow, context, description string, parentID *int64) (*task.Track, error) {
 	if strings.TrimSpace(slug) == "" {
 		return nil, fmt.Errorf("track slug cannot be empty")
 	}
@@ -58,8 +58,8 @@ func (db *DB) CreateTrack(projectID *int64, name, slug, workflow, context string
 	}
 
 	result, err := db.sqlDB.Exec(
-		`INSERT INTO tracks (project_id, parent_id, name, slug, workflow, context) VALUES (?, ?, ?, ?, ?, ?)`,
-		projectID, parentID, name, slug, workflow, context,
+		`INSERT INTO tracks (project_id, parent_id, name, slug, workflow, context, description) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		projectID, parentID, name, slug, workflow, context, description,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -153,6 +153,26 @@ func (db *DB) UpdateTrackContext(id int64, context, mode string) error {
 	return nil
 }
 
+// UpdateTrackDescription replaces the track's description. Replace-only: the
+// description is a stable one-liner, not an accumulator like context.
+func (db *DB) UpdateTrackDescription(id int64, description string) error {
+	result, err := db.sqlDB.Exec(
+		`UPDATE tracks SET description = ?, updated_at = ? WHERE id = ?`,
+		description, time.Now(), id,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("track not found")
+	}
+	return nil
+}
+
 // GetTrackChain returns the track and its ancestors, root-first. Follows the
 // in-Go loop convention of this package (see HasCircularDependency) rather
 // than a recursive CTE. Errors if the chain exceeds maxTrackDepth hops.
@@ -182,7 +202,7 @@ func scanTrackRow(s scanner) (*task.Track, error) {
 	var projectID, parentID sql.NullInt64
 	var createdAt, updatedAt sql.NullTime
 
-	err := s.Scan(&tr.ID, &projectID, &parentID, &tr.Name, &tr.Slug, &tr.Workflow, &tr.Context, &createdAt, &updatedAt)
+	err := s.Scan(&tr.ID, &projectID, &parentID, &tr.Name, &tr.Slug, &tr.Workflow, &tr.Context, &tr.Description, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}

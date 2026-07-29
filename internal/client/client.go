@@ -895,6 +895,27 @@ func (c *Client) UpdateTaskTrackContext(taskID int64, context, mode string) erro
 	})
 }
 
+// SetTrackDescription replaces the description of an arbitrary track resolved
+// by ref. This is the human/CLI surface; agents use UpdateTaskTrackDescription
+// instead.
+func (c *Client) SetTrackDescription(projectPath, ref, description string) error {
+	return c.requestOK(daemon.MsgSetTrackDescription, daemon.SetTrackDescriptionRequest{
+		ProjectPath: projectPath,
+		Track:       ref,
+		Description: description,
+	})
+}
+
+// UpdateTaskTrackDescription replaces the description of the calling task's own
+// track. The daemon rejects tasks with no track or no active step — the
+// own-track-only enforcement backing the update_track_description MCP tool.
+func (c *Client) UpdateTaskTrackDescription(taskID int64, description string) error {
+	return c.requestOK(daemon.MsgUpdateTaskTrackDescription, daemon.UpdateTaskTrackDescriptionRequest{
+		TaskID:      taskID,
+		Description: description,
+	})
+}
+
 // ListWorkflows returns the flat list of workflows configured for the project
 // rooted at projectPath.
 func (c *Client) ListWorkflows(projectPath string) (*daemon.ListWorkflowsResponse, error) {

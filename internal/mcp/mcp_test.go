@@ -172,7 +172,7 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 	for _, want := range []string{
 		"create_task", "list_workflows", "get_task", "update_step_context",
 		"list_tasks", "retry_task", "update_task_description", "update_task_dependencies",
-		"create_track", "update_track_context", "list_tracks",
+		"create_track", "update_track_context", "update_track_description", "list_tracks",
 	} {
 		if !got[want] {
 			t.Errorf("tool %q not advertised; got %v", want, got)

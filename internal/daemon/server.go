@@ -726,6 +726,22 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 		}
 		s.handleUpdateTaskTrackContext(conn, req)
 
+	case MsgSetTrackDescription:
+		var req SetTrackDescriptionRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleSetTrackDescription(conn, req)
+
+	case MsgUpdateTaskTrackDescription:
+		var req UpdateTaskTrackDescriptionRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleUpdateTaskTrackDescription(conn, req)
+
 	case MsgShutdown:
 		s.mu.RLock()
 		clientCount := len(s.clients)

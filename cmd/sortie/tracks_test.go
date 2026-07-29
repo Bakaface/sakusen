@@ -17,7 +17,7 @@ func TestTracksCmd_Registered(t *testing.T) {
 	for _, c := range tracksCmd.Commands() {
 		subs[c.Name()] = true
 	}
-	for _, want := range []string{"create", "list", "show", "set-context"} {
+	for _, want := range []string{"create", "list", "show", "set-context", "set-description"} {
 		if !subs[want] {
 			t.Errorf("expected 'tracks %s' subcommand", want)
 		}
@@ -25,7 +25,7 @@ func TestTracksCmd_Registered(t *testing.T) {
 }
 
 func TestTracksCmd_Flags(t *testing.T) {
-	for _, name := range []string{"parent", "global", "workflow", "context"} {
+	for _, name := range []string{"parent", "global", "workflow", "context", "description"} {
 		if tracksCreateCmd.Flag(name) == nil {
 			t.Errorf("expected --%s on tracks create", name)
 		}

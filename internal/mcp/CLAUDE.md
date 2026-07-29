@@ -9,7 +9,8 @@ irrecoverably destructive operations**.
 - **No irrecoverable operations**: the surface is `create_task`, `get_task`, `list_tasks`,
   `list_workflows`, `retry_task`, `advance_task`, `update_task_description`,
   `update_task_dependencies`, `create_tasks_and_wait`, `wait_for_tasks`,
-  `update_step_context`, `create_track`, `update_track_context`, `list_tracks`. Do not add
+  `update_step_context`, `create_track`, `update_track_context`,
+  `update_track_description`, `list_tracks`. Do not add
   `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision —
   every exposed mutation must be recoverable (re-editable DB state or a re-queued task;
   `retry_task` stops only the task's own agent and preserves worktree/branch).
@@ -18,7 +19,9 @@ irrecoverably destructive operations**.
   `advance_task` is admitted because the daemon only accepts it for tasks in tmux state and
   a premature advance is recoverable via `retry_task`. `update_track_context` is admitted
   because the daemon enforces it can only write the **calling task's own track** (the task
-  must have a track and an active step — see `handleUpdateTaskTrackContext`). Caveat: track
+  must have a track and an active step — see `handleUpdateTaskTrackContext`).
+  `update_track_description` is admitted on the same grounds: own-track-enforced via
+  `handleUpdateTaskTrackDescription`, and a plain re-editable DB field. Caveat: track
   context is a **persistent cross-task prompt-injection surface** — anything written flows
   verbatim into the prompts of every future task attached to that track or its children;
   the tool descriptions warn about this.
@@ -47,6 +50,7 @@ irrecoverably destructive operations**.
 | `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |
 | `tool_create_track.go` | `create_track` tool definition + handler |
 | `tool_update_track_context.go` | `update_track_context` tool definition + handler (own-track-only) |
+| `tool_update_track_description.go` | `update_track_description` tool definition + handler (own-track-only, replace-only) |
 | `tool_list_tracks.go` | `list_tracks` tool definition + handler |
 
 ## Conventions

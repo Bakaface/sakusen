@@ -77,3 +77,40 @@ func TestMigrateReappliesFromOlderRecordedVersion(t *testing.T) {
 		t.Errorf("expected migrateV20 to restore tasks.track_id: %v", err)
 	}
 }
+
+// TestMigrateV21AddsTrackDescription simulates a database last migrated at
+// version 20 (tracks exist, but without a description column) and confirms the
+// upgrade adds the column without disturbing existing rows.
+func TestMigrateV21AddsTrackDescription(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+
+	if _, err := database.sqlDB.Exec(`INSERT INTO tracks (name, slug, context) VALUES ('Legacy', 'legacy', 'kept')`); err != nil {
+		t.Fatalf("failed to seed track: %v", err)
+	}
+	if _, err := database.sqlDB.Exec(`ALTER TABLE tracks DROP COLUMN description`); err != nil {
+		t.Fatalf("failed to drop tracks.description: %v", err)
+	}
+	if _, err := database.sqlDB.Exec(`UPDATE schema_version SET version = 20`); err != nil {
+		t.Fatalf("failed to roll back schema_version: %v", err)
+	}
+
+	if err := database.migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	tr, err := database.GetTrackBySlug(nil, "legacy")
+	if err != nil {
+		t.Fatalf("GetTrackBySlug after migrate: %v", err)
+	}
+	if tr.Description != "" {
+		t.Errorf("pre-existing row description = %q, want the column default", tr.Description)
+	}
+	if tr.Context != "kept" {
+		t.Errorf("context = %q, want %q", tr.Context, "kept")
+	}
+}

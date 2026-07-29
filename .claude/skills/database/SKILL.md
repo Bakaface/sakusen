@@ -8,7 +8,7 @@ description: >
 
 # Database & Persistence
 
-SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys enabled. Schema versioned with progressive migrations (currently **v20**).
+SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys enabled. Schema versioned with progressive migrations (currently **v21**).
 
 ## Schema
 
@@ -127,11 +127,12 @@ DeleteTaskStepsFrom(taskID int64, stepNames []string) error                     
 Tracks are named, mutable, hierarchical context containers (`tracks` table; see `internal/task/track.go`). `project_id` NULL = global track; slug uniqueness is per-scope via two partial unique indexes. Tasks reference a track via `tasks.track_id`.
 
 ```go
-CreateTrack(projectID *int64, name, slug, workflow, context string, parentID *int64) (*task.Track, error) // validates slug (non-empty, not purely numeric), parent scope, depth cap (maxTrackDepth=10)
+CreateTrack(projectID *int64, name, slug, workflow, context, description string, parentID *int64) (*task.Track, error) // validates slug (non-empty, not purely numeric), parent scope, depth cap (maxTrackDepth=10)
 GetTrack(id int64) (*task.Track, error)
 GetTrackBySlug(projectID *int64, slug string) (*task.Track, error) // project shadows global; nil projectID = global only
 ListTracks(projectID int64) ([]*task.Track, error)                 // project + global tracks, project first, slug-ordered
 UpdateTrackContext(id int64, context, mode string) error           // mode "replace" (default) or "append" — append is a single SQL statement (race-free)
+UpdateTrackDescription(id int64, description string) error         // replace-only; the stable purpose one-liner, distinct from the context accumulator
 GetTrackChain(id int64) ([]*task.Track, error)                     // track + ancestors, root-first; in-Go loop, errors past maxTrackDepth
 ```
 

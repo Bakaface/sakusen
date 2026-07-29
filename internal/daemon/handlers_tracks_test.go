@@ -60,6 +60,18 @@ func TestHandleCreateTrack(t *testing.T) {
 		}
 	})
 
+	t.Run("description carried into the response", func(t *testing.T) {
+		s, _ := setupServerWithProject(t)
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Payments API", ProjectPath: "/tmp/sortie-test", Description: "Owns the payments API surface"})
+		msg := readOneMessage(t, clientConn)
+		mustNotError(t, msg)
+		resp := decodePayload[CreateTrackResponse](t, msg)
+		if resp.Track.Description != "Owns the payments API surface" {
+			t.Errorf("description = %q", resp.Track.Description)
+		}
+	})
+
 	t.Run("global track needs no project path", func(t *testing.T) {
 		s, _ := setupServerWithProject(t)
 		clientConn, serverConn := pipeForHandler(t)
@@ -88,7 +100,7 @@ func TestHandleCreateTrack(t *testing.T) {
 
 	t.Run("parent by slug and by numeric ID", func(t *testing.T) {
 		s, _ := setupServerWithProject(t)
-		parent, err := s.database.CreateTrack(nil, "Sprint", "sprint", "", "", nil)
+		parent, err := s.database.CreateTrack(nil, "Sprint", "sprint", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +125,7 @@ func TestHandleCreateTrack(t *testing.T) {
 
 	t.Run("global child under project parent rejected", func(t *testing.T) {
 		s, projID := setupServerWithProject(t)
-		if _, err := s.database.CreateTrack(&projID, "Proj Parent", "proj-parent", "", "", nil); err != nil {
+		if _, err := s.database.CreateTrack(&projID, "Proj Parent", "proj-parent", "", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
 		clientConn, serverConn := pipeForHandler(t)
@@ -136,7 +148,7 @@ func TestHandleCreateTrack(t *testing.T) {
 
 func TestHandleSetTrackContext(t *testing.T) {
 	s, projID := setupServerWithProject(t)
-	tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", nil)
+	tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +181,95 @@ func TestHandleSetTrackContext(t *testing.T) {
 	})
 }
 
+func TestHandleSetTrackDescription(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	tr, err := s.database.CreateTrack(&projID, "T", "t", "", "ctx", "initial", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("replaces the description", func(t *testing.T) {
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleSetTrackDescription(serverConn, SetTrackDescriptionRequest{ProjectPath: "/tmp/sortie-test", Track: "t", Description: "corrected"})
+		mustNotError(t, readOneMessage(t, clientConn))
+
+		got, _ := s.database.GetTrack(tr.ID)
+		if got.Description != "corrected" {
+			t.Errorf("description = %q, want %q", got.Description, "corrected")
+		}
+		if got.Context != "ctx" {
+			t.Errorf("context = %q, want it untouched", got.Context)
+		}
+	})
+
+	t.Run("unknown ref", func(t *testing.T) {
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleSetTrackDescription(serverConn, SetTrackDescriptionRequest{ProjectPath: "/tmp/sortie-test", Track: "nope", Description: "x"})
+		expectError(t, readOneMessage(t, clientConn), "not found")
+	})
+}
+
+func TestHandleUpdateTaskTrackDescription(t *testing.T) {
+	t.Run("running step with track succeeds", func(t *testing.T) {
+		s, projID := setupServerWithProject(t)
+		tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk, err := s.database.CreateTaskWithPriority(projID, "tracked", "desc", "tracked", "default", "", "main", "", "", "running", "medium", true, nil, &tr.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.database.UpdateTaskStep(tk.ID, 0, "implementing"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.database.CreateTaskStep(tk.ID, "implementing"); err != nil {
+			t.Fatal(err)
+		}
+
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleUpdateTaskTrackDescription(serverConn, UpdateTaskTrackDescriptionRequest{TaskID: tk.ID, Description: "payments work"})
+		mustNotError(t, readOneMessage(t, clientConn))
+
+		got, _ := s.database.GetTrack(tr.ID)
+		if got.Description != "payments work" {
+			t.Errorf("track description = %q, want %q", got.Description, "payments work")
+		}
+	})
+
+	t.Run("task with no track rejected", func(t *testing.T) {
+		s, projID := setupServerWithProject(t)
+		tk := createRunningStep(t, s, projID, "implementing")
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleUpdateTaskTrackDescription(serverConn, UpdateTaskTrackDescriptionRequest{TaskID: tk.ID, Description: "x"})
+		expectError(t, readOneMessage(t, clientConn), "has no track")
+	})
+
+	t.Run("task with no active step rejected", func(t *testing.T) {
+		s, projID := setupServerWithProject(t)
+		tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk, err := s.database.CreateTaskWithPriority(projID, "idle", "desc", "idle", "default", "", "main", "", "", "pending", "medium", true, nil, &tr.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleUpdateTaskTrackDescription(serverConn, UpdateTaskTrackDescriptionRequest{TaskID: tk.ID, Description: "x"})
+		expectError(t, readOneMessage(t, clientConn), "has no active step")
+
+		got, _ := s.database.GetTrack(tr.ID)
+		if got.Description != "" {
+			t.Errorf("description = %q, want empty (write must be rejected)", got.Description)
+		}
+	})
+}
+
 func TestHandleUpdateTaskTrackContext(t *testing.T) {
 	t.Run("running step with track succeeds", func(t *testing.T) {
 		s, projID := setupServerWithProject(t)
-		tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", nil)
+		tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -209,7 +306,7 @@ func TestHandleUpdateTaskTrackContext(t *testing.T) {
 
 	t.Run("completed task with stale current_step rejected", func(t *testing.T) {
 		s, projID := setupServerWithProject(t)
-		tr, err := s.database.CreateTrack(&projID, "T2", "t2", "", "", nil)
+		tr, err := s.database.CreateTrack(&projID, "T2", "t2", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +332,7 @@ func TestHandleUpdateTaskTrackContext(t *testing.T) {
 
 	t.Run("task with no active step rejected", func(t *testing.T) {
 		s, projID := setupServerWithProject(t)
-		tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", nil)
+		tr, err := s.database.CreateTrack(&projID, "T", "t", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -253,11 +350,11 @@ func TestHandleUpdateTaskTrackContext(t *testing.T) {
 func TestHandleListAndGetTrack(t *testing.T) {
 	s, projID := setupServerWithProject(t)
 	longCtx := strings.Repeat("x", 300)
-	root, err := s.database.CreateTrack(nil, "Sprint", "sprint", "", "sprint goal", nil)
+	root, err := s.database.CreateTrack(nil, "Sprint", "sprint", "", "sprint goal", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf, err := s.database.CreateTrack(&projID, "Payments", "payments", "", longCtx, &root.ID)
+	leaf, err := s.database.CreateTrack(&projID, "Payments", "payments", "", longCtx, "", &root.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +385,7 @@ func TestHandleListAndGetTrack(t *testing.T) {
 	t.Run("preview truncation is rune-safe", func(t *testing.T) {
 		// 100 × "€" (3 bytes each) = 300 bytes; a naive 200-byte cut lands
 		// mid-rune, so the preview must back up to a boundary (198 bytes).
-		if _, err := s.database.CreateTrack(&projID, "Unicode", "unicode", "", strings.Repeat("€", 100), nil); err != nil {
+		if _, err := s.database.CreateTrack(&projID, "Unicode", "unicode", "", strings.Repeat("€", 100), "", nil); err != nil {
 			t.Fatal(err)
 		}
 		clientConn, serverConn := pipeForHandler(t)
@@ -344,6 +441,31 @@ func TestHandleListAndGetTrack(t *testing.T) {
 		go s.handleGetTrack(serverConn2, GetTrackRequest{Track: "payments"})
 		expectError(t, readOneMessage(t, clientConn2), "not found")
 	})
+
+	t.Run("list carries description alongside the context preview", func(t *testing.T) {
+		if _, err := s.database.CreateTrack(&projID, "Routing", "routing", "", longCtx, "Routes incoming work", nil); err != nil {
+			t.Fatal(err)
+		}
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sortie-test"})
+		msg := readOneMessage(t, clientConn)
+		mustNotError(t, msg)
+		resp := decodePayload[ListTracksResponse](t, msg)
+		for _, info := range resp.Tracks {
+			if info.Slug != "routing" {
+				continue
+			}
+			if info.Description != "Routes incoming work" {
+				t.Errorf("description = %q, want %q", info.Description, "Routes incoming work")
+			}
+			// Description is its own field, not derived from the context.
+			if len(info.ContextPreview) != 200 || info.ContextLen != 300 {
+				t.Errorf("preview len=%d context_len=%d, want the preview intact", len(info.ContextPreview), info.ContextLen)
+			}
+			return
+		}
+		t.Fatal("routing track not in list")
+	})
 }
 
 func TestCreateTaskFromRequest_Tracks(t *testing.T) {
@@ -365,7 +487,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 
 	t.Run("slug attach sets track_id", func(t *testing.T) {
 		s, projID := newServer(t)
-		tr, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", nil)
+		tr, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -380,7 +502,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 
 	t.Run("numeric ID attach", func(t *testing.T) {
 		s, projID := newServer(t)
-		tr, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", nil)
+		tr, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -406,7 +528,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		otherTr, err := s.database.CreateTrack(&otherProj.ID, "Foreign", "foreign", "", "", nil)
+		otherTr, err := s.database.CreateTrack(&otherProj.ID, "Foreign", "foreign", "", "", "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -417,7 +539,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 
 	t.Run("none sentinel is trackless", func(t *testing.T) {
 		s, projID := newServer(t)
-		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", nil); err != nil {
+		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "None"})
@@ -436,7 +558,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 			{Name: "explicit-flow", Steps: []config.StepConfig{{Name: "implementing", Prompt: "p"}}},
 		}
 		s, projID := newServer(t, wfs...)
-		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "track-flow", "", nil); err != nil {
+		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "track-flow", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
 
@@ -471,7 +593,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 
 	t.Run("track referencing unknown workflow errors", func(t *testing.T) {
 		s, projID := newServer(t)
-		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "ghost-flow", "", nil); err != nil {
+		if _, err := s.database.CreateTrack(&projID, "Payments", "payments", "ghost-flow", "", "", nil); err != nil {
 			t.Fatal(err)
 		}
 		_, _, err := s.createTaskFromRequest(CreateTaskRequest{Description: "d", ProjectPath: projectPath, Track: "payments"})
@@ -486,11 +608,11 @@ func TestCreateTasksAndWait_TrackInheritance(t *testing.T) {
 	wf := config.WorkflowConfig{Name: "default", Steps: []config.StepConfig{{Name: "implementing", Prompt: "p"}}}
 	s, projID := setupServerWithPinnedWorkflow(t, projectPath, wf)
 
-	parentTrack, err := s.database.CreateTrack(&projID, "Sprint", "sprint", "", "", nil)
+	parentTrack, err := s.database.CreateTrack(&projID, "Sprint", "sprint", "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherTrack, err := s.database.CreateTrack(&projID, "Other", "other", "", "", nil)
+	otherTrack, err := s.database.CreateTrack(&projID, "Other", "other", "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +657,7 @@ func TestCreateTasksAndWait_TrackInheritance(t *testing.T) {
 
 func TestTaskToInfoTrackEnrichment(t *testing.T) {
 	s, projID := setupServerWithProject(t)
-	tr, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", nil)
+	tr, err := s.database.CreateTrack(&projID, "Payments", "payments", "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
