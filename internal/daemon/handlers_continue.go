@@ -212,6 +212,10 @@ func (s *Server) continuePausedTask(conn net.Conn, t *task.Task) {
 		s.sendError(conn, fmt.Sprintf("failed to update task status: %v", err))
 		return
 	}
+	// Keep the in-memory struct in sync: the engine restores t.Status into
+	// the DB after each step summarization, so a stale pause status here
+	// would be written back while the task is running.
+	t.Status = task.StatusRunning
 
 	if err := s.startTaskAgent(t); err != nil {
 		if errors.Is(err, agent.ErrTaskAlreadyTracked) {
@@ -324,6 +328,11 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 		if err := s.database.UpdateTaskStatus(t.ID, task.StatusRunning); err != nil {
 			return tmuxAdvanceOutcome{}, fmt.Errorf("failed to update task status: %v", err)
 		}
+		// Keep the in-memory struct in sync: ResumeAfterApproval summarizes
+		// the just-finished tmux step, and markSummarizingStep restores
+		// t.Status into the DB afterwards — a stale "tmux" here would be
+		// written back while the task is running.
+		t.Status = task.StatusRunning
 
 		engine := pc.engine
 		manager := s.manager

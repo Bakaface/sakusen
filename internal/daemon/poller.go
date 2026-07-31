@@ -121,6 +121,11 @@ func (s *Server) startTaskAgent(t *task.Task) error {
 		if !claimed {
 			return agent.ErrTaskAlreadyTracked
 		}
+		// Mirror the claim into the in-memory struct: the engine holds this
+		// task for the whole run, and markSummarizingStep restores t.Status
+		// into the DB after each step summarization — a stale "pending" here
+		// would be written back mid-run.
+		t.Status = task.StatusRunning
 	}
 
 	pc, err := s.getProjectContext(t.ProjectID)
