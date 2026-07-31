@@ -254,3 +254,105 @@ func TestDeleteTask_CleansWaitsOnEdges(t *testing.T) {
 		t.Errorf("expected waits-on edge removed when child deleted")
 	}
 }
+
+// --- Cross-project waits ---------------------------------------------------
+//
+// task_waits_on is a pure task-ID relation with no project column, so a parent
+// may wait on children living in an entirely different project. These tests
+// lock that in so a future change does not add a project filter.
+
+func TestAllWaitsOnTerminal_CrossProject(t *testing.T) {
+	db := openTestDBForWaits(t)
+	projA := mustProject(t, db, "/tmp/proj-a")
+	projB := mustProject(t, db, "/tmp/proj-b")
+	if projA == projB {
+		t.Fatalf("expected distinct project rows, both = %d", projA)
+	}
+
+	parent := mustCreateTaskForWaits(t, db, projA, "xparent")
+	c1 := mustCreateTaskForWaits(t, db, projB, "xc1")
+	c2 := mustCreateTaskForWaits(t, db, projB, "xc2")
+
+	if err := db.AddTaskWaitsOn(parent.ID, c1.ID); err != nil {
+		t.Fatalf("AddTaskWaitsOn c1: %v", err)
+	}
+	if err := db.AddTaskWaitsOn(parent.ID, c2.ID); err != nil {
+		t.Fatalf("AddTaskWaitsOn c2: %v", err)
+	}
+
+	allDone, err := db.AllWaitsOnTerminal(parent.ID)
+	if err != nil || allDone {
+		t.Fatalf("non-terminal cross-project children: allDone=%v err=%v", allDone, err)
+	}
+
+	if err := db.UpdateTaskStatus(c1.ID, task.StatusCompleted); err != nil {
+		t.Fatalf("update c1: %v", err)
+	}
+	if err := db.UpdateTaskStatus(c2.ID, task.StatusFailed); err != nil {
+		t.Fatalf("update c2: %v", err)
+	}
+
+	allDone, err = db.AllWaitsOnTerminal(parent.ID)
+	if err != nil || !allDone {
+		t.Fatalf("completed+failed cross-project children should be terminal: allDone=%v err=%v", allDone, err)
+	}
+}
+
+func TestGetWaitsOnChildren_CrossProject(t *testing.T) {
+	db := openTestDBForWaits(t)
+	projA := mustProject(t, db, "/tmp/proj-a-children")
+	projB := mustProject(t, db, "/tmp/proj-b-children")
+
+	parent := mustCreateTaskForWaits(t, db, projA, "xcparent")
+	c1 := mustCreateTaskForWaits(t, db, projB, "xcc1")
+	c2 := mustCreateTaskForWaits(t, db, projB, "xcc2")
+	db.AddTaskWaitsOn(parent.ID, c1.ID)
+	db.AddTaskWaitsOn(parent.ID, c2.ID)
+	db.UpdateTaskStatus(c1.ID, task.StatusCompleted)
+	db.UpdateTaskStatus(c2.ID, task.StatusFailed)
+
+	children, err := db.GetWaitsOnChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("GetWaitsOnChildren: %v", err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("got %d children, want 2", len(children))
+	}
+	// ORDER BY id ASC
+	if children[0].ID != c1.ID || children[1].ID != c2.ID {
+		t.Fatalf("children not ordered by id: got %d,%d want %d,%d", children[0].ID, children[1].ID, c1.ID, c2.ID)
+	}
+	for _, c := range children {
+		if c.ProjectID != projB {
+			t.Errorf("child #%d ProjectID=%d, want %d (the child's own project)", c.ID, c.ProjectID, projB)
+		}
+	}
+	if children[0].Status != task.StatusCompleted {
+		t.Errorf("c1.Status=%q want completed", children[0].Status)
+	}
+	if children[1].Status != task.StatusFailed {
+		t.Errorf("c2.Status=%q want failed", children[1].Status)
+	}
+}
+
+func TestHasCircularWaitsOn_CrossProject(t *testing.T) {
+	db := openTestDBForWaits(t)
+	projA := mustProject(t, db, "/tmp/proj-a-cycle")
+	projB := mustProject(t, db, "/tmp/proj-b-cycle")
+
+	a := mustCreateTaskForWaits(t, db, projA, "xa")
+	b := mustCreateTaskForWaits(t, db, projB, "xb")
+
+	if err := db.AddTaskWaitsOn(a.ID, b.ID); err != nil {
+		t.Fatalf("AddTaskWaitsOn a->b: %v", err)
+	}
+
+	// b waiting on a would close a cycle spanning two projects.
+	got, err := db.HasCircularWaitsOn(b.ID, a.ID)
+	if err != nil {
+		t.Fatalf("HasCircularWaitsOn: %v", err)
+	}
+	if !got {
+		t.Errorf("expected cross-project cycle a → b → a to be detected")
+	}
+}

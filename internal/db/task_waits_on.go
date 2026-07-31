@@ -66,6 +66,9 @@ func (db *DB) HasAnyWaitsOn(taskID int64) (bool, error) {
 // AllWaitsOnTerminal returns true iff every child of taskID has reached a
 // terminal status (completed or failed). Empty wait set returns true (the
 // parent is not waiting on anyone, so it is trivially unblocked).
+//
+// Intentionally project-blind: task_waits_on is a pure task-ID relation and a
+// parent may wait on children in other projects. Do not add a project filter.
 func (db *DB) AllWaitsOnTerminal(taskID int64) (bool, error) {
 	rows, err := db.sqlDB.Query(`
 		SELECT t.status FROM task_waits_on w
@@ -99,6 +102,9 @@ func (db *DB) GetTasksAwaitingChildren() ([]*task.Task, error) {
 
 // GetWaitsOnChildren returns the full Task structs for every child taskID is
 // waiting on. Used to build {{children.*}} template variables on resume.
+//
+// Intentionally project-blind: it feeds {{children.*}} for children in any
+// project. Do not add a project filter.
 func (db *DB) GetWaitsOnChildren(taskID int64) ([]*task.Task, error) {
 	rows, err := db.sqlDB.Query(fmt.Sprintf(`
 		SELECT %s FROM tasks
@@ -117,6 +123,9 @@ func (db *DB) GetWaitsOnChildren(taskID int64) ([]*task.Task, error) {
 // waits_on edges; returns true if taskID is reachable. Also checks the
 // task_dependencies graph so a parent cannot wait on one of its own ancestors
 // across either relation.
+//
+// ID-based and therefore already cross-project-safe: a cycle spanning two
+// projects is still a cycle in the unified blocking order.
 func (db *DB) HasCircularWaitsOn(taskID, newWaitsOnID int64) (bool, error) {
 	if taskID == newWaitsOnID {
 		return true, nil

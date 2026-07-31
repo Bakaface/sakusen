@@ -167,6 +167,41 @@ func (e *Env) startDaemon() {
 	e.daemonCmd = cmd
 }
 
+// RestartDaemon gracefully stops the running daemon and starts a fresh one.
+//
+// Needed when a test must change config that is read once at server
+// construction (e.g. max_workers → agent.NewManager): setupE2E starts the
+// daemon BEFORE the test calls WriteSortieYAML, so the initial daemon runs on
+// defaults. Restarting after WriteSortieYAML makes the committed .sortie.yml
+// take effect.
+func (e *Env) RestartDaemon() {
+	e.t.Helper()
+
+	stopCmd := exec.Command(sortieBinPath, "daemon", "stop")
+	stopCmd.Env = os.Environ()
+	stopCmd.Dir = e.ProjectDir
+	_ = stopCmd.Run()
+
+	// Wait for the old process to exit so the new daemon does not race it on
+	// the socket/pid files (the old process removes both on shutdown).
+	if e.daemonCmd != nil && e.daemonCmd.Process != nil {
+		done := make(chan struct{})
+		go func() {
+			_ = e.daemonCmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = e.daemonCmd.Process.Kill()
+			<-done
+		}
+	}
+
+	e.startDaemon()
+	e.WaitDaemonReady(filepath.Join(e.XDGDir, "sortie", "daemon.sock"), 5*time.Second)
+}
+
 // WriteSortieYAML writes the given YAML string as .sortie.yml in the project
 // directory and commits it so the working tree remains clean before tasks run.
 func (e *Env) WriteSortieYAML(yaml string) {
@@ -208,6 +243,66 @@ func (e *Env) MustSortie(args ...string) string {
 		e.t.Fatalf("sortie %v: %v\noutput: %s", args, err, out)
 	}
 	return out
+}
+
+// AddProject creates a SECOND isolated git repo served by the same daemon and
+// returns its absolute path. The daemon socket and tasks.db live under
+// $XDG_CONFIG_HOME/sortie/, so `sortie create` run with cwd = the returned dir
+// talks to the already-running daemon; the daemon builds that project's context
+// lazily from its own committed .sortie.yml.
+//
+// The .sortie.yml MUST be committed — cmd/sortie's PersistentPreRunE requires
+// cfg.ProjectConfigFound for `create`, and an uncommitted file would also leave
+// the working tree dirty for finalization.
+func (e *Env) AddProject(yaml string) string {
+	e.t.Helper()
+
+	dir, err := os.MkdirTemp("/tmp", "p")
+	if err != nil {
+		e.t.Fatalf("mkdir second project temp: %v", err)
+	}
+	e.t.Cleanup(func() {
+		if e.t.Failed() && os.Getenv("KEEP_E2E_TMPDIR") != "" {
+			e.t.Logf("KEEP_E2E_TMPDIR: extra ProjectDir=%s", dir)
+			return
+		}
+		_ = os.RemoveAll(dir)
+	})
+
+	e.mustRun(dir, "git", "init", "-b", "main")
+	e.mustRun(dir, "git", "config", "user.email", "test@e2e.local")
+	e.mustRun(dir, "git", "config", "user.name", "E2E Test")
+	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), nil, 0644); err != nil {
+		e.t.Fatalf("write .gitkeep: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".sortie/\n"), 0644); err != nil {
+		e.t.Fatalf("write .gitignore: %v", err)
+	}
+	e.mustRun(dir, "git", "add", ".gitkeep", ".gitignore")
+	e.mustRun(dir, "git", "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(dir, ".sortie.yml"), []byte(yaml), 0644); err != nil {
+		e.t.Fatalf("write .sortie.yml for second project: %v", err)
+	}
+	e.mustRun(dir, "git", "add", ".sortie.yml")
+	e.mustRun(dir, "git", "commit", "-m", "add .sortie.yml")
+
+	return dir
+}
+
+// WriteHookFile writes content to $HOME/<name> so stub hooks can read
+// per-test values as "$HOME/<name>".
+//
+// HOME is set to e.XDGDir before the daemon starts and the daemon passes
+// os.Environ() through to the claude process, so this is the ONLY reliable way
+// to pass per-test values into a hook: a t.Setenv after setupE2E never reaches
+// the already-started daemon.
+func (e *Env) WriteHookFile(name, content string) {
+	e.t.Helper()
+	path := filepath.Join(e.XDGDir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		e.t.Fatalf("write hook file %s: %v", path, err)
+	}
 }
 
 // SortieJSON runs sortie with --json appended and decodes JSON output.

@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"e2e-session-cross-child"}
+{"type":"result","result":"Child did the work.","duration_ms":12,"total_cost_usd":0.0001}

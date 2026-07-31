@@ -67,6 +67,11 @@ func (s *Server) checkPendingTasks() {
 // same step (step_index is preserved), and loadAndClearChildren in the engine
 // hydrates {{children.*}} from the still-attached wait-on edges before
 // clearing them.
+//
+// The resume path is project-blind: the parent and its wait-on children may
+// live in different projects. AllWaitsOnTerminal joins on task IDs only, and
+// the subsequent checkPendingTasks tick re-claims the parent through the same
+// global GetClaimableTasks scan, which has no project filter.
 func (s *Server) checkSuspendedParents() {
 	suspended, err := s.database.GetTasksAwaitingChildren()
 	if err != nil {
@@ -88,9 +93,11 @@ func (s *Server) checkSuspendedParents() {
 			continue
 		}
 		// Failure semantics: even if some children failed, the parent
-		// resumes. The agent inspects {{children.<id>.status}} on resume and
-		// decides whether to fail, retry, or proceed. This is the documented
-		// design choice (see PR description "Failure semantics" section).
+		// resumes. `failed` is terminal, so this holds for a cross-project
+		// child failure exactly as it does for a same-project one. The agent
+		// inspects {{children.<id>.status}} on resume and decides whether to
+		// fail, retry, or proceed — see loadAndClearChildren in
+		// internal/workflow/engine.go for how those vars are hydrated.
 		log.Printf("%sTask #%d: all waited-on children terminal, resuming at step %d", s.projectLogPrefix(t.ProjectID), t.ID, t.StepIndex)
 		if err := s.database.UpdateTaskStatus(t.ID, task.StatusPending); err != nil {
 			log.Printf("%sFailed to flip task #%d to pending for resume: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)

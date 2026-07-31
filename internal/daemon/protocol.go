@@ -359,8 +359,9 @@ type UpdateDependencyResponse struct {
 // wait, nor wait on the wrong IDs.
 type CreateTasksAndWaitRequest struct {
 	// ParentTaskID is the task whose currently-running step will suspend
-	// pending the children's completion. Must be a running task in the same
-	// project as every child.
+	// pending the children's completion. Must be a running task. Children may
+	// live in any project; each child's project_path defaults to the parent's
+	// project when omitted.
 	ParentTaskID int64               `json:"parent_task_id"`
 	Tasks        []CreateTaskRequest `json:"tasks"`
 }
@@ -371,9 +372,9 @@ type CreateTasksAndWaitResponse struct {
 }
 
 // WaitForTasksRequest records task_waits_on edges from ParentTaskID to each of
-// the supplied child task IDs without creating any new tasks. Children must
-// belong to the same project as the parent. Used to wait on pre-existing
-// tasks (e.g., observe-and-block patterns).
+// the supplied child task IDs without creating any new tasks. Children may
+// belong to any project — the wait relation is purely ID-based. Used to wait
+// on pre-existing tasks (e.g., observe-and-block patterns).
 type WaitForTasksRequest struct {
 	ParentTaskID int64   `json:"parent_task_id"`
 	ChildTaskIDs []int64 `json:"child_task_ids"`

@@ -17,7 +17,7 @@ import (
 // can copy-paste a spec between tools without remapping fields.
 type ChildTaskSpec struct {
 	Input          string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
-	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project."`
+	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sortie.yml and workflows."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
 	Workflow       string   `json:"workflow,omitempty" jsonschema:"Workflow name to run. Empty selects the project's first task workflow."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent."`
@@ -28,7 +28,7 @@ type ChildTaskSpec struct {
 	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive Claude session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this child runs."`
-	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). Empty inherits the parent task's track; pass 'none' to explicitly detach the child from any track."`
+	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). Empty inherits the parent task's track ONLY when the child is in the parent's project — a child in a different project starts trackless unless you pass an explicit track, which is resolved in the child's own project. Pass 'none' to explicitly detach."`
 }
 
 // CreateTasksAndWaitArgs is the input schema for create_tasks_and_wait.
@@ -70,7 +70,8 @@ func registerCreateTasksAndWait(s *server.MCPServer, c *client.Client) {
 		mcp.WithDescription(
 			"Spawn one or more child sortie tasks and suspend the calling task's current step until ALL children reach a terminal status (completed or failed). "+
 				"The calling step is paused on the daemon side; this tool returns immediately with the child task IDs. "+
-				"When the children all finish, the calling step is re-run from the same step index — the agent must check {{children.<id>.status}} to detect failures and decide whether to proceed, retry, or abort.",
+				"When the children all finish, the calling step is re-run from the same step index — the agent must check {{children.<id>.status}} to detect failures and decide whether to proceed, retry, or abort. "+
+				"Children may be created in a different project via project_path; the parent suspends and resumes identically. On resume, check {{children.<id>.status}} — it is 'completed' or 'failed' regardless of which project the child ran in.",
 		),
 		mcp.WithInputSchema[CreateTasksAndWaitArgs](),
 	)
@@ -84,7 +85,8 @@ func registerWaitForTasks(s *server.MCPServer, c *client.Client) {
 		"wait_for_tasks",
 		mcp.WithDescription(
 			"Suspend the calling task's current step until each named pre-existing task reaches a terminal status. "+
-				"For spawning + waiting in one atomic operation, prefer create_tasks_and_wait. Children already in completed/failed state are silently skipped.",
+				"For spawning + waiting in one atomic operation, prefer create_tasks_and_wait. Children already in completed/failed state are silently skipped. "+
+				"The named tasks may live in any project.",
 		),
 		mcp.WithInputSchema[WaitForTasksArgs](),
 	)
@@ -143,7 +145,8 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 		ChildIDs:     ids,
 		Children:     children,
 		Message: fmt.Sprintf(
-			"Spawned %d child task(s) %v. Parent task #%d will suspend at the current step until all children reach terminal status, then re-run this step with {{children.<id>.context}}, {{children.<id>.status}}, {{children.<id>.title}}, and {{children.summary}} populated.",
+			"Spawned %d child task(s) %v. Parent task #%d will suspend at the current step until all children reach terminal status, then re-run this step with {{children.<id>.context}}, {{children.<id>.status}}, {{children.<id>.title}}, and {{children.summary}} populated. "+
+				"Each entry in children carries project_name/project_path so you can confirm where each child landed.",
 			len(children), ids, parentID,
 		),
 	})

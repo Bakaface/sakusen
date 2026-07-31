@@ -14,9 +14,21 @@ import (
 // currently-running step suspends to StatusAwaitingChildren when the engine's
 // next post-Claude check observes the edges.
 //
-// All children must resolve to the same project as the parent (the engine
-// re-runs only that project's workflow, so cross-project waits are nonsensical
-// and would deadlock under the current scheduler).
+// Children MAY live in a different project than the parent: pass a per-child
+// project_path. An omitted project_path defaults to the parent's project.
+//
+// Cross-project waits cannot deadlock. On suspend the parent's agent goroutine
+// returns, so the agent manager marks it completed and frees its max_workers
+// slot (canStartMore counts only agents whose state IsActive). GetClaimableTasks
+// is project-blind, so startTaskAgent picks up whichever project the child lives
+// in and runs it through that project's own engine. No scheduler resource is
+// held while blocked — no hold-and-wait, hence no deadlock, even at
+// max_workers = 1.
+//
+// A child that never reaches terminal status leaves the parent suspended
+// indefinitely. That is a stuck wait, not a deadlock — nothing is held.
+// Recovery is `sortie delete <child_id>`, which drops the wait-on edge (see
+// DeleteTask) and lets the poller resume the parent on the next tick.
 //
 // Validation is fail-fast: if any child fails to create, the partial children
 // are left in place (caller can decide how to recover). We do NOT roll back —
@@ -41,17 +53,35 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 
 	created := make([]TaskInfo, 0, len(req.Tasks))
 	createdTasks := make([]*task.Task, 0, len(req.Tasks))
+	var crossProject []int64
 	for i, childReq := range req.Tasks {
 		// Default project_path to the parent's project so the agent doesn't
 		// have to discover it.
 		if childReq.ProjectPath == "" {
 			childReq.ProjectPath = parentProj.Path
 		}
+		// Resolve the child's project row BEFORE track inheritance.
+		// GetOrCreateProject is idempotent and applies exactly the same
+		// filepath.Abs normalization createTaskFromRequest will apply, so
+		// comparing IDs is the honest same-project test.
+		childProj, perr := s.database.GetOrCreateProject(childReq.ProjectPath)
+		if perr != nil {
+			s.sendError(conn, fmt.Sprintf("failed to resolve project for child task %d/%d: %v", i+1, len(req.Tasks), perr))
+			return
+		}
 		// Children inherit the parent task's track by default, keeping sprint
 		// fan-outs coherent. An explicit per-child Track overrides; the "none"
 		// sentinel passes through and is normalized to trackless inside
 		// createTaskFromRequest.
-		if childReq.Track == "" && parent.TrackID != nil {
+		//
+		// Track inheritance is SAME-PROJECT ONLY. Tracks are project-scoped
+		// (resolveTrackRef rejects a numeric track ID owned by another
+		// project), so stamping the parent's track ID onto a child in another
+		// project would hard-fail the create. Cross-project children start
+		// trackless; an explicit per-child Track is still honored and resolves
+		// in the CHILD's own project. The rule is uniform — it applies even
+		// when the parent's track is global — so the behavior is predictable.
+		if childReq.Track == "" && parent.TrackID != nil && childProj.ID == parent.ProjectID {
 			childReq.Track = strconv.FormatInt(*parent.TrackID, 10)
 		}
 		child, _, err := s.createTaskFromRequest(childReq)
@@ -60,8 +90,7 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 			return
 		}
 		if child.ProjectID != parent.ProjectID {
-			s.sendError(conn, fmt.Sprintf("child task #%d belongs to a different project (%d) than parent (%d)", child.ID, child.ProjectID, parent.ProjectID))
-			return
+			crossProject = append(crossProject, child.ID)
 		}
 
 		// Cycle check: a parent cannot wait on a task that already (transitively)
@@ -92,7 +121,14 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 	}
 	s.broadcastTaskUpdate(parent.ID)
 
-	log.Printf("%sParent task #%d will suspend on %d children: %v", s.projectLogPrefix(parent.ProjectID), parent.ID, len(createdTasks), childIDsOf(createdTasks))
+	// Call out cross-project fan-out explicitly — the daemon log is the only
+	// place an operator can see that children landed outside the parent's
+	// project.
+	if len(crossProject) > 0 {
+		log.Printf("%sParent task #%d will suspend on %d children: %v (cross-project: %v)", s.projectLogPrefix(parent.ProjectID), parent.ID, len(createdTasks), childIDsOf(createdTasks), crossProject)
+	} else {
+		log.Printf("%sParent task #%d will suspend on %d children: %v", s.projectLogPrefix(parent.ProjectID), parent.ID, len(createdTasks), childIDsOf(createdTasks))
+	}
 
 	s.sendMessage(conn, MsgCreateTasksAndWait, CreateTasksAndWaitResponse{
 		ParentTaskID: parent.ID,
@@ -104,6 +140,10 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 // pre-existing set of child task IDs. Useful for "wait on tasks I didn't
 // just spawn" patterns; the bundled create_tasks_and_wait is preferred for
 // fresh children because it eliminates the risk of forgetting to wait.
+//
+// Children may live in any project — the wait relation is purely ID-based and
+// project-blind, and the same slot-release argument documented on
+// handleCreateTasksAndWait means a cross-project wait cannot deadlock.
 func (s *Server) handleWaitForTasks(conn net.Conn, req WaitForTasksRequest) {
 	parent, err := s.database.GetTask(req.ParentTaskID)
 	if err != nil {
@@ -130,10 +170,6 @@ func (s *Server) handleWaitForTasks(conn net.Conn, req WaitForTasksRequest) {
 		child, err := s.database.GetTask(childID)
 		if err != nil || child == nil {
 			s.sendError(conn, fmt.Sprintf("child task #%d not found", childID))
-			return
-		}
-		if child.ProjectID != parent.ProjectID {
-			s.sendError(conn, fmt.Sprintf("child task #%d belongs to a different project than parent #%d", childID, parent.ID))
 			return
 		}
 		// Skip already-terminal children — adding a wait edge would

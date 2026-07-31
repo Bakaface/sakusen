@@ -435,6 +435,8 @@ Both default `parent_task_id` to the `SORTIE_TASK_ID` env var the engine injects
 | `{{children.<id>.status}}` | Terminal status: `completed` or `failed` |
 | `{{children.<id>.context}}` | Child's final task context (its synthesized output) — multi-line |
 
+**Children may live in a different project.** Pass a per-child `project_path` to `create_tasks_and_wait` (it defaults to the parent's project), or hand `wait_for_tasks` any task ID at all — the wait relation is purely ID-based. The child runs under its own project's `.sortie.yml` and workflows and merges into its own repo; the parent suspends and resumes identically, and `{{children.<id>.status}}` is `completed`/`failed` regardless of where the child ran. One caveat: a cross-project child does **not** inherit the parent's track (tracks are project-scoped), so pass an explicit `track` if you want one — it resolves in the child's own project.
+
 Unknown IDs and unsupported fields resolve to empty. On the first (pre-spawn) run of the step these are all empty — a typical orchestrator prompt branches: "If `<children-summary>` below is empty, break the task into subtasks and call `create_tasks_and_wait`. Otherwise, review the child results, check every `{{children.<id>.status}}` for failures, and integrate."
 
 Since the meaningful state usually lives in the conversation, orchestrator steps pair well with `summarize_chat` (the default) and `require_context: true`.

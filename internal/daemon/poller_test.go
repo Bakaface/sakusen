@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -207,4 +208,122 @@ func initRecoveryTestRepo(t *testing.T) string {
 	}
 
 	return dir
+}
+
+// --- Cross-project resume --------------------------------------------------
+//
+// checkSuspendedParents never touches getProjectContext, so these need no git
+// repo: they exercise the project-blind AllWaitsOnTerminal join directly.
+
+// suspendedParentWithChildren builds a parent in projA at StatusAwaitingChildren
+// with stepIndex, plus one child in projB per status, wired with wait-on edges.
+func suspendedParentWithChildren(t *testing.T, s *Server, projA int64, stepIndex int, childStatuses ...task.Status) (*task.Task, []*task.Task) {
+	t.Helper()
+	projB, err := s.database.GetOrCreateProject("/tmp/sortie-test-poller-other")
+	if err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+
+	parent, err := s.database.CreateTaskWithPriority(
+		projA, "parent", "parent work", "parent", "", "", "branch-parent", "", "",
+		task.StatusRunning, task.PriorityMedium, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if err := s.database.UpdateTaskStep(parent.ID, stepIndex, ""); err != nil {
+		t.Fatalf("set parent step index: %v", err)
+	}
+	if err := s.database.UpdateTaskStatus(parent.ID, task.StatusAwaitingChildren); err != nil {
+		t.Fatalf("suspend parent: %v", err)
+	}
+
+	children := make([]*task.Task, 0, len(childStatuses))
+	for i, st := range childStatuses {
+		name := fmt.Sprintf("child-%d", i)
+		c, err := s.database.CreateTaskWithPriority(
+			projB.ID, name, "child work", name, "", "", "branch-"+name, "", "",
+			task.StatusPending, task.PriorityMedium, false, nil, nil,
+		)
+		if err != nil {
+			t.Fatalf("create child %d: %v", i, err)
+		}
+		if err := s.database.UpdateTaskStatus(c.ID, st); err != nil {
+			t.Fatalf("set child %d status: %v", i, err)
+		}
+		if err := s.database.AddTaskWaitsOn(parent.ID, c.ID); err != nil {
+			t.Fatalf("AddTaskWaitsOn child %d: %v", i, err)
+		}
+		children = append(children, c)
+	}
+	return parent, children
+}
+
+func TestCheckSuspendedParents_ResumesOnCrossProjectChildrenCompleted(t *testing.T) {
+	s, projA := setupServerWithProject(t)
+	parent, _ := suspendedParentWithChildren(t, s, projA, 1, task.StatusCompleted, task.StatusCompleted)
+
+	s.checkSuspendedParents()
+
+	got, err := s.database.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if got.Status != task.StatusPending {
+		t.Errorf("parent status = %q, want pending", got.Status)
+	}
+	// Resume must re-run the SAME step, not advance past it.
+	if got.StepIndex != 1 {
+		t.Errorf("parent StepIndex = %d, want 1 (preserved for resume)", got.StepIndex)
+	}
+}
+
+func TestCheckSuspendedParents_ResumesOnCrossProjectChildFailure(t *testing.T) {
+	s, projA := setupServerWithProject(t)
+	parent, children := suspendedParentWithChildren(t, s, projA, 1, task.StatusCompleted, task.StatusFailed)
+
+	s.checkSuspendedParents()
+
+	got, err := s.database.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if got.Status != task.StatusPending {
+		t.Fatalf("parent status = %q, want pending (failed is terminal)", got.Status)
+	}
+
+	// The edges must survive the resume flip so loadAndClearChildren can
+	// hydrate {{children.<id>.status}} on the re-run.
+	hydrated, err := s.database.GetWaitsOnChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("GetWaitsOnChildren: %v", err)
+	}
+	if len(hydrated) != 2 {
+		t.Fatalf("got %d children for template hydration, want 2", len(hydrated))
+	}
+	byID := map[int64]task.Status{}
+	for _, c := range hydrated {
+		byID[c.ID] = c.Status
+	}
+	if byID[children[0].ID] != task.StatusCompleted {
+		t.Errorf("child #%d status = %q, want completed", children[0].ID, byID[children[0].ID])
+	}
+	if byID[children[1].ID] != task.StatusFailed {
+		t.Errorf("child #%d status = %q, want failed", children[1].ID, byID[children[1].ID])
+	}
+}
+
+func TestCheckSuspendedParents_DoesNotResumeWhileCrossProjectChildRunning(t *testing.T) {
+	s, projA := setupServerWithProject(t)
+	parent, _ := suspendedParentWithChildren(t, s, projA, 1, task.StatusCompleted, task.StatusRunning)
+
+	s.checkSuspendedParents()
+
+	got, err := s.database.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if got.Status != task.StatusAwaitingChildren {
+		t.Errorf("parent status = %q, want awaiting-children (one child still running)", got.Status)
+	}
 }
