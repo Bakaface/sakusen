@@ -386,6 +386,158 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 	}
 }
 
+func TestMCP_CreateTask_RequiresWorkflow(t *testing.T) {
+	fake := newFakeDaemon(t)
+	// No MsgCreateTask handler on purpose — the tool must reject the call
+	// before ever talking to the daemon.
+	c := startMCPServer(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cases := map[string]map[string]any{
+		"plain task": {
+			"input":        "do something",
+			"project_path": "/tmp/proj",
+		},
+		// checkout_branch tasks still run their workflow steps, so they are
+		// deliberately NOT exempt from the requirement.
+		"checkout_branch task": {
+			"checkout_branch": "feat/existing",
+			"project_path":    "/tmp/proj",
+		},
+	}
+	for name, arguments := range cases {
+		res, err := c.CallTool(ctx, mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Name: "create_task", Arguments: arguments},
+		})
+		if err != nil {
+			t.Fatalf("%s: CallTool: %v", name, err)
+		}
+		if !res.IsError {
+			t.Fatalf("%s: expected tool error for missing workflow, got success: %s", name, textOf(res))
+		}
+		if !strings.Contains(textOf(res), "workflow is required") ||
+			!strings.Contains(textOf(res), "list_workflows") {
+			t.Errorf("%s: error should say workflow is required and point to list_workflows; got %q", name, textOf(res))
+		}
+	}
+
+	for _, msgType := range fake.requestTypes() {
+		if msgType == daemon.MsgCreateTask {
+			t.Errorf("create_task should not be sent to the daemon when workflow is missing")
+		}
+	}
+}
+
+func TestMCP_CreateTask_TmuxDirectExemptFromWorkflowRequirement(t *testing.T) {
+	fake := newFakeDaemon(t)
+
+	var captured daemon.CreateTaskRequest
+	fake.handle(daemon.MsgCreateTask, func(msg *daemon.Message) *daemon.Message {
+		_ = msg.DecodePayload(&captured)
+		resp, _ := daemon.NewMessage(daemon.MsgCreateTask, daemon.CreateTaskResponse{
+			Task: daemon.TaskInfo{ID: 7, Status: "init"},
+		})
+		return resp
+	})
+
+	c := startMCPServer(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "create_task",
+			Arguments: map[string]any{
+				"input":        "interactive session",
+				"project_path": "/tmp/proj",
+				"tmux_direct":  true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tmux_direct task without workflow should be accepted, got error: %s", textOf(res))
+	}
+	if !captured.TmuxDirect {
+		t.Errorf("TmuxDirect should be forwarded as true")
+	}
+	if captured.Workflow != "" {
+		t.Errorf("Workflow should be forwarded empty, got %q", captured.Workflow)
+	}
+}
+
+func TestMCP_CreateTask_AdvertisesWorkflowAsRequired(t *testing.T) {
+	fake := newFakeDaemon(t)
+	c := startMCPServer(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := c.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	for _, tool := range resp.Tools {
+		if tool.Name != "create_task" {
+			continue
+		}
+		for _, req := range tool.InputSchema.Required {
+			if req == "workflow" {
+				return
+			}
+		}
+		t.Fatalf("create_task schema should list workflow as required; got required=%v", tool.InputSchema.Required)
+	}
+	t.Fatalf("create_task tool not advertised")
+}
+
+func TestMCP_CreateTasksAndWait_RequiresWorkflowPerChild(t *testing.T) {
+	fake := newFakeDaemon(t)
+	// No MsgCreateTasksAndWait handler on purpose — validation must fail
+	// before the daemon is contacted.
+	c := startMCPServer(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "create_tasks_and_wait",
+			Arguments: map[string]any{
+				"parent_task_id": 1,
+				"tasks": []map[string]any{
+					// Child 1 is tmux_direct: exempt from the requirement.
+					{"input": "interactive child", "tmux_direct": true},
+					// Child 2 is a plain workflow task with no workflow: rejected.
+					{"input": "plain child"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected tool error for missing child workflow, got success: %s", textOf(res))
+	}
+	if !strings.Contains(textOf(res), "child 2") ||
+		!strings.Contains(textOf(res), "workflow is required") ||
+		!strings.Contains(textOf(res), "list_workflows") {
+		t.Errorf("error should name child 2, say workflow is required, and point to list_workflows; got %q", textOf(res))
+	}
+
+	for _, msgType := range fake.requestTypes() {
+		if msgType == daemon.MsgCreateTasksAndWait {
+			t.Errorf("create_tasks_and_wait should not be sent to the daemon when a child workflow is missing")
+		}
+	}
+}
+
 func TestMCP_CreateTask_RejectsCwdOutsideRepo(t *testing.T) {
 	// When project_path isn't supplied, the tool must fall back to
 	// `git rev-parse --show-toplevel` on cwd. From an arbitrary tempdir
@@ -415,7 +567,7 @@ func TestMCP_CreateTask_RejectsCwdOutsideRepo(t *testing.T) {
 	res, err := c.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "create_task",
-			Arguments: map[string]any{"input": "hello"},
+			Arguments: map[string]any{"input": "hello", "workflow": "implement"},
 		},
 	})
 	if err != nil {

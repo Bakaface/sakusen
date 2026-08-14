@@ -301,6 +301,7 @@ func TestMCP_CreateTask_PassesTrackThrough(t *testing.T) {
 			Arguments: map[string]any{
 				"input":        "do the thing",
 				"project_path": "/tmp/some-project",
+				"workflow":     "implement",
 				"track":        "payments-api",
 			},
 		},
@@ -339,8 +340,8 @@ func TestMCP_CreateTasksAndWait_PassesTrackThrough(t *testing.T) {
 			Arguments: map[string]any{
 				"parent_task_id": 1,
 				"tasks": []map[string]any{
-					{"input": "child a", "track": "payments-api"},
-					{"input": "child b", "track": "none"},
+					{"input": "child a", "workflow": "implement", "track": "payments-api"},
+					{"input": "child b", "workflow": "implement", "track": "none"},
 				},
 			},
 		},

@@ -19,7 +19,7 @@ type ChildTaskSpec struct {
 	Input          string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
 	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sortie.yml and workflows."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
-	Workflow       string   `json:"workflow,omitempty" jsonschema:"Workflow name to run. Empty selects the project's first task workflow."`
+	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every child except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch children still run their workflow steps, so the requirement applies to them too."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent."`
 	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'."`
 	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override."`
@@ -71,7 +71,8 @@ func registerCreateTasksAndWait(s *server.MCPServer, c *client.Client) {
 			"Spawn one or more child sortie tasks and suspend the calling task's current step until ALL children reach a terminal status (completed or failed). "+
 				"The calling step is paused on the daemon side; this tool returns immediately with the child task IDs. "+
 				"When the children all finish, the calling step is re-run from the same step index — the agent must check {{children.<id>.status}} to detect failures and decide whether to proceed, retry, or abort. "+
-				"Children may be created in a different project via project_path; the parent suspends and resumes identically. On resume, check {{children.<id>.status}} — it is 'completed' or 'failed' regardless of which project the child ran in.",
+				"Children may be created in a different project via project_path; the parent suspends and resumes identically. On resume, check {{children.<id>.status}} — it is 'completed' or 'failed' regardless of which project the child ran in. "+
+				"Each child spec must name a workflow (call list_workflows to see available workflows); only tmux_direct children may omit it.",
 		),
 		mcp.WithInputSchema[CreateTasksAndWaitArgs](),
 	)
@@ -106,6 +107,13 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 
 	reqs := make([]daemon.CreateTaskRequest, len(args.Tasks))
 	for i, t := range args.Tasks {
+		// Same rule as create_task: an explicit workflow is required so a
+		// child never silently falls back to the project's first workflow.
+		// tmux_direct children are exempt — the daemon skips the workflow
+		// engine entirely for them.
+		if t.Workflow == "" && !t.TmuxDirect {
+			return resultErr("child %d: workflow is required — call list_workflows to see available workflows (only tmux_direct children may omit it)", i+1)
+		}
 		projectPath := t.ProjectPath
 		if projectPath != "" {
 			abs, perr := resolveProjectPath(projectPath)
