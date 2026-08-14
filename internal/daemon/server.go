@@ -100,6 +100,14 @@ type Server struct {
 	wg     sync.WaitGroup
 
 	shutdownOnce sync.Once
+
+	// shutdownDone is closed as the last statement of shutdown(), after the
+	// database is closed and the pid/socket files are removed. Start() blocks
+	// on it after wg.Wait() so process exit cannot preempt shutdown's tail:
+	// shutdown() runs on a connection (or signal) goroutine and its first act —
+	// closing the listener — unblocks the accept loop, so wg.Wait() returns
+	// while shutdown() is still mid-flight (the sortie#337 stale-pid race).
+	shutdownDone chan struct{}
 }
 
 // tmuxAutoEntry holds the daemon's per-task state for tmux auto-advance.
@@ -130,6 +138,7 @@ func NewServer(cfg *config.Config, database taskStore) *Server {
 		taskFlowLocks: make(map[int64]*sync.Mutex),
 		ctx:           ctx,
 		cancel:        cancel,
+		shutdownDone:  make(chan struct{}),
 	}
 }
 
@@ -403,6 +412,12 @@ func (s *Server) Start() error {
 	log.Printf("Daemon started, listening on %s (pid=%d, ppid=%d)", s.cfg.SocketPath, os.Getpid(), os.Getppid())
 
 	s.wg.Wait()
+
+	// The loops above all exit only because shutdown() closed the listener /
+	// canceled the context, so a shutdown is guaranteed to be in flight here.
+	// Wait for its tail (DB close, pid/socket removal, "Daemon stopped" log)
+	// to finish before returning and letting the process exit.
+	<-s.shutdownDone
 
 	return nil
 }
@@ -820,6 +835,10 @@ func (s *Server) shutdown() {
 	os.Remove(s.cfg.SocketPath)
 
 	log.Println("Daemon stopped")
+
+	// Must be the last statement: Start() blocks on this channel so the
+	// process cannot exit before the cleanup above has completed.
+	close(s.shutdownDone)
 }
 
 func (s *Server) writePidFile() error {
