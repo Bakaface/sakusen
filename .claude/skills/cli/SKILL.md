@@ -17,7 +17,7 @@ Cobra-based CLI split across multiple files in `cmd/sortie/`.
 | `task_crud.go` | `create`, `edit`, `delete` commands |
 | `tasks.go` | `tasks`, `start`, `stop`, `list`/`agents`, `retry`, `revert`, `continue`, `logs`, `cleanup`, `attach`, `detach`, `attach-branch` commands |
 | `tui.go` | `tui` command, `resolveProjectMode()` helper |
-| `init.go` | `init` command (scaffolds `.sortie.yml`) |
+| `init.go` | `init` command (scaffolds `.sortie.yml` + user-owned agent scripts under `.sortie/agents/` from the embedded `scaffold/` FS; never overwrites existing files) |
 | `validate.go` | `validate [path]` command — runs config validation, surfaces errors directly (PersistentPreRunE suppresses generic load errors for this command) |
 | `mcp.go` | `mcp` command — starts the MCP server over stdio (see `internal/mcp/`) |
 | `backfill_context.go` | `backfill-context` — backfills missing step contexts for older tasks |

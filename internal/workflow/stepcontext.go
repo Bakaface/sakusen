@@ -18,19 +18,20 @@ import (
 //  1. MANUAL — an agent (or a human) pushed a value through the
 //     update_step_context MCP tool while the step's session was live. A
 //     manual write always wins; automatic capture is skipped entirely.
-//  2. LAST_MESSAGE — the text of Claude's NDJSON `result` event from a
-//     headless step. This is the synchronous fallback captured the instant
-//     the step finishes, before any summarization runs.
-//  3. SUMMARIZE_CHAT — a Claude-generated summary of the step's full chat
-//     transcript (headless step log, or tmux/interactive session JSONL).
-//     Used when the step's `summarization_strategy` calls for it (the
-//     default) and the chat is non-trivial (see shouldSummarizeChat in
-//     summarizer.go).
+//  2. LAST_MESSAGE — the agent's result text from a headless step (read from
+//     $SORTIE_RESULT_FILE, stdout-tail fallback). This is the synchronous
+//     fallback captured the instant the step finishes, before any
+//     summarization runs.
+//  3. SUMMARIZE_CHAT — a summary of the step's full chat content produced by
+//     the configured `summarizer:` command (headless step log region, or the
+//     tmux agent's chat_log_command output). Used when the step's
+//     `summarization_strategy` calls for it (the default) and the chat is
+//     non-trivial (see shouldSummarizeChat in summarizer.go).
 //
 // Where each strategy is decided:
 //   - Headless steps (and the tmux fire-and-forget spawn, best-effort) decide
 //     synchronously inside RunTask via captureHeadlessStepContext below,
-//     right after the step's Claude process returns.
+//     right after the step's agent command returns.
 //   - Tmux/human steps generally cannot summarize synchronously — RunTask
 //     returns immediately to pause at the approval gate, before the chat
 //     exists — so summarizePreviousTmuxStep (summarizer.go) captures on the
@@ -159,7 +160,7 @@ func decideSummarizeChat(hasManualContext bool, strategy string) bool {
 // precedence (see the STEP-CONTEXT LIFECYCLE doc comment above) for a step
 // that just finished running inside RunTask. resultText/exitCode/useTmux are
 // the step's just-completed outcome. This covers both headless steps
-// (resultText is the Claude result-event text) and the tmux fire-and-forget
+// (resultText is the agent's result text) and the tmux fire-and-forget
 // spawn path (resultText is always "" there, and the chat rarely exists yet
 // at this point in time — this is a best-effort attempt for tmux;
 // summarizePreviousTmuxStep in summarizer.go is the real capture point for
@@ -195,7 +196,7 @@ func (e *Engine) captureHeadlessStepContext(ctx context.Context, t *task.Task, w
 		return
 	}
 
-	chat, chatErr := e.loadStepChatContent(t, step.Name, useTmux)
+	chat, chatErr := e.loadStepChatContent(ctx, t, wf, step, useTmux)
 	if chatErr != nil {
 		log.Printf("Warning: failed to load chat content for step %q of task #%d: %v", step.Name, t.ID, chatErr)
 		return
@@ -207,7 +208,7 @@ func (e *Engine) captureHeadlessStepContext(ctx context.Context, t *task.Task, w
 	// Surface the step summarization phase via the task status so
 	// the TUI can distinguish it from regular step execution.
 	restore := e.markSummarizingStep(t, wf)
-	summary, sumErr := e.summarizeChatLog(ctx, t, step.Name, step.SummarizationPrompt, chat, step.EffectiveAllowedSummarizationModels(e.cfg.AllowedSummarizationModels))
+	summary, sumErr := e.summarizeChatLog(ctx, t, step.Name, step.SummarizationPrompt, chat)
 	restore()
 	if sumErr != nil {
 		log.Printf("Warning: summarize_chat failed for step %q of task #%d: %v", step.Name, t.ID, sumErr)
@@ -223,17 +224,15 @@ func (e *Engine) captureHeadlessStepContext(ctx context.Context, t *task.Task, w
 	log.Printf("summarize_chat updated step context for step %q of task #%d (%d chars)", step.Name, t.ID, len(summary))
 }
 
-// RecordTmuxStepSentinelSession corrects the recorded chat session id for a
-// tmux step from its Claude Stop-hook sentinel payload, if the sentinel names
-// a different session than what's on record. The launch-time cwd-matched
-// async finder (runClaudeStepTmux) can latch onto an unrelated session when
-// several agents share a working directory (notably non-worktree mode); the
-// sentinel is written by the agent that actually ran THIS step, so its
-// session id is authoritative. This gates which chat transcript
-// loadStepChatContent reads for summarize_chat capture, so it is part of the
-// step-context lifecycle even though it never touches task_steps.context
-// directly. No-op when there is no sentinel, it carries no session id, or the
-// recorded session already matches.
+// RecordTmuxStepSentinelSession records the chat session id for a tmux step
+// from its turn-end sentinel payload (the optional `session_id` field — see
+// the sentinel convention in sentinel.go). The sentinel is written from
+// inside the very session that ran the step, so its session id is
+// authoritative. This is the ONLY session-discovery mechanism: it gates which
+// session the agent's chat_log_command reads for summarize_chat capture and
+// which session resume_command restores after a daemon restart. No-op when
+// there is no sentinel, it carries no session id, or the recorded session
+// already matches.
 func (e *Engine) RecordTmuxStepSentinelSession(t *task.Task, stepName string) {
 	sentinel, ok := LatestStepSentinel(t.WorktreePath, stepName)
 	if !ok || sentinel.SessionID == "" {
@@ -248,6 +247,6 @@ func (e *Engine) RecordTmuxStepSentinelSession(t *task.Task, stepName string) {
 		return
 	}
 	if existing != nil && existing.SessionID != "" && existing.SessionID != sentinel.SessionID {
-		log.Printf("Task #%d step %q: corrected chat session %q -> %q from Stop-hook sentinel", t.ID, stepName, existing.SessionID, sentinel.SessionID)
+		log.Printf("Task #%d step %q: corrected chat session %q -> %q from turn-end sentinel", t.ID, stepName, existing.SessionID, sentinel.SessionID)
 	}
 }

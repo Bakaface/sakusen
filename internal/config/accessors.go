@@ -207,10 +207,8 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	yolo := c.Claude.Yolo
 	global := GlobalConfig{
 		MaxWorkers:               c.MaxWorkers,
-		Yolo:                     &yolo,
 		Notifications:            c.Notifications,
 		TmuxNestedAttachBehavior: c.TmuxNestedAttachBehavior,
 	}

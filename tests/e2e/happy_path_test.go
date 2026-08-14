@@ -10,15 +10,17 @@ import (
 
 // simpleWorkflowYAML returns a one-step workflow YAML using the stub at stubPath.
 func simpleWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 on_complete: merge
 workflows:
   - name: simple
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task"

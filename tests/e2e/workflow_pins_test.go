@@ -14,8 +14,11 @@ import (
 // workflow can be launched without any New Task input (the TUI skips the screen;
 // the CLI accepts `create -w pinned` with no input argument).
 func pinnedWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
@@ -26,7 +29,6 @@ workflows:
     worktree: true
     branch: "sortie/pinned-{{task_id}}"
     target: main
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task"
@@ -68,8 +70,11 @@ func TestWorkflowPinsSkipPath(t *testing.T) {
 // input, so the empty-input gate is satisfied). branch/checkout/target
 // are intentionally absent — they are invalid when worktree is false.
 func noWorktreePinnedYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
@@ -78,7 +83,6 @@ workflows:
   - name: inplace
     input: "In-place task input"
     worktree: false
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task"
@@ -92,8 +96,11 @@ workflows:
 // workflow's pinned input), and the daemon-side precedence chain must
 // supply the project default worktree (true) when the workflow leaves it open.
 func partialPinWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
@@ -102,7 +109,6 @@ workflows:
   - name: partial
     input: "Partially pinned input"
     target: main
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task"

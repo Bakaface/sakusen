@@ -26,8 +26,11 @@ import (
 // takes effect after RestartDaemon because the agent manager reads it once at
 // server construction.
 func crossProjectParentYAML(stubPath string, maxWorkers int) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 max_workers: %d
 git:
@@ -35,7 +38,6 @@ git:
 on_complete: commit
 workflows:
   - name: parent
-    print: true
     steps:
       - name: spawn
         prompt: "Spawn cross-project children; on resume c2=[{{children.2.status}}] c3=[{{children.3.status}}] summary={{children.summary}}"
@@ -46,20 +48,21 @@ workflows:
 // fails (its hook exits 1, aborting the stub). Children run under project B's
 // own workflows and commit into project B's own repo.
 func crossProjectChildYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 on_complete: commit
 workflows:
   - name: child
-    print: true
     steps:
       - name: do-work
         prompt: "Do the work for child task #{{task.id}}"
   - name: child-fail
-    print: true
     steps:
       - name: fail-work
         prompt: "Fail the work for child task #{{task.id}}"
@@ -148,7 +151,7 @@ func TestCrossProjectChildrenSuspendAndResume(t *testing.T) {
 	// h) The key assertion: {{children.<id>.status}} is visible to the
 	// resumed parent step for cross-project children, including the FAILED
 	// one. The stub overwrites prompt-1-spawn.txt each invocation, so the
-	// capture holds the resume run's resolved argv.
+	// capture holds the resume run's resolved prompt.
 	prompt := e.CapturedPrompt(1, "spawn")
 	if !strings.Contains(prompt, "c2=[completed]") {
 		t.Errorf("resume prompt missing c2=[completed]:\n%s", prompt)

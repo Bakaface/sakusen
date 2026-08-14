@@ -119,6 +119,7 @@ func newTrackedFakeRunnerTestEngine(t *testing.T, wf config.WorkflowConfig) (*En
 	cfg := &config.Config{
 		OnComplete: "none",
 		Workflows:  []config.WorkflowConfig{wf},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: "true"}},
 	}
 	engine := NewEngine(cfg, database, nil, dir)
 	runner := newFakeAgentRunner()
@@ -133,8 +134,7 @@ func newTrackedFakeRunnerTestEngine(t *testing.T, wf config.WorkflowConfig) (*En
 // and the step env must carry SORTIE_TRACK_ID.
 func TestRunTaskTrackContextInterpolatedAndEnvSet(t *testing.T) {
 	wf := config.WorkflowConfig{
-		Name:  "default",
-		Print: true,
+		Name: "default",
 		Steps: []config.StepConfig{
 			{Name: "implement", Prompt: "CHAIN:\n{{track.context}}\nOWN:{{track.own_context}} NAME:{{track.name}} ID:{{track.id}}"},
 		},
@@ -176,7 +176,6 @@ func TestRunTaskTrackContextInterpolatedAndEnvSet(t *testing.T) {
 func TestRunTaskTracklessEnvOmitsTrackID(t *testing.T) {
 	wf := config.WorkflowConfig{
 		Name:  "default",
-		Print: true,
 		Steps: []config.StepConfig{{Name: "implement", Prompt: "do it"}},
 	}
 	engine, tk, runner, _ := newFakeRunnerTestEngine(t, wf)
@@ -199,7 +198,6 @@ func TestRunTaskTracklessEnvOmitsTrackID(t *testing.T) {
 func TestRunTaskTrackChainErrorFailsStep(t *testing.T) {
 	wf := config.WorkflowConfig{
 		Name:  "default",
-		Print: true,
 		Steps: []config.StepConfig{{Name: "implement", Prompt: "{{track.context}}"}},
 	}
 	engine, tk, _, _ := newFakeRunnerTestEngine(t, wf)

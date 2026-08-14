@@ -1,6 +1,11 @@
 package workflow
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Bakaface/sortie/internal/config"
@@ -269,5 +274,182 @@ func TestRecordTmuxStepSentinelSession_CorrectsFromSentinel(t *testing.T) {
 	got2, _ := store.GetChatByStep(1, "grilling")
 	if got2.SessionID != "new-session" {
 		t.Errorf("session id changed on idempotent re-call: %q", got2.SessionID)
+	}
+}
+
+// TestRecordTmuxStepSentinelSession_NoSessionIDIsNoOp verifies that a sentinel
+// whose payload carries no session_id (an empty object, or only a
+// transcript_path) records nothing: the sentinel's existence is a turn-end
+// signal, but session discovery requires the session_id field.
+func TestRecordTmuxStepSentinelSession_NoSessionIDIsNoOp(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{"empty object", `{}`},
+		{"transcript_path without session_id", `{"transcript_path":"/x"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			worktree := t.TempDir()
+			writeSentinel(t, worktree, "grilling-1234567890.json", tt.payload)
+
+			store := newFakeTaskStore()
+			e := &Engine{database: store}
+			tk := &task.Task{ID: 1, WorktreePath: worktree}
+
+			e.RecordTmuxStepSentinelSession(tk, "grilling")
+
+			got, err := store.GetChatByStep(1, "grilling")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != nil {
+				t.Errorf("expected no chat row for a session-id-less sentinel, got %+v", got)
+			}
+		})
+	}
+}
+
+// TestRecordTmuxStepSentinelSession_CorrectsStaleRecordedSession verifies the
+// correction path: when a session was already recorded but the authoritative
+// sentinel (written from inside the very session that ran the step) carries a
+// different session_id, the recorded row is updated to the sentinel's value.
+func TestRecordTmuxStepSentinelSession_CorrectsStaleRecordedSession(t *testing.T) {
+	worktree := t.TempDir()
+	writeSentinel(t, worktree, "grilling-1234567890.json", `{"session_id":"new-id"}`)
+
+	store := newFakeTaskStore()
+	if err := store.SetChatSessionID(1, "grilling", "old-id"); err != nil {
+		t.Fatalf("SetChatSessionID: %v", err)
+	}
+	e := &Engine{database: store}
+	tk := &task.Task{ID: 1, WorktreePath: worktree}
+
+	e.RecordTmuxStepSentinelSession(tk, "grilling")
+
+	got, err := store.GetChatByStep(1, "grilling")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.SessionID != "new-id" {
+		t.Errorf("got %+v, want session id corrected to %q", got, "new-id")
+	}
+}
+
+// TestCaptureHeadlessStepContextNoSummarizerDegrades pins the ErrNoSummarizer
+// degradation through captureHeadlessStepContext: a headless step with the
+// summarize_chat strategy and a non-trivial chat log, but NO `summarizer:`
+// command configured, keeps its already-captured last_message context (the
+// failed summarize pass must not clobber it) and does not fail the task —
+// even with require_context set, which only gates the tmux capture path
+// (summarizePreviousTmuxStep), not this one.
+func TestCaptureHeadlessStepContextNoSummarizerDegrades(t *testing.T) {
+	wf := config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{{
+			Name:                  "implement",
+			Prompt:                "do the thing",
+			SummarizationStrategy: config.SummarizationStrategySummarizeChat,
+			RequireContext:        true,
+		}},
+	}
+	engine, tk, runner, database := newFakeRunnerTestEngine(t, wf)
+
+	// Pre-write a unified task log with a step region larger than
+	// smallChatBytes so shouldSummarizeChat is true and the summarize pass is
+	// actually attempted (and hits ErrNoSummarizer — the helper's config has
+	// no summarizer command).
+	if err := os.MkdirAll(ProjectLogsDir(engine.dataDir, tk.ID), 0755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	logContent := fmt.Sprintf("[10:00:00] === Step: implement (task #%d) ===\n", tk.ID) +
+		strings.Repeat("[10:00:01] chat line with meaningful implementation detail\n", smallChatBytes/16)
+	if err := os.WriteFile(ProjectLogPath(engine.dataDir, tk.ID), []byte(logContent), 0644); err != nil {
+		t.Fatalf("write task log: %v", err)
+	}
+
+	runner.script("implement", fakeAgentResult{exitCode: 0, resultText: "last-message context"})
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask must not fail when the summarizer is unconfigured (best-effort degradation), got %v", err)
+	}
+
+	got, err := database.GetTaskStepContext(tk.ID, "implement")
+	if err != nil {
+		t.Fatalf("GetTaskStepContext: %v", err)
+	}
+	if got != "last-message context" {
+		t.Errorf("step context = %q, want the last_message value %q left intact", got, "last-message context")
+	}
+
+	refreshed, err := database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if refreshed.Status != task.StatusRunning {
+		t.Errorf("Status = %q, want unchanged %q (degradation must not fail the task)", refreshed.Status, task.StatusRunning)
+	}
+	if refreshed.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil (no failure recorded)", *refreshed.ExitCode)
+	}
+}
+
+// TestCaptureHeadlessStepContextSummarizeChatOverwrites pins the success half
+// of the summarize_chat strategy (the failure half is the NoSummarizer test
+// above): with a configured summarizer command, the summary it produces
+// REPLACES the initially-captured last_message context via
+// UpdateTaskStepContext, and the summarizer is invoked with
+// SORTIE_PURPOSE=summarize_chat.
+func TestCaptureHeadlessStepContextSummarizeChatOverwrites(t *testing.T) {
+	wf := config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{{
+			Name:                  "implement",
+			Prompt:                "do the thing",
+			SummarizationStrategy: config.SummarizationStrategySummarizeChat,
+		}},
+	}
+	engine, tk, runner, database := newFakeRunnerTestEngine(t, wf)
+
+	// Configure a summarizer post-construction via the engineConfig snapshot
+	// (same-package seam; the helper's config has none). The stub records its
+	// SORTIE_PURPOSE and emits a fixed summary.
+	purposeLog := filepath.Join(t.TempDir(), "purpose.log")
+	engine.cfg.Summarizer = config.SummarizerConfig{
+		Command: fmt.Sprintf(`cat > /dev/null; echo "$SORTIE_PURPOSE" >> %q; echo chat-summary`, purposeLog),
+	}
+
+	// A unified task log with a step region larger than smallChatBytes so
+	// shouldSummarizeChat fires.
+	if err := os.MkdirAll(ProjectLogsDir(engine.dataDir, tk.ID), 0755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	logContent := fmt.Sprintf("[10:00:00] === Step: implement (task #%d) ===\n", tk.ID) +
+		strings.Repeat("[10:00:01] chat line with meaningful implementation detail\n", smallChatBytes/16)
+	if err := os.WriteFile(ProjectLogPath(engine.dataDir, tk.ID), []byte(logContent), 0644); err != nil {
+		t.Fatalf("write task log: %v", err)
+	}
+
+	runner.script("implement", fakeAgentResult{exitCode: 0, resultText: "last-message context"})
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	got, err := database.GetTaskStepContext(tk.ID, "implement")
+	if err != nil {
+		t.Fatalf("GetTaskStepContext: %v", err)
+	}
+	if got != "chat-summary" {
+		t.Errorf("step context = %q, want the summarize_chat output %q to overwrite the last_message value", got, "chat-summary")
+	}
+
+	purposes, err := os.ReadFile(purposeLog)
+	if err != nil {
+		t.Fatalf("summarizer stub never ran: %v", err)
+	}
+	if strings.TrimSpace(string(purposes)) != "summarize_chat" {
+		t.Errorf("SORTIE_PURPOSE log = %q, want a single %q invocation", string(purposes), "summarize_chat")
 	}
 }

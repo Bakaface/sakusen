@@ -1,18 +1,17 @@
 package workflow
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sortie/internal/runner"
 	"github.com/Bakaface/sortie/internal/task"
 )
 
@@ -31,7 +30,7 @@ import (
 // behavior on top of.
 //
 // noiseFiles enumerates paths that don't count toward "meaningful" (e.g.
-// .claude-output.log, CLAUDE.md). Ownership of that list stays with the
+// .sortie-output.log). Ownership of that list stays with the
 // daemon (it's daemon/tmux bookkeeping, not a workflow config concept) —
 // it's passed in rather than hardcoded here.
 //
@@ -259,14 +258,11 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 
 	logMsg("Running summarizer for task #%d", t.ID)
 
-	// Run Claude synchronously to capture the summary text. Auto-select a
-	// model from the project-level allowlist based on prompt size — the final
-	// task summarizer uses the same allowlist as step-level summarize_chat
-	// (per-step allowlist overrides only apply to summarize_chat passes).
-	model, _ := chooseSummarizationModel(len(prompt), e.cfg.AllowedSummarizationModels)
-	summary, err := e.runClaudeSync(ctx, prompt, t.WorktreePath, "summarize", model)
+	// Run the configured summarizer command synchronously to capture the
+	// summary text.
+	summary, err := e.runSummarizerSync(ctx, prompt, t.WorktreePath, "summarize")
 	if err != nil {
-		return fmt.Errorf("summarizer claude invocation failed: %w", err)
+		return fmt.Errorf("summarizer invocation failed: %w", err)
 	}
 
 	summary = strings.TrimSpace(summary)
@@ -304,79 +300,55 @@ func BuildDiffStatSummaryPrompt(taskID int64, title, input, diffStat string) str
 	return sb.String()
 }
 
-// encodeClaudeProjectDir encodes a workdir path to the directory name format used by
-// Claude Code under ~/.claude/projects/. Claude Code replaces every non-alphanumeric
-// character (e.g. '/', '.', '_', spaces) with '-', preserving case and NOT collapsing
-// runs of separators. Replacing only '/' and '.' would mis-encode paths containing
-// underscores (e.g. "uscreen_2" → "uscreen-2"), pointing at a non-existent JSONL and
-// silently dropping the chat content for tmux steps.
-func encodeClaudeProjectDir(workdir string) string {
-	var b strings.Builder
-	b.Grow(len(workdir))
-	for _, r := range workdir {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('-')
-		}
-	}
-	return b.String()
-}
-
 // loadStepChatContent returns the raw chat content for a step.
-// For tmux steps, reads the Claude session JSONL via the session id recorded by UpsertChat.
-// For headless steps, reads the per-step log file.
+// For tmux steps, runs the step agent's chat_log_command (which prints the
+// conversation log on stdout, typically located via the recorded session id or
+// the latest sentinel's transcript_path). For headless steps, reads the
+// per-step region of the unified task log.
 // Returns empty string (no error) if no content is available yet.
-func (e *Engine) loadStepChatContent(t *task.Task, stepName string, useTmux bool) (string, error) {
+func (e *Engine) loadStepChatContent(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, step config.StepConfig, useTmux bool) (string, error) {
 	if useTmux {
-		// Look up the session id recorded when the tmux step started
-		chat, err := e.database.GetChatByStep(t.ID, stepName)
-		if err != nil {
-			return "", fmt.Errorf("failed to look up chat session for tmux step %q: %w", stepName, err)
+		_, agent, agentErr := e.cfg.StepAgent(wf, &step)
+		if agentErr != nil {
+			return "", fmt.Errorf("failed to load chat for tmux step %q: %w", step.Name, agentErr)
 		}
-		if chat == nil || chat.SessionID == "" {
-			// No session recorded yet — treat as no content available
+		if strings.TrimSpace(agent.ChatLogCommand) == "" {
+			// The agent record has no chat-log mechanism — nothing to feed the
+			// summarizer. Callers treat "" as "no chat content" (warn, or fail
+			// when require_context is set).
+			log.Printf("Step %q of task #%d: agent has no chat_log_command; no chat content available for summarize_chat", step.Name, t.ID)
 			return "", nil
 		}
 
-		// Construct the JSONL path: ~/.claude/projects/<encoded-workdir>/<sessionid>.jsonl
-		encoded := encodeClaudeProjectDir(t.WorktreePath)
-		jsonlPath := filepath.Join(os.Getenv("HOME"), ".claude", "projects", encoded, chat.SessionID+".jsonl")
-		data, err := os.ReadFile(jsonlPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// A session id was persisted for this step, so its transcript
-				// JSONL must exist somewhere. A missing file means the path we
-				// derived does not match where Claude Code actually stored the
-				// session (e.g. a project-dir encoding mismatch). Surface it
-				// loudly — silently returning "" here drops the entire step's
-				// chat and leaves the step context empty with no breadcrumb.
-				log.Printf("Warning: recorded session %q for tmux step %q of task #%d has no JSONL at %s; step context will be empty", chat.SessionID, stepName, t.ID, jsonlPath)
-				return "", nil
+		// Look up the session id recorded from the step's sentinel payload.
+		env := map[string]string{
+			"SORTIE_TASK_ID":  fmt.Sprintf("%d", t.ID),
+			"SORTIE_STEP":     step.Name,
+			"SORTIE_WORKTREE": t.WorktreePath,
+		}
+		if chat, err := e.database.GetChatByStep(t.ID, step.Name); err != nil {
+			return "", fmt.Errorf("failed to look up chat session for tmux step %q: %w", step.Name, err)
+		} else if chat != nil {
+			env["SORTIE_SESSION_ID"] = chat.SessionID
+		}
+		if sentinel, sentinelPath, ok := LatestStepSentinelWithPath(t.WorktreePath, step.Name); ok {
+			env["SORTIE_SENTINEL_FILE"] = sentinelPath
+			if sentinel.TranscriptPath != "" {
+				env["SORTIE_TRANSCRIPT_PATH"] = sentinel.TranscriptPath
 			}
-			return "", fmt.Errorf("failed to read claude session JSONL for step %q: %w", stepName, err)
 		}
-		transcript, hasConversation := extractSessionTranscript(string(data))
-		if !hasConversation {
-			// The session JSONL exists but holds no actual assistant turn — only the
-			// injected step prompt plus metadata lines (mode, permission-mode,
-			// file-history-snapshot, attachment, ...). This happens when a tmux step
-			// is (re-)spawned but no conversation runs in it (e.g. the step is
-			// restarted and advanced without anyone grilling). Feeding the raw prompt
-			// to summarize_chat makes the summarizer RE-ENACT the prompt's embedded
-			// instructions instead of summarizing — confabulating a bogus context
-			// (e.g. emitting the grilling agent's opening question as the "summary").
-			// Treat it as no content so the caller's empty-guard fires: a prior
-			// manually-folded context is preserved, and require_context fails loudly,
-			// instead of overwriting good context with garbage.
-			log.Printf("Step %q of task #%d: session %q has no conversational turns; treating as empty chat", stepName, t.ID, chat.SessionID)
-			return "", nil
+
+		cmdCtx, cancel := context.WithTimeout(ctx, chatLogCommandTimeout)
+		defer cancel()
+		out, err := runner.RunSync(cmdCtx, agent.ChatLogCommand, t.WorktreePath, runner.MergeEnv(env, agent.Env), "")
+		if err != nil {
+			return "", fmt.Errorf("chat_log_command failed for tmux step %q: %w", step.Name, err)
 		}
-		return transcript, nil
+		return strings.TrimSpace(out), nil
 	}
 
 	// Headless step: slice the most recent run of this step out of the unified
-	// task log. The step header and footer (written by runClaudeStep) act as
+	// task log. The step header and footer (written by runHeadlessAgent) act as
 	// region markers; retries leave multiple header/footer pairs in the file
 	// and we want the most recent.
 	logPath := ProjectLogPath(e.dataDir, t.ID)
@@ -385,153 +357,14 @@ func (e *Engine) loadStepChatContent(t *task.Task, stepName string, useTmux bool
 		if os.IsNotExist(err) {
 			return "", nil
 		}
-		return "", fmt.Errorf("failed to read task log for step %q: %w", stepName, err)
+		return "", fmt.Errorf("failed to read task log for step %q: %w", step.Name, err)
 	}
-	return extractLatestStepRegion(string(data), stepName), nil
+	return extractLatestStepRegion(string(data), step.Name), nil
 }
 
-// sessionEntry decodes the fields we need from one line of a Claude Code
-// interactive session JSONL transcript (the per-session files under
-// ~/.claude/projects/<encoded>/<id>.jsonl). These files interleave conversational
-// turns ("user"/"assistant") with many non-conversational line types — mode,
-// permission-mode, file-history-snapshot, attachment, last-prompt, ai-title,
-// queue-operation — which are ignored.
-type sessionEntry struct {
-	Type        string          `json:"type"`
-	IsSidechain bool            `json:"isSidechain"`
-	Message     *sessionMessage `json:"message"`
-}
-
-type sessionMessage struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"` // a plain string OR an array of blocks
-}
-
-type sessionBlock struct {
-	Type    string          `json:"type"` // "text", "tool_use", "tool_result", "thinking"
-	Text    string          `json:"text"`
-	Name    string          `json:"name"`    // tool name for tool_use
-	Input   json.RawMessage `json:"input"`   // tool_use input
-	Content json.RawMessage `json:"content"` // tool_result content (string OR array of {text})
-}
-
-// extractSessionTranscript parses a Claude Code session JSONL file into a clean,
-// human-readable transcript, dropping the non-conversational metadata lines and the
-// verbose internals (thinking blocks, raw tool I/O) that would otherwise bloat the
-// summarizer prompt and tempt the model into re-enacting embedded instructions
-// rather than summarizing.
-//
-// It returns the rendered transcript and whether the session contains any actual
-// assistant turn. A session with no assistant turn carries no conversation worth
-// summarizing — only the injected step prompt — so callers treat hasConversation
-// == false as "no chat content".
-func extractSessionTranscript(raw string) (string, bool) {
-	var b strings.Builder
-	hasAssistant := false
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var e sessionEntry
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			continue
-		}
-		if e.Message == nil || (e.Type != "user" && e.Type != "assistant") {
-			continue
-		}
-		rendered := renderSessionContent(e.Message.Content)
-		if rendered == "" {
-			continue
-		}
-		role := e.Type
-		if e.IsSidechain {
-			role = "subagent-" + role
-		}
-		if e.Type == "assistant" {
-			hasAssistant = true
-		}
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(strings.ToUpper(role[:1]) + role[1:])
-		b.WriteString(": ")
-		b.WriteString(rendered)
-	}
-	return b.String(), hasAssistant
-}
-
-// renderSessionContent renders a session message's content, which is either a plain
-// string (typical user message) or an array of content blocks (assistant turns and
-// tool-result user turns). Thinking blocks are dropped; tool calls/results are
-// rendered as compact, truncated markers so identifiers and error strings survive
-// without dragging full file dumps into the summarizer prompt.
-func renderSessionContent(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return strings.TrimSpace(s)
-	}
-	var blocks []sessionBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return ""
-	}
-	var parts []string
-	for _, blk := range blocks {
-		switch blk.Type {
-		case "text":
-			if t := strings.TrimSpace(blk.Text); t != "" {
-				parts = append(parts, t)
-			}
-		case "tool_use":
-			if in := truncateTranscript(strings.TrimSpace(string(blk.Input)), 200); in != "" {
-				parts = append(parts, fmt.Sprintf("[tool: %s %s]", blk.Name, in))
-			} else {
-				parts = append(parts, fmt.Sprintf("[tool: %s]", blk.Name))
-			}
-		case "tool_result":
-			if r := strings.TrimSpace(renderToolResult(blk.Content)); r != "" {
-				parts = append(parts, "[tool result: "+truncateTranscript(r, 500)+"]")
-			}
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
-}
-
-// renderToolResult flattens a tool_result block's content, which Claude Code stores
-// as either a plain string or an array of {"type":"text","text":...} blocks.
-func renderToolResult(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-	var blocks []sessionBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return ""
-	}
-	var parts []string
-	for _, blk := range blocks {
-		if t := strings.TrimSpace(blk.Text); t != "" {
-			parts = append(parts, t)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-// truncateTranscript collapses a value to a single-line, length-bounded form for the
-// transcript. Newlines become spaces so tool I/O stays on one marker line.
-func truncateTranscript(s string, maxLen int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
+// chatLogCommandTimeout bounds a chat_log_command invocation — it should read
+// a file or two, never run an interactive tool.
+const chatLogCommandTimeout = 30 * time.Second
 
 // extractLatestStepRegion returns the slice of the unified task log corresponding
 // to the most recent run of the given step. Returns an empty string if no header
@@ -561,16 +394,16 @@ func extractLatestStepRegion(content, stepName string) string {
 	return strings.TrimSpace(strings.Join(lines[lastHeader:end], "\n"))
 }
 
-// smallChatBytes is the threshold below which a non-tmux step skips the haiku
-// summarization pass and keeps the Claude result-event text as step context.
-// Roughly equates to "a handful of NDJSON events" — too short to be worth
-// paying a haiku round trip for.
+// smallChatBytes is the threshold below which a non-tmux step skips the
+// summarization pass and keeps the agent's result text as step context —
+// a chat log that small is too short to be worth paying a summarizer round
+// trip for.
 const smallChatBytes = 4096
 
-// shouldSummarizeChat returns true when the chat log is worth running a haiku
+// shouldSummarizeChat returns true when the chat log is worth running a
 // summarization pass over. For non-tmux steps with a non-empty result text and
-// a tiny chat log, the result text is kept and haiku is skipped. Tmux steps
-// always summarize because they have no result-event fallback.
+// a tiny chat log, the result text is kept and the summarizer is skipped. Tmux
+// steps always summarize because they have no result-text fallback.
 func shouldSummarizeChat(chat, resultText string, useTmux bool) bool {
 	if useTmux {
 		return true
@@ -581,125 +414,40 @@ func shouldSummarizeChat(chat, resultText string, useTmux bool) bool {
 	return len(chat) >= smallChatBytes
 }
 
-// haikuPromptByteLimit / sonnetPromptByteLimit / opusPromptByteLimit are the
-// empirically measured safe per-invocation prompt-size ceilings for `claude -p`.
-// Each is calibrated below the size at which `claude -p` returns
-// "Prompt is too long" — see scripts/measure-claude-limits/ (or
-// /tmp/sortie-limit-test/results.csv from the original measurement). The prompt
-// is piped on stdin so the OS-level ARG_MAX (1 MB on macOS) does not apply.
-const (
-	haikuPromptByteLimit  = 380 * 1024  // empirical reject at ~420 KB
-	sonnetPromptByteLimit = 700 * 1024  // empirical reject at ~800 KB
-	opusPromptByteLimit   = 1500 * 1024 // empirical reject at ~1.8 MB
-)
-
-// maxPromptBytesForModel returns the safe upper bound for a single `claude -p`
-// invocation when using the given model alias. Unknown aliases fall back to
-// the haiku ceiling (most conservative).
-func maxPromptBytesForModel(model string) int {
-	switch model {
-	case config.SummarizationModelOpus:
-		return opusPromptByteLimit
-	case config.SummarizationModelSonnet:
-		return sonnetPromptByteLimit
-	default:
-		return haikuPromptByteLimit
-	}
-}
-
-// chunkBytesForModel returns the target chunk size for map-reduce summarization
-// when using the given model, leaving headroom for the surrounding instruction
-// prompt.
-func chunkBytesForModel(model string) int {
-	const headroom = 30 * 1024
-	return maxPromptBytesForModel(model) - headroom
-}
-
-// chooseSummarizationModel picks the cheapest model from the allowed list
-// whose prompt-byte ceiling fits promptBytes. Returns (model, fits=true) when
-// a fitting model exists. If no allowed model can hold the prompt, returns the
-// largest-ceiling allowed model and fits=false — the caller should fall back
-// to map-reduce on the returned model.
-//
-// Model ordering (cheapest → most capable): haiku < sonnet < opus. An empty
-// allowed list is treated as DefaultAllowedSummarizationModels.
-func chooseSummarizationModel(promptBytes int, allowed []string) (string, bool) {
-	if len(allowed) == 0 {
-		allowed = config.DefaultAllowedSummarizationModels
-	}
-	allowedSet := make(map[string]bool, len(allowed))
-	for _, m := range allowed {
-		allowedSet[m] = true
-	}
-	// Cheapest → most capable.
-	candidates := []string{
-		config.SummarizationModelHaiku,
-		config.SummarizationModelSonnet,
-		config.SummarizationModelOpus,
-	}
-	var largestAllowed string
-	var largestCap int
-	for _, m := range candidates {
-		if !allowedSet[m] {
-			continue
-		}
-		cap := maxPromptBytesForModel(m)
-		if promptBytes <= cap {
-			return m, true
-		}
-		if cap > largestCap {
-			largestCap = cap
-			largestAllowed = m
-		}
-	}
-	// Nothing fits — fall back to the largest allowed model for map-reduce.
-	// largestAllowed is non-empty because allowed is non-empty after the
-	// default-list substitution above (and candidates covers every entry that
-	// passes ValidateSteps).
-	return largestAllowed, false
-}
-
-// summarizeChatLog summarises the given chat content via Claude. The model is
-// chosen automatically per-call: the cheapest model in `allowed` whose
-// prompt-size ceiling fits the resolved prompt wins (see
-// chooseSummarizationModel). If no allowed model fits, the chat is summarised
-// via map-reduce on the largest allowed model: split on line boundaries into
-// chunks sized to fit, each chunk is summarised with a generic extraction
-// prompt, then the chunk summaries are fed back through the original
-// (customPrompt or default) final-summary prompt — at which point a fresh
-// auto-selection runs over the (smaller) reduced prompt.
+// summarizeChatLog summarises the given chat content via the configured
+// summarizer command. When `summarizer.max_prompt_bytes` is set and the
+// resolved prompt exceeds it, the chat is summarised map-reduce style: split
+// on line boundaries into chunks below the ceiling, each chunk summarised with
+// a generic extraction prompt, then the chunk summaries fed back through the
+// original (customPrompt or default) final-summary prompt.
 //
 // customPrompt is a template that may reference the chat via a {{chat}}
 // placeholder; task template variables ({{task.id}}, {{task.title}}, etc.) are
 // also resolved. If customPrompt is empty, the default summarization prompt is
 // used.
-//
-// An empty `allowed` list falls back to DefaultAllowedSummarizationModels.
-func (e *Engine) summarizeChatLog(ctx context.Context, t *task.Task, stepName, customPrompt, chatContent string, allowed []string) (string, error) {
+func (e *Engine) summarizeChatLog(ctx context.Context, t *task.Task, stepName, customPrompt, chatContent string) (string, error) {
 	if strings.TrimSpace(chatContent) == "" {
 		return "", nil
 	}
 
 	prompt := e.buildSummarizePrompt(t, stepName, customPrompt, chatContent)
-	model, fits := chooseSummarizationModel(len(prompt), allowed)
 
-	if !fits {
-		log.Printf("summarize_chat: prompt %d bytes exceeds all allowed-model limits (%v) for step %q of task #%d; running map-reduce on %s", len(prompt), allowed, stepName, t.ID, model)
-		chunkSummaries, err := e.summarizeChatChunks(ctx, t, stepName, chatContent, allowed, model)
+	maxBytes := e.cfg.Summarizer.MaxPromptBytes
+	if maxBytes > 0 && len(prompt) > maxBytes {
+		log.Printf("summarize_chat: prompt %d bytes exceeds summarizer.max_prompt_bytes (%d) for step %q of task #%d; running map-reduce", len(prompt), maxBytes, stepName, t.ID)
+		chunkSummaries, err := e.summarizeChatChunks(ctx, t, stepName, chatContent, maxBytes)
 		if err != nil {
 			return "", err
 		}
 		reduced := strings.Join(chunkSummaries, "\n\n--- CHUNK BOUNDARY ---\n\n")
 		prompt = e.buildSummarizePrompt(t, stepName, customPrompt, reduced)
-		// Re-select on the smaller reduced prompt: a cheaper model may now fit.
-		model, _ = chooseSummarizationModel(len(prompt), allowed)
-		log.Printf("summarize_chat: map-reduce reduce step for step %q of task #%d (%d chunk summaries, %d chars, model=%s)", stepName, t.ID, len(chunkSummaries), len(reduced), model)
+		log.Printf("summarize_chat: map-reduce reduce step for step %q of task #%d (%d chunk summaries, %d chars)", stepName, t.ID, len(chunkSummaries), len(reduced))
 	}
 
-	log.Printf("Running summarize_chat for step %q of task #%d (model=%s, prompt %d bytes)", stepName, t.ID, model, len(prompt))
-	summary, err := e.runClaudeSync(ctx, prompt, t.WorktreePath, "summarize_chat", model)
+	log.Printf("Running summarize_chat for step %q of task #%d (prompt %d bytes)", stepName, t.ID, len(prompt))
+	summary, err := e.runSummarizerSync(ctx, prompt, t.WorktreePath, "summarize_chat")
 	if err != nil {
-		return "", fmt.Errorf("summarize_chat claude invocation failed: %w", err)
+		return "", fmt.Errorf("summarize_chat invocation failed: %w", err)
 	}
 	summary = strings.TrimSpace(summary)
 	log.Printf("summarize_chat completed for step %q of task #%d (%d chars)", stepName, t.ID, len(summary))
@@ -728,7 +476,7 @@ func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chat
 	}
 
 	return fmt.Sprintf(
-		"Summarize the following Claude Code conversation log from step %q of task #%d: %s\n\n"+
+		"Summarize the following agent conversation log from step %q of task #%d: %s\n\n"+
 			"Output requirements:\n"+
 			"- Under 200 words.\n"+
 			"- Preserve file paths, function/symbol names, command lines, and error strings VERBATIM — do not paraphrase identifiers.\n"+
@@ -739,26 +487,32 @@ func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chat
 	)
 }
 
-// summarizeChatChunks splits chatContent on line boundaries (sized for
-// chunkModel) and runs an extraction pass over each chunk, returning the
-// per-chunk summaries. Each chunk re-selects from `allowed`: chunks small
-// enough to fit a cheaper model use it. chunkModel sets the chunk size and
-// caps the maximum chunk a cheaper model may need to swallow.
-func (e *Engine) summarizeChatChunks(ctx context.Context, t *task.Task, stepName, chatContent string, allowed []string, chunkModel string) ([]string, error) {
-	chunks := splitOnLineBoundary(chatContent, chunkBytesForModel(chunkModel))
+// chunkHeadroomBytes is subtracted from summarizer.max_prompt_bytes when
+// sizing map-reduce chunks, leaving room for the surrounding instruction
+// prompt.
+const chunkHeadroomBytes = 30 * 1024
+
+// summarizeChatChunks splits chatContent on line boundaries (sized below
+// maxPromptBytes, minus instruction headroom) and runs an extraction pass over
+// each chunk, returning the per-chunk summaries.
+func (e *Engine) summarizeChatChunks(ctx context.Context, t *task.Task, stepName, chatContent string, maxPromptBytes int) ([]string, error) {
+	chunkBytes := maxPromptBytes - chunkHeadroomBytes
+	if chunkBytes < 1024 {
+		chunkBytes = maxPromptBytes // tiny ceilings: skip the headroom math
+	}
+	chunks := splitOnLineBoundary(chatContent, chunkBytes)
 	summaries := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
 		mapPrompt := fmt.Sprintf(
-			"This is chunk %d of %d from a Claude Code conversation log (step %q of task #%d: %s).\n"+
+			"This is chunk %d of %d from an agent conversation log (step %q of task #%d: %s).\n"+
 				"Extract the key information from this chunk: decisions made, file paths, function/symbol names, "+
 				"commands run, errors hit, blockers, and unresolved questions. Preserve identifiers VERBATIM. "+
 				"Under 300 words. This is a partial slice — a later pass will combine all chunk extracts into a final summary.\n\n"+
 				"--- CHUNK ---\n%s",
 			i+1, len(chunks), stepName, t.ID, t.Title, chunk,
 		)
-		model, _ := chooseSummarizationModel(len(mapPrompt), allowed)
-		log.Printf("summarize_chat: map step %d/%d for step %q of task #%d (model=%s, %d chars)", i+1, len(chunks), stepName, t.ID, model, len(chunk))
-		s, err := e.runClaudeSync(ctx, mapPrompt, t.WorktreePath, "summarize_chat_chunk", model)
+		log.Printf("summarize_chat: map step %d/%d for step %q of task #%d (%d chars)", i+1, len(chunks), stepName, t.ID, len(chunk))
+		s, err := e.runSummarizerSync(ctx, mapPrompt, t.WorktreePath, "summarize_chat_chunk")
 		if err != nil {
 			return nil, fmt.Errorf("summarize_chat map step %d/%d failed: %w", i+1, len(chunks), err)
 		}
@@ -855,53 +609,27 @@ func RunWorktreeSetupCommands(ctx context.Context, projectRoot, worktreePath str
 	return nil
 }
 
-// runClaudeSync runs Claude Code synchronously and captures its stdout output.
-// workDir sets the working directory for the Claude process so it can access
-// the task's worktree files. purpose tags the invocation via SORTIE_PURPOSE so
-// stub claude binaries can route the response without parsing prompt text.
-// model is the Claude model alias ("haiku", "sonnet", "opus") or full model id;
-// an empty string falls back to the haiku alias.
+// ErrNoSummarizer is returned when a summarization pass is requested but no
+// `summarizer:` command is configured. Callers treat it as a degradation:
+// summaries are skipped with a warning (or the task fails when a step demands
+// context via require_context).
+var ErrNoSummarizer = errors.New("no summarizer configured: set a top-level `summarizer:` command in .sortie.yml (run `sortie init` in a fresh project for a scaffolded default)")
+
+// runSummarizerSync runs the configured summarizer command synchronously with
+// the prompt piped on stdin and captures its stdout. workDir sets the working
+// directory so the command can access the task's worktree files. purpose tags
+// the invocation via SORTIE_PURPOSE so stubs/scripts can route the call
+// without parsing prompt text.
 //
-// The prompt is piped on stdin (claude reads it via the default --input-format
-// text path) rather than passed as an argv positional. This sidesteps the
-// macOS ARG_MAX (1 MB) ceiling that would otherwise cap the largest model
-// (opus) far below its actual prompt-size capacity.
-func (e *Engine) runClaudeSync(ctx context.Context, prompt string, workDir string, purpose string, model string) (string, error) {
-	if model == "" {
-		model = config.SummarizationModelHaiku
+// The prompt is piped on stdin rather than passed as an argv positional — this
+// sidesteps the OS ARG_MAX ceiling for very large chat logs.
+func (e *Engine) runSummarizerSync(ctx context.Context, prompt string, workDir string, purpose string) (string, error) {
+	if !e.cfg.Summarizer.Configured() {
+		return "", ErrNoSummarizer
 	}
-	args := []string{"-p", "--output-format", "text", "--model", model}
-	args = append(args, e.cfg.Claude.Args()...)
-
-	cmd := exec.CommandContext(ctx, e.cfg.Claude.Command, args...)
-	if workDir != "" {
-		cmd.Dir = workDir
-	}
+	env := map[string]string{}
 	if purpose != "" {
-		cmd.Env = append(os.Environ(), "SORTIE_PURPOSE="+purpose)
+		env["SORTIE_PURPOSE"] = purpose
 	}
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		// claude prints user-facing errors (e.g. "Prompt is too long") to stdout
-		// rather than stderr, so surface both streams for diagnosis.
-		return "", fmt.Errorf("claude command failed: %w (stdout: %s, stderr: %s)", err, truncateForLog(stdout.String()), truncateForLog(stderr.String()))
-	}
-
-	return stdout.String(), nil
-}
-
-// truncateForLog clips a string to a sensible length for inclusion in error
-// messages so a multi-megabyte stdout dump cannot drown a log line.
-func truncateForLog(s string) string {
-	const maxLen = 500
-	s = strings.TrimSpace(s)
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + fmt.Sprintf("... (truncated, %d total bytes)", len(s))
+	return runner.RunSync(ctx, e.cfg.Summarizer.Command, workDir, env, prompt)
 }

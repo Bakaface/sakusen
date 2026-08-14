@@ -1,17 +1,16 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sortie/internal/runner"
 	"github.com/Bakaface/sortie/internal/task"
 	"github.com/Bakaface/sortie/internal/tmux"
 	"github.com/Bakaface/sortie/internal/workflow"
@@ -24,7 +23,12 @@ const (
 
 // noiseFiles are files that don't count as meaningful changes when checking
 // whether a task produced real output (e.g. when fast-tracking to completed).
-var noiseFiles = []string{".claude-output.log", "CLAUDE.md"}
+// Only sortie-written artifacts belong here: sortie never writes files an
+// agent might also legitimately edit (continue-path context flows as the
+// session's initial prompt, not as a CLAUDE.md dropped into the worktree), so
+// anything else — including a CLAUDE.md edit — is real work and must not be
+// fast-tracked away.
+var noiseFiles = []string{runner.OutputLogFileName}
 
 // tmuxFirstTitle returns a placeholder title for a tmux-first workflow task that
 // was created without an input. Falls back to a generic label if the
@@ -143,7 +147,7 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	}
 
 	wf := projCfg.GetWorkflow(workflowName)
-	tmuxFirst := wf != nil && wf.FirstStepIsTmux()
+	tmuxFirst := projCfg.FirstStepIsTmux(wf)
 
 	// Apply workflow-level pins as fallbacks below explicit request values.
 	// Precedence: explicit request value > workflow config pin > project default.
@@ -737,12 +741,19 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 	} else if input == "" {
 		// Skip AI title generation when input is empty (existing branch with no prompt)
 		title = initialTitle
+	} else if !projCfg.Summarizer.Configured() {
+		// No summarizer command → no AI titles. Degrade to a sanitized,
+		// truncated slice of the input instead of blocking task creation.
+		title = task.SanitizeTitle(truncateTitleInput(input))
+		if title == "" {
+			title = initialTitle
+		}
 	} else {
 		ctx, cancel := context.WithTimeout(s.ctx, titleGenerationTimeout)
 		defer cancel()
 
 		var err error
-		title, err = s.generateTitle(ctx, input, &projCfg.Claude)
+		title, err = s.generateTitle(ctx, input, &projCfg.Summarizer)
 		if err != nil {
 			log.Printf("%sFailed to generate AI title for task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
 			if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
@@ -783,32 +794,37 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 	log.Printf("%sAI title for task #%d: %s (branch: %s)", s.projectLogPrefix(projectID), taskID, title, branch)
 }
 
-func (s *Server) generateTitle(ctx context.Context, input string, claude *config.ClaudeConfig) (string, error) {
+func (s *Server) generateTitle(ctx context.Context, input string, summarizer *config.SummarizerConfig) (string, error) {
 	prompt := fmt.Sprintf(
 		"Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task input:\n\n%s",
 		input,
 	)
 
-	args := []string{"-p", prompt, "--output-format", "text", "--model", "haiku"}
-	args = append(args, claude.DefaultArgs...)
-
-	cmd := exec.CommandContext(ctx, claude.Command, args...)
-	cmd.Env = append(os.Environ(), "SORTIE_PURPOSE=title")
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("claude command failed: %w (stderr: %s)", err, stderr.String())
+	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SORTIE_PURPOSE": "title"}, prompt)
+	if err != nil {
+		return "", fmt.Errorf("title generation failed: %w", err)
 	}
 
-	title := task.SanitizeTitle(stdout.String())
+	title := task.SanitizeTitle(out)
 	if title == "" {
-		return "", fmt.Errorf("claude returned empty title")
+		return "", fmt.Errorf("summarizer returned empty title")
 	}
 
 	return title, nil
+}
+
+// truncateTitleInput clips a task input's first line to a title-sized slice
+// for the no-summarizer fallback title.
+func truncateTitleInput(input string) string {
+	line := strings.TrimSpace(input)
+	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+		line = strings.TrimSpace(line[:idx])
+	}
+	const maxLen = 80
+	if len(line) > maxLen {
+		line = strings.TrimSpace(line[:maxLen])
+	}
+	return line
 }
 
 // validateTaskRefs scans value for {{tasks.<id>.<field>}} references and

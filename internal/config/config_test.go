@@ -90,91 +90,63 @@ func TestGitOnCompleteRejected(t *testing.T) {
 	}
 }
 
-func TestYoloDefaultFalse(t *testing.T) {
-	cfg := defaultConfig()
-	if cfg.Claude.Yolo {
-		t.Error("expected yolo to default to false")
+// TestRemovedProjectKeysRejected verifies the removed .sortie.yml top-level
+// keys (claude:, yolo:, system_prompt:, allowed_summarization_models:) are hard
+// load-time errors with migration messages pointing at the agents:/summarizer:
+// replacements, instead of being silently dropped.
+func TestRemovedProjectKeysRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"claude block", "claude:\n  command: /tmp/foo\n  default_args: [--flag]\n", "`claude:` block was removed"},
+		{"yolo", "yolo: true\n", "`yolo:` was removed"},
+		{"system_prompt", "system_prompt: \"be terse\"\n", "`system_prompt:` was removed"},
+		{"allowed_summarization_models", "allowed_summarization_models: [haiku]\n", "`allowed_summarization_models` was removed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, ".sortie.yml")
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg := defaultConfig()
+			err := loadProjectConfig(configPath, cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected migration error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
 	}
 }
 
-func TestClaudeConfigArgsWithoutYolo(t *testing.T) {
-	cfg := &ClaudeConfig{
-		Command:     "claude",
-		DefaultArgs: []string{"--verbose"},
-		Yolo:        false,
-	}
-	args := cfg.Args()
-	for _, a := range args {
-		if a == "--dangerously-skip-permissions" {
-			t.Error("expected --dangerously-skip-permissions to NOT be in args when yolo is false")
-		}
-	}
-	if len(args) != 1 || args[0] != "--verbose" {
-		t.Errorf("expected [--verbose], got %v", args)
-	}
-}
-
-func TestClaudeConfigArgsWithYolo(t *testing.T) {
-	cfg := &ClaudeConfig{
-		Command: "claude",
-		Yolo:    true,
-	}
-	args := cfg.Args()
-	found := false
-	for _, a := range args {
-		if a == "--dangerously-skip-permissions" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected --dangerously-skip-permissions in args when yolo is true")
-	}
-}
-
-func TestYoloProjectConfig(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
-
-	yamlContent := `
-yolo: true
-workflows:
-  - name: default
-    steps:
-      - name: implement
-        prompt: "Implement the task"
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatal(err)
+// TestRemovedKeysRejectedInGlobalConfig verifies the same removed keys are
+// rejected in the global ~/.config/sortie/config.yaml too.
+func TestRemovedKeysRejectedInGlobalConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"claude block", "claude:\n  command: /tmp/bar\n", "`claude:` block was removed"},
+		{"yolo", "yolo: true\n", "`yolo:` was removed"},
 	}
 
-	cfg := defaultConfig()
-	if err := loadProjectConfig(configPath, cfg); err != nil {
-		t.Fatal(err)
-	}
-
-	if !cfg.Claude.Yolo {
-		t.Error("expected yolo to be true from project config")
-	}
-}
-
-func TestYoloGlobalConfig(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-
-	yamlContent := `
-yolo: true
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := defaultConfig()
-	if err := loadGlobalConfig(configPath, cfg); err != nil {
-		t.Fatal(err)
-	}
-
-	if !cfg.Claude.Yolo {
-		t.Error("expected yolo to be true from global config")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg := defaultConfig()
+			err := loadGlobalConfig(configPath, cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected migration error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
 	}
 }
 
@@ -290,32 +262,6 @@ poll_interval: "not a duration"
 	}
 }
 
-func TestYoloProjectOverridesGlobal(t *testing.T) {
-	// Global sets yolo: true, project sets yolo: false
-	globalDir := t.TempDir()
-	globalPath := filepath.Join(globalDir, "config.yaml")
-	os.WriteFile(globalPath, []byte("yolo: true\n"), 0644)
-
-	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
-	os.WriteFile(projectPath, []byte("yolo: false\n"), 0644)
-
-	cfg := defaultConfig()
-	if err := loadGlobalConfig(globalPath, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if !cfg.Claude.Yolo {
-		t.Error("expected yolo to be true after loading global config")
-	}
-
-	if err := loadProjectConfig(projectPath, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Claude.Yolo {
-		t.Error("expected yolo to be false after project config overrides global")
-	}
-}
-
 func TestLoopConfigParsing(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, ".sortie.yml")
@@ -323,7 +269,6 @@ func TestLoopConfigParsing(t *testing.T) {
 	yamlContent := `
 workflows:
   - name: default
-    print: true
     steps:
       - name: plan
         prompt: "Plan"
@@ -382,10 +327,10 @@ workflows:
 }
 
 func TestValidateLoopsValidConfig(t *testing.T) {
-	// Loop steps cannot run in tmux, so the workflow must opt into headless mode.
+	// The tmux-mode constraint on loop steps is enforced against the resolved
+	// agent in validateAgents; ValidateLoops itself is mode-agnostic.
 	wf := &WorkflowConfig{
-		Name:  "test",
-		Print: true,
+		Name: "test",
 		Steps: []StepConfig{
 			{Name: "plan", Prompt: "Plan"},
 			{Name: "implement", Prompt: "Implement"},
@@ -535,8 +480,7 @@ func TestValidateLoopsHumanStep(t *testing.T) {
 
 func TestValidateLoopsInvalidExitCondition(t *testing.T) {
 	wf := &WorkflowConfig{
-		Name:  "test",
-		Print: true,
+		Name: "test",
 		Steps: []StepConfig{
 			{Name: "plan", Prompt: "Plan"},
 			{
@@ -564,8 +508,7 @@ func TestValidateLoopsInvalidExitCondition(t *testing.T) {
 
 func TestValidateLoopsOverlapping(t *testing.T) {
 	wf := &WorkflowConfig{
-		Name:  "test",
-		Print: true,
+		Name: "test",
 		Steps: []StepConfig{
 			{Name: "step1", Prompt: "Step 1"},
 			{Name: "step2", Prompt: "Step 2"},
@@ -613,72 +556,66 @@ func TestValidateLoopsNoLoop(t *testing.T) {
 	}
 }
 
-func TestEffectiveAllowedSummarizationModels(t *testing.T) {
-	tests := []struct {
-		name           string
-		stepAllowed    []string
-		projectDefault []string
-		want           []string
-	}{
-		{
-			name:           "both empty falls back to default allowlist",
-			stepAllowed:    nil,
-			projectDefault: nil,
-			want:           DefaultAllowedSummarizationModels,
-		},
-		{
-			name:           "project default used when step empty",
-			stepAllowed:    nil,
-			projectDefault: []string{"sonnet", "opus"},
-			want:           []string{"sonnet", "opus"},
-		},
-		{
-			name:           "step overrides project default",
-			stepAllowed:    []string{"opus"},
-			projectDefault: []string{"haiku", "sonnet"},
-			want:           []string{"opus"},
-		},
-		{
-			name:           "step overrides empty project default",
-			stepAllowed:    []string{"haiku"},
-			projectDefault: nil,
-			want:           []string{"haiku"},
+// TestStepAgentCascade verifies the agent resolution cascade:
+// step.agent → workflow.agent → top-level default_agent → "claude".
+func TestStepAgentCascade(t *testing.T) {
+	cfg := &Config{
+		Agents: map[string]AgentConfig{
+			"claude":     {Command: "claude-cmd"},
+			"wf-agent":   {Command: "wf-cmd"},
+			"step-agent": {Command: "step-cmd"},
+			"def-agent":  {Command: "def-cmd"},
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			step := &StepConfig{AllowedSummarizationModels: tt.stepAllowed}
-			got := step.EffectiveAllowedSummarizationModels(tt.projectDefault)
-			if len(got) != len(tt.want) {
-				t.Fatalf("EffectiveAllowedSummarizationModels: got %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("EffectiveAllowedSummarizationModels[%d]: got %q, want %q", i, got[i], tt.want[i])
-				}
-			}
-		})
+	wf := &WorkflowConfig{Name: "w", Agent: "wf-agent"}
+
+	// Step-level agent wins over everything.
+	slug, agent, err := cfg.StepAgent(wf, &StepConfig{Name: "s", Agent: "step-agent"})
+	if err != nil {
+		t.Fatalf("StepAgent: %v", err)
+	}
+	if slug != "step-agent" || agent.Command != "step-cmd" {
+		t.Errorf("step-level: got (%q, %q), want (step-agent, step-cmd)", slug, agent.Command)
 	}
 
-	// The default must allow all three aliases so the auto-selector can pick the
-	// cheapest fitting model for every prompt size.
-	wantDefault := map[string]bool{"haiku": true, "sonnet": true, "opus": true}
-	if len(DefaultAllowedSummarizationModels) != len(wantDefault) {
-		t.Errorf("DefaultAllowedSummarizationModels = %v, want all three aliases", DefaultAllowedSummarizationModels)
-	}
-	for _, m := range DefaultAllowedSummarizationModels {
-		if !wantDefault[m] {
-			t.Errorf("DefaultAllowedSummarizationModels contains unexpected entry %q", m)
-		}
+	// Workflow-level agent wins when the step sets none.
+	if slug := cfg.StepAgentSlug(wf, &StepConfig{Name: "s"}); slug != "wf-agent" {
+		t.Errorf("workflow-level: got %q, want wf-agent", slug)
 	}
 
-	// EffectiveAllowedSummarizationModels must return a copy so callers can
-	// mutate the slice without poisoning the default.
-	step := &StepConfig{}
-	got := step.EffectiveAllowedSummarizationModels(nil)
-	got[0] = "MUTATED"
-	if DefaultAllowedSummarizationModels[0] == "MUTATED" {
-		t.Errorf("EffectiveAllowedSummarizationModels returned a reference to the default slice")
+	// default_agent wins when neither step nor workflow set one.
+	cfg.DefaultAgent = "def-agent"
+	if slug := cfg.StepAgentSlug(&WorkflowConfig{Name: "plain"}, &StepConfig{Name: "s"}); slug != "def-agent" {
+		t.Errorf("default_agent: got %q, want def-agent", slug)
+	}
+
+	// Implicit "claude" fallback when nothing is configured.
+	cfg.DefaultAgent = ""
+	slug, agent, err = cfg.StepAgent(&WorkflowConfig{Name: "plain"}, &StepConfig{Name: "s"})
+	if err != nil {
+		t.Fatalf("StepAgent fallback: %v", err)
+	}
+	if slug != DefaultAgentSlug || agent.Command != "claude-cmd" {
+		t.Errorf("fallback: got (%q, %q), want (claude, claude-cmd)", slug, agent.Command)
+	}
+}
+
+// TestStepAgentUnresolvableSlugErrors verifies StepAgent surfaces an
+// instructive error when the resolved slug has no record (e.g. the implicit
+// "claude" fallback with no agents configured at all).
+func TestStepAgentUnresolvableSlugErrors(t *testing.T) {
+	cfg := &Config{}
+	slug, _, err := cfg.StepAgent(&WorkflowConfig{Name: "w"}, &StepConfig{Name: "s"})
+	if slug != DefaultAgentSlug {
+		t.Errorf("slug = %q, want %q", slug, DefaultAgentSlug)
+	}
+	if err == nil || !strings.Contains(err.Error(), `no agent "claude" configured`) {
+		t.Fatalf("expected instructive no-agent error, got: %v", err)
+	}
+
+	// StepIsTmux degrades to false on unresolvable slugs instead of erroring.
+	if cfg.StepIsTmux(&WorkflowConfig{Name: "w"}, &StepConfig{Name: "s"}) {
+		t.Error("StepIsTmux must report false for unresolvable agents")
 	}
 }
 
@@ -1793,9 +1730,15 @@ func TestTmuxSetupCommandDefaultEmpty(t *testing.T) {
 	}
 }
 
-func TestWorkflowConfig_FirstStepIsTmux(t *testing.T) {
-	tr := true
-	fa := false
+// TestConfigFirstStepIsTmux verifies Config.FirstStepIsTmux resolves the first
+// step's agent through the cascade and reports its mode.
+func TestConfigFirstStepIsTmux(t *testing.T) {
+	cfg := &Config{
+		Agents: map[string]AgentConfig{
+			"claude":      {Mode: AgentModeHeadless, Command: "true"},
+			"claude-tmux": {Mode: AgentModeTmux, Command: "true"},
+		},
+	}
 
 	tests := []struct {
 		name string
@@ -1813,10 +1756,22 @@ func TestWorkflowConfig_FirstStepIsTmux(t *testing.T) {
 			want: false,
 		},
 		{
-			// Default (print not set) means tmux mode — first step runs in tmux.
-			name: "default first step is tmux",
+			// The implicit "claude" fallback resolves to a headless agent.
+			name: "default agent is headless",
 			wf: &WorkflowConfig{
-				Name: "tmux-first",
+				Name: "headless",
+				Steps: []StepConfig{
+					{Name: "implement"},
+				},
+			},
+			want: false,
+		},
+		{
+			// Workflow-level tmux agent makes the first step tmux.
+			name: "workflow-level tmux agent",
+			wf: &WorkflowConfig{
+				Name:  "tmux-first",
+				Agent: "claude-tmux",
 				Steps: []StepConfig{
 					{Name: "interact"},
 					{Name: "review"},
@@ -1825,37 +1780,24 @@ func TestWorkflowConfig_FirstStepIsTmux(t *testing.T) {
 			want: true,
 		},
 		{
-			// Workflow-level print=true makes the first step run headless.
-			name: "workflow-level print true disables tmux",
+			// Step-level agent overrides the workflow default.
+			name: "step-level tmux agent on first step",
 			wf: &WorkflowConfig{
-				Name:  "headless",
-				Print: true,
+				Name: "override-on",
 				Steps: []StepConfig{
-					{Name: "implement"},
-				},
-			},
-			want: false,
-		},
-		{
-			// Step-level print=false overrides workflow-level print=true, restoring tmux.
-			name: "step-level print false overrides workflow default",
-			wf: &WorkflowConfig{
-				Name:  "override-on",
-				Print: true,
-				Steps: []StepConfig{
-					{Name: "interact", Print: &fa},
+					{Name: "interact", Agent: "claude-tmux"},
 				},
 			},
 			want: true,
 		},
 		{
-			// Step-level print=true on the first step disables tmux even when
-			// workflow-level print=false (tmux mode).
-			name: "step-level print true on first step",
+			// Step-level headless agent overrides a workflow-level tmux agent.
+			name: "step-level headless agent overrides workflow tmux",
 			wf: &WorkflowConfig{
-				Name: "headless-first",
+				Name:  "headless-first",
+				Agent: "claude-tmux",
 				Steps: []StepConfig{
-					{Name: "implement", Print: &tr},
+					{Name: "implement", Agent: "claude"},
 					{Name: "interact"},
 				},
 			},
@@ -1865,61 +1807,27 @@ func TestWorkflowConfig_FirstStepIsTmux(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.wf.FirstStepIsTmux(); got != tt.want {
+			if got := cfg.FirstStepIsTmux(tt.wf); got != tt.want {
 				t.Errorf("FirstStepIsTmux() = %v, want %v", got, tt.want)
 			}
 		})
 	}
-}
 
-func TestClaudeCommandProjectConfig(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
-
-	yamlContent := "claude:\n  command: /tmp/foo\n  default_args: [--flag]\n"
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatal(err)
+	// A tmux-mode default_agent flips the fallback path too.
+	tmuxDefault := &Config{
+		Agents:       cfg.Agents,
+		DefaultAgent: "claude-tmux",
 	}
-
-	cfg := defaultConfig()
-	if err := loadProjectConfig(configPath, cfg); err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.Claude.Command != "/tmp/foo" {
-		t.Errorf("expected claude.command /tmp/foo, got %q", cfg.Claude.Command)
-	}
-	if len(cfg.Claude.DefaultArgs) != 1 || cfg.Claude.DefaultArgs[0] != "--flag" {
-		t.Errorf("expected claude.default_args [--flag], got %v", cfg.Claude.DefaultArgs)
-	}
-}
-
-func TestClaudeCommandGlobalConfig(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-
-	yamlContent := "claude:\n  command: /tmp/bar\n  default_args: [--verbose]\n"
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := defaultConfig()
-	if err := loadGlobalConfig(configPath, cfg); err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.Claude.Command != "/tmp/bar" {
-		t.Errorf("expected claude.command /tmp/bar, got %q", cfg.Claude.Command)
-	}
-	if len(cfg.Claude.DefaultArgs) != 1 || cfg.Claude.DefaultArgs[0] != "--verbose" {
-		t.Errorf("expected claude.default_args [--verbose], got %v", cfg.Claude.DefaultArgs)
+	wf := &WorkflowConfig{Name: "plain", Steps: []StepConfig{{Name: "interact"}}}
+	if !tmuxDefault.FirstStepIsTmux(wf) {
+		t.Error("expected FirstStepIsTmux=true with a tmux-mode default_agent")
 	}
 }
 
 // TestLoadProjectConfig_LegacyTmuxFieldRejected verifies the production load
 // path (not just ValidateFile) refuses configs that still use the removed
-// `tmux:` field, with an error that names both the removed and replacement
-// fields so the user can migrate without consulting docs.
+// `tmux:` field, with an error that points at the agent mechanism so the user
+// can migrate without consulting docs.
 func TestLoadProjectConfig_LegacyTmuxFieldRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".sortie.yml")
@@ -1932,8 +1840,62 @@ func TestLoadProjectConfig_LegacyTmuxFieldRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when loading config with legacy `tmux:` field")
 	}
-	if !contains(err.Error(), "tmux") || !contains(err.Error(), "print") {
-		t.Errorf("error must mention both `tmux` and `print` for migration clarity, got: %v", err)
+	if !contains(err.Error(), "tmux") || !contains(err.Error(), "agent") {
+		t.Errorf("error must mention both `tmux` and the `agent` replacement for migration clarity, got: %v", err)
+	}
+}
+
+// TestLoadProjectConfig_LegacyPrintFieldRejected verifies the removed `print:`
+// field (workflow and step level) is a hard load-time error pointing at the
+// agent mechanism.
+func TestLoadProjectConfig_LegacyPrintFieldRejected(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "workflow-level print",
+			yaml: "workflows:\n  - name: w\n    print: true\n    steps:\n      - name: s\n        prompt: do\n",
+		},
+		{
+			name: "step-level print",
+			yaml: "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: do\n        print: true\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".sortie.yml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg := defaultConfig()
+			err := loadProjectConfig(path, cfg)
+			if err == nil {
+				t.Fatal("expected error when loading config with legacy `print:` field")
+			}
+			if !contains(err.Error(), "print") || !contains(err.Error(), "agent") {
+				t.Errorf("error must mention both `print` and the `agent` replacement, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoadProjectConfig_StepAllowedSummarizationModelsRejected verifies the
+// removed step-level `allowed_summarization_models:` field is a hard load-time
+// error pointing at the summarizer command.
+func TestLoadProjectConfig_StepAllowedSummarizationModelsRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".sortie.yml")
+	yaml := "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: do\n        allowed_summarization_models: [haiku]\n"
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	err := loadProjectConfig(path, cfg)
+	if err == nil || !contains(err.Error(), "allowed_summarization_models") || !contains(err.Error(), "summarizer") {
+		t.Fatalf("expected migration error pointing at `summarizer:`, got: %v", err)
 	}
 }
 
@@ -2286,4 +2248,261 @@ func TestEffectiveOnCompleteLocality(t *testing.T) {
 			t.Errorf("EffectiveOnComplete(unknown) = %q, want %q (built-in default)", got, "commit")
 		}
 	})
+}
+
+// TestAgentsParsedFromYaml verifies the agents:/default_agent:/summarizer:
+// surface parses fully (mode, tmux-only fields, env) and drives the
+// mode-resolution accessors on a loaded Config.
+func TestAgentsParsedFromYaml(t *testing.T) {
+	isolateHome(t)
+	dir, _ := setupProject(t, `
+agents:
+  worker:
+    command: "run-headless"
+  interactive:
+    mode: tmux
+    command: "run-tmux"
+    resume_command: "run-tmux --resume"
+    chat_log_command: "cat chat.log"
+    env:
+      FOO: bar
+summarizer:
+  command: "summarize-stdin"
+  max_prompt_bytes: 1024
+workflows:
+  - name: w
+    agent: interactive
+    steps:
+      - name: interact
+        prompt: p
+      - name: implement
+        prompt: p
+        agent: worker
+`, nil)
+
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+
+	interactive, ok := cfg.ResolveAgent("interactive")
+	if !ok {
+		t.Fatal("expected interactive agent in registry")
+	}
+	if !interactive.IsTmux() {
+		t.Error("interactive agent must resolve as tmux mode")
+	}
+	if interactive.Command != "run-tmux" ||
+		interactive.ResumeCommand != "run-tmux --resume" ||
+		interactive.ChatLogCommand != "cat chat.log" {
+		t.Errorf("interactive agent fields not parsed: %+v", interactive)
+	}
+	if interactive.Env["FOO"] != "bar" {
+		t.Errorf("interactive agent env not parsed: %v", interactive.Env)
+	}
+
+	worker, ok := cfg.ResolveAgent("worker")
+	if !ok || worker.IsTmux() {
+		t.Errorf("worker must be a headless agent, got ok=%v %+v", ok, worker)
+	}
+	if worker.EffectiveMode() != AgentModeHeadless {
+		t.Errorf("worker EffectiveMode = %q, want headless default", worker.EffectiveMode())
+	}
+
+	if cfg.Summarizer.Command != "summarize-stdin" || cfg.Summarizer.MaxPromptBytes != 1024 {
+		t.Errorf("summarizer not parsed: %+v", cfg.Summarizer)
+	}
+
+	wf := cfg.GetTaskWorkflow("w")
+	if wf == nil {
+		t.Fatal("workflow w not found")
+	}
+	if !cfg.FirstStepIsTmux(wf) {
+		t.Error("first step resolves to the workflow's tmux agent → FirstStepIsTmux must be true")
+	}
+	if cfg.StepIsTmux(wf, &wf.Steps[1]) {
+		t.Error("second step overrides with the headless worker agent → StepIsTmux must be false")
+	}
+}
+
+// TestAgentsMergeAcrossTiers verifies the agents map merges per slug across
+// the global (~/.sortie.yml) and project tiers: a slug redefined by the project
+// wins wholesale (no field merging), other global slugs survive, and the
+// project default_agent overrides the global one.
+func TestAgentsMergeAcrossTiers(t *testing.T) {
+	globalYml := `
+default_agent: global-default
+agents:
+  shared:
+    mode: tmux
+    command: "global shared"
+    resume_command: "global resume"
+  global-only:
+    command: "global only"
+  global-default:
+    command: "gd"
+`
+	projectYml := `
+default_agent: project-default
+agents:
+  shared:
+    command: "project shared"
+  project-default:
+    command: "pd"
+`
+	projectDir := setupGlobalAndProject(t, globalYml, nil, projectYml, nil)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+
+	// The project's "shared" replaces the global record wholesale: headless,
+	// no leftover resume_command (a field-merged record would fail validation —
+	// resume_command is tmux-only).
+	shared, ok := cfg.ResolveAgent("shared")
+	if !ok {
+		t.Fatal("expected shared agent")
+	}
+	if shared.Command != "project shared" {
+		t.Errorf("shared.Command = %q, want project tier to win", shared.Command)
+	}
+	if shared.IsTmux() || shared.ResumeCommand != "" {
+		t.Errorf("shared must be replaced wholesale, got %+v", shared)
+	}
+
+	// Global-only slugs survive the merge.
+	if _, ok := cfg.ResolveAgent("global-only"); !ok {
+		t.Error("expected global-only agent to survive the merge")
+	}
+
+	// Project default_agent overrides the global one.
+	if cfg.DefaultAgent != "project-default" {
+		t.Errorf("DefaultAgent = %q, want project-default", cfg.DefaultAgent)
+	}
+	if cfg.EffectiveDefaultAgentSlug() != "project-default" {
+		t.Errorf("EffectiveDefaultAgentSlug = %q, want project-default", cfg.EffectiveDefaultAgentSlug())
+	}
+}
+
+// TestAgentsGlobalDefaultAgentInherited verifies a global default_agent applies
+// when the project doesn't set its own.
+func TestAgentsGlobalDefaultAgentInherited(t *testing.T) {
+	projectDir := setupGlobalAndProject(t, `
+default_agent: global-default
+agents:
+  global-default:
+    command: "gd"
+`, nil, "max_workers: 2\n", nil)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if cfg.DefaultAgent != "global-default" {
+		t.Errorf("DefaultAgent = %q, want global-default inherited from ~/.sortie.yml", cfg.DefaultAgent)
+	}
+}
+
+// TestValidateAgentsAtLoad covers the load-time agent validation surface:
+// record shape errors, unresolvable explicit refs, loop-step tmux constraints,
+// and the removed {{claude_command}} template variable.
+func TestValidateAgentsAtLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "invalid mode",
+			yaml:    "agents:\n  a:\n    mode: quantum\n    command: x\n",
+			wantErr: "invalid mode",
+		},
+		{
+			name:    "missing command",
+			yaml:    "agents:\n  a:\n    mode: headless\n",
+			wantErr: "command is required",
+		},
+		{
+			name:    "resume_command on headless agent",
+			yaml:    "agents:\n  a:\n    command: x\n    resume_command: y\n",
+			wantErr: "resume_command is only valid for tmux-mode agents",
+		},
+		{
+			name:    "chat_log_command on headless agent",
+			yaml:    "agents:\n  a:\n    command: x\n    chat_log_command: y\n",
+			wantErr: "chat_log_command is only valid for tmux-mode agents",
+		},
+		{
+			name:    "invalid slug",
+			yaml:    "agents:\n  Bad_Slug:\n    command: x\n",
+			wantErr: "kebab-case",
+		},
+		{
+			name:    "unknown default_agent ref",
+			yaml:    "default_agent: ghost\n",
+			wantErr: `default_agent: unknown agent "ghost"`,
+		},
+		{
+			name:    "unknown workflow agent ref",
+			yaml:    "workflows:\n  - name: w\n    agent: ghost\n    steps:\n      - name: s\n        prompt: p\n",
+			wantErr: `workflow "w": unknown agent "ghost"`,
+		},
+		{
+			name:    "unknown step agent ref",
+			yaml:    "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: p\n        agent: ghost\n",
+			wantErr: `workflow "w" step "s": unknown agent "ghost"`,
+		},
+		{
+			name: "loop step resolving to tmux agent",
+			yaml: "agents:\n  tm:\n    mode: tmux\n    command: x\n" +
+				"workflows:\n  - name: w\n    steps:\n      - name: a\n        prompt: p\n" +
+				"      - name: b\n        prompt: p\n        agent: tm\n        loop:\n          goto: a\n          max_iterations: 2\n",
+			wantErr: "loop steps cannot use a tmux-mode agent",
+		},
+		{
+			name:    "claude_command in top-level tmux-setup-command",
+			yaml:    "tmux-setup-command: \"run {{claude_command}}\"\n",
+			wantErr: "{{claude_command}} was removed",
+		},
+		{
+			name:    "claude_command in workflow tmux-setup-command",
+			yaml:    "workflows:\n  - name: w\n    tmux-setup-command: \"run {{claude_command}}\"\n    steps:\n      - name: s\n        prompt: p\n",
+			wantErr: "{{claude_command}} was removed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			dir, _ := setupProject(t, tt.yaml, nil)
+			_, err := LoadForProject(dir)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateAgentsMissingImplicitClaudeAllowed verifies a config with no
+// agents at all still loads: the implicit "claude" fallback is exempt from
+// ref validation and only fails at step-run time.
+func TestValidateAgentsMissingImplicitClaudeAllowed(t *testing.T) {
+	isolateHome(t)
+	dir, _ := setupProject(t, `
+workflows:
+  - name: w
+    steps:
+      - name: s
+        prompt: p
+`, nil)
+
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject must tolerate a missing implicit claude agent, got: %v", err)
+	}
+	wf := cfg.GetTaskWorkflow("w")
+	if _, _, err := cfg.StepAgent(wf, &wf.Steps[0]); err == nil {
+		t.Error("expected StepAgent to fail at run time when no agent is configured")
+	}
 }

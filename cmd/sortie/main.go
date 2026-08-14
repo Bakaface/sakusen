@@ -27,8 +27,9 @@ var noProjectRequired = map[string]bool{
 
 var rootCmd = &cobra.Command{
 	Use:   "sortie",
-	Short: "Sortie orchestrates Claude Code agents",
-	Long: `Sortie orchestrates Claude Code agents to work through tasks
+	Short: "Sortie orchestrates coding agents",
+	Long: `Sortie orchestrates user-configured coding agents (Claude Code,
+opencode, or any CLI wrapped in a shell command) to work through tasks
 systematically. It runs tasks through configurable multi-step workflows in
 dedicated git worktrees, and provides real-time monitoring via TUI.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

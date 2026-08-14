@@ -24,7 +24,7 @@ type Agent struct {
 	Task      *task.Task
 	WorkDir   string
 	State     State
-	PID       int // Process ID of claude CLI
+	PID       int // Process ID of the spawned agent command
 	StartedAt time.Time
 	EndedAt   time.Time
 	Error     string

@@ -121,19 +121,19 @@ func TestDeleteCmd_InvalidTaskID(t *testing.T) {
 
 func TestWorkflowAllowsEmptyDescription(t *testing.T) {
 	tmuxFirst := config.WorkflowConfig{
-		// Default mode is tmux — no need to set print explicitly.
-		Name: "interact",
+		// Resolves to a tmux-mode agent, so the first step is interactive.
+		Name:  "interact",
+		Agent: "tmux-agent",
 		Steps: []config.StepConfig{
 			{Name: "shell"},
 			{Name: "review"},
 		},
 	}
 	plain := config.WorkflowConfig{
-		// Workflow-level print=true forces headless execution; tasks that use
-		// this workflow must supply a description because there is no
+		// No agent configured — headless execution; tasks that use this
+		// workflow must supply a description because there is no
 		// interactive tmux session for the user to drive.
-		Name:  "default",
-		Print: true,
+		Name: "default",
 		Steps: []config.StepConfig{
 			{Name: "implement"},
 		},
@@ -142,13 +142,15 @@ func TestWorkflowAllowsEmptyDescription(t *testing.T) {
 		// Input is pre-pinned by the workflow, so no -i flag is needed.
 		Name:  "pinned",
 		Input: "pre-set input",
-		Print: true,
 		Steps: []config.StepConfig{
 			{Name: "implement"},
 		},
 	}
 
 	cfg := &config.Config{
+		Agents: map[string]config.AgentConfig{
+			"tmux-agent": {Mode: config.AgentModeTmux, Command: "true"},
+		},
 		Workflows: []config.WorkflowConfig{plain, tmuxFirst, pinned},
 	}
 
@@ -156,15 +158,15 @@ func TestWorkflowAllowsEmptyDescription(t *testing.T) {
 		t.Error("nil cfg should never allow empty descriptions")
 	}
 	if workflowAllowsEmptyInput(cfg, "default") {
-		t.Error("print workflow should not allow empty descriptions")
+		t.Error("headless workflow should not allow empty descriptions")
 	}
 	if !workflowAllowsEmptyInput(cfg, "interact") {
 		t.Error("tmux-first workflow should allow empty descriptions")
 	}
 	// Empty workflow name resolves to the first registered workflow,
-	// which in this fixture is the headless (print=true) workflow.
+	// which in this fixture is the headless workflow.
 	if workflowAllowsEmptyInput(cfg, "") {
-		t.Error("empty workflow name should resolve to first workflow (print=true)")
+		t.Error("empty workflow name should resolve to first workflow (headless)")
 	}
 	// A workflow that pins its own description allows an empty -d flag.
 	if !workflowAllowsEmptyInput(cfg, "pinned") {

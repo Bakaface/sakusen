@@ -32,13 +32,11 @@ func (db *DB) UpsertChat(taskID int64, stepName, sessionID, tmuxSessionName stri
 	return err
 }
 
-// SetChatSessionID records the authoritative Claude session id for a task step,
-// preserving any tmux_session_name already stored. Used to correct the session
-// captured for a tmux step from the Stop-hook sentinel payload: the cwd-matched
-// async finder can latch onto an unrelated session when several agents share a
-// working directory (notably non-worktree mode). Unlike UpsertChat it does not
-// touch tmux_session_name or created_at, so it never reorders chats or wipes
-// the recorded tmux session name.
+// SetChatSessionID records the authoritative agent session id for a task step,
+// preserving any tmux_session_name already stored. Used to record the session
+// id carried in a tmux step's turn-end sentinel payload. Unlike UpsertChat it
+// does not touch tmux_session_name or created_at, so it never reorders chats
+// or wipes the recorded tmux session name.
 func (db *DB) SetChatSessionID(taskID int64, stepName, sessionID string) error {
 	_, err := db.sqlDB.Exec(
 		`INSERT INTO chats (task_id, step_name, session_id)

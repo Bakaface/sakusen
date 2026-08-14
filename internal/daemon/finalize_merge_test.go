@@ -25,15 +25,15 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// writeFailingClaudeStub returns the path to an executable that stands in for
-// the claude binary and always exits non-zero, so the merge pipeline's
-// conflict resolver fails and the merge genuinely cannot land.
-func writeFailingClaudeStub(t *testing.T) string {
+// writeFailingAgentStub returns the path to an executable that stands in for
+// the headless agent command and always exits non-zero, so the merge
+// pipeline's conflict resolver fails and the merge genuinely cannot land.
+func writeFailingAgentStub(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "claude-stub")
+	path := filepath.Join(t.TempDir(), "agent-stub")
 	script := "#!/bin/sh\necho 'stub conflict resolver refuses to resolve' >&2\nexit 1\n"
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
-		t.Fatalf("failed to write claude stub: %v", err)
+		t.Fatalf("failed to write agent stub: %v", err)
 	}
 	return path
 }
@@ -48,26 +48,39 @@ func writeFailingClaudeStub(t *testing.T) string {
 // the agent-completion and tmux-advance finalization paths.
 func TestRunFinalization_MergeFailureIsNotCompleted(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the claude stub is a /bin/sh script")
+		t.Skip("the agent stub is a /bin/sh script")
 	}
+
+	// Isolate config loading from the developer's real global config: the
+	// failing conflict-resolver agent must come from the project .sortie.yml.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	repoDir := initRecoveryTestRepo(t)
 	sortieYML := fmt.Sprintf(`on_complete: merge
 git:
   base_branch: main
-claude:
-  command: %q
+agents:
+  claude:
+    command: %q
 workflows:
   - name: default
     steps:
       - name: implement
         prompt: implement
-`, writeFailingClaudeStub(t))
+`, writeFailingAgentStub(t))
 	if err := os.WriteFile(filepath.Join(repoDir, ".sortie.yml"), []byte(sortieYML), 0644); err != nil {
 		t.Fatalf("failed to write .sortie.yml: %v", err)
 	}
-	// -f: the user's global excludes may ignore .sortie.yml.
-	runGit(t, repoDir, "add", "-f", "--", ".sortie.yml")
+	// With HOME isolated there are no global excludes, so ignore sortie's own
+	// runtime artifacts (.sortie/ logs etc.) in-repo — an untracked file on the
+	// target branch would park the merge coordinator in merge-blocked instead
+	// of reaching the conflict this test needs.
+	if err := os.WriteFile(filepath.Join(repoDir, ".gitignore"), []byte(".sortie/\n"), 0644); err != nil {
+		t.Fatalf("failed to write .gitignore: %v", err)
+	}
+	// -f: redundant (neither file matches the .sortie/ ignore pattern) but harmless.
+	runGit(t, repoDir, "add", "-f", "--", ".sortie.yml", ".gitignore")
 	runGit(t, repoDir, "commit", "-q", "-m", "add sortie config")
 
 	// Task branch forks here, then base diverges with a change to the same

@@ -266,78 +266,6 @@ func TestTemplateTaskImagesEmpty(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptWithImages(t *testing.T) {
-	images := []string{".sortie/images/screenshot.png", ".sortie/images/diagram.jpg"}
-
-	s := BuildSystemPrompt("Implement the feature", "", images)
-
-	if !strings.Contains(s, "Attached Images") {
-		t.Error("expected system prompt to contain 'Attached Images' section")
-	}
-	if !strings.Contains(s, ".sortie/images/screenshot.png") {
-		t.Error("expected system prompt to reference screenshot.png")
-	}
-	if !strings.Contains(s, ".sortie/images/diagram.jpg") {
-		t.Error("expected system prompt to reference diagram.jpg")
-	}
-	// Verify default system prompt is used when empty
-	if !strings.Contains(s, "autonomous coding agent") {
-		t.Error("expected system prompt to contain default system prompt")
-	}
-}
-
-func TestBuildSystemPromptWithoutImages(t *testing.T) {
-	s := BuildSystemPrompt("Implement the feature", "", nil)
-
-	if strings.Contains(s, "Attached Images") {
-		t.Error("expected system prompt to NOT contain 'Attached Images' section when no images")
-	}
-}
-
-func TestBuildSystemPromptWithCustomSystemPrompt(t *testing.T) {
-	customPrompt := "You are a careful code reviewer. Never make changes without tests."
-
-	s := BuildSystemPrompt("Review the code", customPrompt, nil)
-
-	if !strings.Contains(s, customPrompt) {
-		t.Error("expected system prompt to contain custom system prompt")
-	}
-	if strings.Contains(s, "autonomous coding agent") {
-		t.Error("expected system prompt to NOT contain default system prompt when custom is provided")
-	}
-	if !strings.Contains(s, "# Task") {
-		t.Error("expected system prompt to contain task section")
-	}
-	if !strings.Contains(s, "Review the code") {
-		t.Error("expected system prompt to contain resolved prompt")
-	}
-}
-
-// TestBuildSystemPromptVerificationFooter ensures the project-agnostic
-// verification reminder is appended regardless of whether the project supplies
-// a custom SystemPrompt — spawned agents must be told to discover and run the
-// project's own test/lint commands rather than inventing them.
-func TestBuildSystemPromptVerificationFooter(t *testing.T) {
-	cases := []struct {
-		name         string
-		systemPrompt string
-	}{
-		{"default", ""},
-		{"custom", "You are a careful code reviewer."},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s := BuildSystemPrompt("Do the thing", tc.systemPrompt, nil)
-			if !strings.Contains(s, "Verification before declaring done") {
-				t.Errorf("expected verification footer in %s-prompt output", tc.name)
-			}
-			if !strings.Contains(s, "CLAUDE.md") {
-				t.Errorf("expected footer to reference CLAUDE.md so agents look there for canonical commands")
-			}
-		})
-	}
-}
-
 func TestWriteTmuxLogMessage(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "step.log")
@@ -395,49 +323,48 @@ func TestWriteTmuxLogMessageCallsOutputFn(t *testing.T) {
 	}
 }
 
-func TestRunClaudeSyncSetsWorkDir(t *testing.T) {
+func TestRunSummarizerSyncSetsWorkDir(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create a script that prints the working directory, ignoring all args
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\npwd\n"), 0755)
-
+	// A summarizer stub that consumes the stdin prompt and prints the working
+	// directory.
 	cfg := &config.Config{
-		Claude: config.ClaudeConfig{
-			Command: script,
-		},
+		Summarizer: config.SummarizerConfig{Command: "cat > /dev/null; pwd"},
 	}
 	engine := NewEngine(cfg, (*db.DB)(nil), nil, dir)
 
 	ctx := context.Background()
-	output, err := engine.runClaudeSync(ctx, "test prompt", dir, "", "")
+	output, err := engine.runSummarizerSync(ctx, "test prompt", dir, "summarize")
 	if err != nil {
-		t.Fatalf("runClaudeSync failed: %v", err)
+		t.Fatalf("runSummarizerSync failed: %v", err)
 	}
 
 	output = strings.TrimSpace(output)
-	// The script should print the workDir we passed
-	if output != dir {
-		t.Errorf("expected working directory %q, got %q", dir, output)
+	// The command should print the workDir we passed (compare with symlinks
+	// resolved: on macOS the temp dir is under /var -> /private/var).
+	wantDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	gotDir, err := filepath.EvalSymlinks(output)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(output): %v", err)
+	}
+	if gotDir != wantDir {
+		t.Errorf("expected working directory %q, got %q", wantDir, gotDir)
 	}
 }
 
-func TestRunClaudeSyncEmptyWorkDir(t *testing.T) {
-	// Create a script that prints the working directory, ignoring all args
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\npwd\n"), 0755)
-
+func TestRunSummarizerSyncEmptyWorkDir(t *testing.T) {
 	cfg := &config.Config{
-		Claude: config.ClaudeConfig{
-			Command: script,
-		},
+		Summarizer: config.SummarizerConfig{Command: "cat > /dev/null; pwd"},
 	}
 	engine := NewEngine(cfg, (*db.DB)(nil), nil, "")
 
 	ctx := context.Background()
-	output, err := engine.runClaudeSync(ctx, "test prompt", "", "", "")
+	output, err := engine.runSummarizerSync(ctx, "test prompt", "", "summarize")
 	if err != nil {
-		t.Fatalf("runClaudeSync failed: %v", err)
+		t.Fatalf("runSummarizerSync failed: %v", err)
 	}
 
 	// Should succeed without error — we just verify it doesn't crash
@@ -558,10 +485,6 @@ func TestSummarizationDescription(t *testing.T) {
 }
 
 func TestSummarizerLogFnCalledWithArtifacts(t *testing.T) {
-	// Create a fake Claude script that echoes a summary
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\necho 'task summary output'\n"), 0755)
-
 	dir := t.TempDir()
 
 	// Create a real SQLite database for the test
@@ -594,7 +517,7 @@ func TestSummarizerLogFnCalledWithArtifacts(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Claude: config.ClaudeConfig{Command: script},
+		Summarizer: config.SummarizerConfig{Command: "cat > /dev/null; echo 'task summary output'"},
 	}
 	engine := NewEngine(cfg, database, nil, dir)
 
@@ -630,9 +553,6 @@ func TestSummarizerLogFnCalledWithArtifacts(t *testing.T) {
 
 func TestSummarizerLogFnCalledWithNilLogFn(t *testing.T) {
 	// Verify runSummarizer doesn't panic when logFn is nil
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\necho 'summary'\n"), 0755)
-
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, ".sortie"), 0755)
 
@@ -655,7 +575,7 @@ func TestSummarizerLogFnCalledWithNilLogFn(t *testing.T) {
 	taskObj.WorktreePath = dir
 
 	cfg := &config.Config{
-		Claude: config.ClaudeConfig{Command: script},
+		Summarizer: config.SummarizerConfig{Command: "cat > /dev/null; echo 'summary'"},
 	}
 	engine := NewEngine(cfg, database, nil, dir)
 
@@ -699,33 +619,6 @@ func TestFindStepIndex(t *testing.T) {
 				t.Errorf("findStepIndex(%q) = %d, want %d", tt.stepName, result, tt.expected)
 			}
 		})
-	}
-}
-
-func TestTmuxScriptEmptyPromptLaunchesBlankSession(t *testing.T) {
-	// Verify that when prompt is empty, the tmux script launches Claude
-	// without a prompt argument (blank interactive session)
-	prompt := ""
-	claudeCmd := "claude"
-	envExports := ""
-
-	var script string
-	if strings.TrimSpace(prompt) == "" {
-		script = fmt.Sprintf("#!/bin/bash\n%s%s\nexec bash\n", envExports, claudeCmd)
-	} else {
-		script = fmt.Sprintf("#!/bin/bash\n%sPROMPT=$(cat %q)\n%s \"$PROMPT\"\nexec bash\n", envExports, "/tmp/prompt.txt", claudeCmd)
-	}
-
-	// Should NOT contain PROMPT= or "$PROMPT"
-	if strings.Contains(script, "PROMPT=") {
-		t.Error("blank session script should not contain PROMPT variable")
-	}
-	if strings.Contains(script, "$PROMPT") {
-		t.Error("blank session script should not reference $PROMPT")
-	}
-	// Should contain bare claude command
-	if !strings.Contains(script, "claude\n") {
-		t.Error("blank session script should contain bare claude command")
 	}
 }
 
@@ -845,12 +738,6 @@ func TestRunTaskDoesNotSetSummarizingStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a fake Claude script that exits successfully
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'done'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
 	dbPath := filepath.Join(dir, ".sortie", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
@@ -875,7 +762,9 @@ func TestRunTaskDoesNotSetSummarizingStatus(t *testing.T) {
 	tk.WorktreePath = dir
 
 	cfg := &config.Config{
-		Claude:     config.ClaudeConfig{Command: script},
+		// A real headless agent command that writes its result text through
+		// the SORTIE_RESULT_FILE contract.
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SORTIE_RESULT_FILE"`}},
 		OnComplete: "merge",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -916,11 +805,6 @@ func TestRunTaskDoesNotCallExecuteOnComplete(t *testing.T) {
 	// and the task remains in its running state (no status change to summarizing/completed).
 	dir := t.TempDir()
 
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'done'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
 	dbPath := filepath.Join(dir, ".sortie", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
@@ -946,7 +830,7 @@ func TestRunTaskDoesNotCallExecuteOnComplete(t *testing.T) {
 	tk.WorktreePath = dir
 
 	cfg := &config.Config{
-		Claude:     config.ClaudeConfig{Command: script},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SORTIE_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -980,13 +864,6 @@ func TestRunTaskSummarizationStrategyNoneSkipsContext(t *testing.T) {
 	// any step context — later steps see empty context for that step.
 	dir := t.TempDir()
 
-	// Fake Claude script emits something on stdout so a normal step would
-	// otherwise capture a non-empty result.
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'last message body'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
 	dbPath := filepath.Join(dir, ".sortie", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
@@ -1010,7 +887,9 @@ func TestRunTaskSummarizationStrategyNoneSkipsContext(t *testing.T) {
 	tk.WorktreePath = dir
 
 	cfg := &config.Config{
-		Claude:     config.ClaudeConfig{Command: script},
+		// The agent emits a non-empty result so a normal step would otherwise
+		// capture a non-empty context.
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf 'last message body' > "$SORTIE_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -1048,14 +927,6 @@ func TestRunTaskSummarizationStrategyNoneSkipsContext(t *testing.T) {
 func TestRunTaskManualContextOverridesLastMessage(t *testing.T) {
 	dir := t.TempDir()
 
-	// Fake Claude sleeps long enough for the test to inject a manual context
-	// while the step row is still 'running', then emits a non-empty result that
-	// would otherwise be captured as the step context.
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 2\necho 'agent last message'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
 	dbPath := filepath.Join(dir, ".sortie", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
@@ -1079,12 +950,15 @@ func TestRunTaskManualContextOverridesLastMessage(t *testing.T) {
 	tk.WorktreePath = dir
 
 	cfg := &config.Config{
-		Claude:     config.ClaudeConfig{Command: script},
+		// The headless agent sleeps long enough for the test to inject a manual
+		// context while the step row is still 'running', then emits a non-empty
+		// result that would otherwise be captured as the step context. The
+		// headless (synchronous) path blocks RunTask on the agent command.
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `sleep 2; printf 'agent last message' > "$SORTIE_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{
-				Name:  "default",
-				Print: true, // headless/synchronous path so the step blocks on the fake-claude exec
+				Name: "default",
 				Steps: []config.StepConfig{
 					{Name: "implement", Prompt: "do a thing"},
 				},
@@ -1344,29 +1218,6 @@ func TestPromoteSingleStepContextToTaskNoOpForEmptyStepContext(t *testing.T) {
 	}
 }
 
-func TestTmuxScriptNonEmptyPromptPassesPrompt(t *testing.T) {
-	// Verify that when prompt is non-empty, the tmux script passes it to Claude
-	prompt := "implement the feature"
-	claudeCmd := "claude"
-	envExports := ""
-	promptFile := "/tmp/prompt.txt"
-
-	var script string
-	if strings.TrimSpace(prompt) == "" {
-		script = fmt.Sprintf("#!/bin/bash\n%s%s\nexec bash\n", envExports, claudeCmd)
-	} else {
-		script = fmt.Sprintf("#!/bin/bash\n%sPROMPT=$(cat %q)\n%s \"$PROMPT\"\nexec bash\n", envExports, promptFile, claudeCmd)
-	}
-
-	// Should contain PROMPT= and "$PROMPT"
-	if !strings.Contains(script, "PROMPT=") {
-		t.Error("non-empty prompt script should contain PROMPT variable")
-	}
-	if !strings.Contains(script, `"$PROMPT"`) {
-		t.Error("non-empty prompt script should pass $PROMPT to claude")
-	}
-}
-
 // TestSummarizePreviousTmuxStepRequireContextBlocks verifies that a tmux
 // summarize_chat step which fails to capture its context returns a blocking
 // error when require_context is set, and proceeds (nil) when it is not. The
@@ -1413,9 +1264,15 @@ func TestSummarizePreviousTmuxStepRequireContextBlocks(t *testing.T) {
 
 			cfg := &config.Config{
 				OnComplete: "none",
+				Agents: map[string]config.AgentConfig{
+					"claude": {Command: "true"},
+					// A tmux-mode agent with no chat_log_command: the grill step
+					// resolves to it, and its chat load yields no content.
+					"claude-tmux": {Mode: config.AgentModeTmux, Command: "true"},
+				},
 				Workflows: []config.WorkflowConfig{{
 					Name:  "wf",
-					Print: false, // steps default to tmux
+					Agent: "claude-tmux", // steps default to the tmux agent
 					Steps: []config.StepConfig{
 						{
 							Name:                  "grill",
@@ -1423,7 +1280,7 @@ func TestSummarizePreviousTmuxStepRequireContextBlocks(t *testing.T) {
 							Human:                 true,
 							RequireContext:        tc.requireContext,
 						},
-						{Name: "implement", Print: boolPtr(true)},
+						{Name: "implement", Agent: "claude"},
 					},
 				}},
 			}
@@ -1480,9 +1337,13 @@ func TestSummarizePreviousTmuxStepSkipsManualContext(t *testing.T) {
 
 	cfg := &config.Config{
 		OnComplete: "none",
+		Agents: map[string]config.AgentConfig{
+			"claude":      {Command: "true"},
+			"claude-tmux": {Mode: config.AgentModeTmux, Command: "true"},
+		},
 		Workflows: []config.WorkflowConfig{{
 			Name:  "wf",
-			Print: false,
+			Agent: "claude-tmux",
 			Steps: []config.StepConfig{
 				{
 					Name:                  "grill",
@@ -1490,7 +1351,7 @@ func TestSummarizePreviousTmuxStepSkipsManualContext(t *testing.T) {
 					Human:                 true,
 					RequireContext:        true,
 				},
-				{Name: "implement", Print: boolPtr(true)},
+				{Name: "implement", Agent: "claude"},
 			},
 		}},
 	}
@@ -1509,7 +1370,86 @@ func TestSummarizePreviousTmuxStepSkipsManualContext(t *testing.T) {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
+// newResultCaptureEngine wires a real (in-memory) DB-backed Engine around a
+// REAL headless agent command (no fake runner) so the SORTIE_RESULT_FILE →
+// step-context capture path runs end to end through runner.Process. The single
+// step uses the last_message strategy, so whatever ResultText the process
+// yields is exactly what lands as the step's context.
+func newResultCaptureEngine(t *testing.T, agentCommand string) (*Engine, *task.Task, *db.DB) {
+	t.Helper()
+	dir := t.TempDir()
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	project, err := database.GetOrCreateProject(dir)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject: %v", err)
+	}
+	tk, err := database.CreateTask(project.ID, "result capture", "desc", "slug", "default", "", task.StatusRunning, nil)
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	tk.Worktree = false
+	tk.WorktreePath = dir
+
+	cfg := &config.Config{
+		OnComplete: "none",
+		Agents:     map[string]config.AgentConfig{"claude": {Command: agentCommand}},
+		Workflows: []config.WorkflowConfig{{
+			Name: "default",
+			Steps: []config.StepConfig{{
+				Name:                  "implement",
+				Prompt:                "do the thing",
+				SummarizationStrategy: config.SummarizationStrategyLastMessage,
+			}},
+		}},
+	}
+	return NewEngine(cfg, database, nil, dir), tk, database
+}
+
+// TestRunTaskResultFileBecomesStepContext proves the headless result contract
+// at the workflow level: an agent command that writes $SORTIE_RESULT_FILE has
+// that exact text captured as the step's context after RunTask.
+func TestRunTaskResultFileBecomesStepContext(t *testing.T) {
+	engine, tk, database := newResultCaptureEngine(t, `printf ctx-from-result-file > "$SORTIE_RESULT_FILE"`)
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	got, err := database.GetTaskStepContext(tk.ID, "implement")
+	if err != nil {
+		t.Fatalf("GetTaskStepContext: %v", err)
+	}
+	if got != "ctx-from-result-file" {
+		t.Errorf("step context = %q, want %q", got, "ctx-from-result-file")
+	}
+}
+
+// TestRunTaskStdoutTailFallbackBecomesStepContext proves the crude fallback
+// half of the result contract: an agent command that never writes
+// $SORTIE_RESULT_FILE and only prints to stdout still yields a step context
+// (the retained stdout tail), keeping the step clear of the
+// no-output/diff-required failure branch in applyStepResult.
+func TestRunTaskStdoutTailFallbackBecomesStepContext(t *testing.T) {
+	engine, tk, database := newResultCaptureEngine(t, `echo tail-fallback-line`)
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	got, err := database.GetTaskStepContext(tk.ID, "implement")
+	if err != nil {
+		t.Fatalf("GetTaskStepContext: %v", err)
+	}
+	if !strings.Contains(got, "tail-fallback-line") {
+		t.Errorf("step context = %q, expected it to contain the stdout tail %q", got, "tail-fallback-line")
+	}
+}
 
 // TestEffectiveOnComplete verifies the on_complete resolution precedence:
 // locality wins. A project-scoped workflow's on_complete beats the project

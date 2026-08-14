@@ -808,23 +808,26 @@ func TestPromptView_SwitchFocusBackwardWithWorktree(t *testing.T) {
 // validation is bypassed when the chosen workflow's first step uses tmux.
 func TestModel_SelectedWorkflowAllowsEmptyDescription(t *testing.T) {
 	tmuxFirst := config.WorkflowConfig{
-		// Default mode is tmux — no explicit `print` needed.
-		Name: "interact",
+		// Resolves to a tmux-mode agent, so the first step is interactive.
+		Name:  "interact",
+		Agent: "tmux-agent",
 		Steps: []config.StepConfig{
 			{Name: "shell"},
 			{Name: "review"},
 		},
 	}
 	plain := config.WorkflowConfig{
-		// print=true forces headless mode, so empty descriptions are not allowed.
-		Name:  "default",
-		Print: true,
+		// No agent configured — headless mode, so empty descriptions are not allowed.
+		Name: "default",
 		Steps: []config.StepConfig{
 			{Name: "implement"},
 		},
 	}
 
 	cfg := &config.Config{
+		Agents: map[string]config.AgentConfig{
+			"tmux-agent": {Mode: config.AgentModeTmux, Command: "true"},
+		},
 		Workflows: []config.WorkflowConfig{plain, tmuxFirst},
 	}
 

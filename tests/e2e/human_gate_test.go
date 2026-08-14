@@ -9,15 +9,17 @@ import (
 )
 
 func humanApprovalWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 on_complete: merge
 workflows:
   - name: human-approval
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task"

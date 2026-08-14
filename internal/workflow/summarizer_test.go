@@ -1,9 +1,17 @@
 package workflow
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sortie/internal/task"
 )
 
 func TestShouldSummarizeChat(t *testing.T) {
@@ -97,144 +105,263 @@ func TestSplitOnLineBoundary(t *testing.T) {
 	})
 }
 
-func TestMaxPromptBytesForModel(t *testing.T) {
-	tests := []struct {
-		model string
-		want  int
-	}{
-		{"haiku", haikuPromptByteLimit},
-		{"", haikuPromptByteLimit},                          // empty falls back to haiku limit
-		{"claude-haiku-4-5-20251001", haikuPromptByteLimit}, // full id unknown -> defaults to haiku limit
-		{"sonnet", sonnetPromptByteLimit},
-		{"opus", opusPromptByteLimit},
+// TestSummarizeChatLogNoSummarizerConfigured verifies the degradation contract:
+// with no `summarizer:` command configured, a summarize pass surfaces
+// ErrNoSummarizer instead of silently returning an empty summary.
+func TestSummarizeChatLogNoSummarizerConfigured(t *testing.T) {
+	e := &Engine{
+		cfg:      newEngineConfig(&config.Config{}),
+		database: newFakeTaskStore(),
 	}
-	for _, tt := range tests {
-		t.Run(tt.model, func(t *testing.T) {
-			if got := maxPromptBytesForModel(tt.model); got != tt.want {
-				t.Errorf("maxPromptBytesForModel(%q) = %d, want %d", tt.model, got, tt.want)
+	tk := &task.Task{ID: 1, Title: "no summarizer", WorktreePath: t.TempDir()}
+
+	_, err := e.summarizeChatLog(context.Background(), tk, "grill", "", "some chat content")
+	if err == nil {
+		t.Fatal("expected an error when no summarizer is configured")
+	}
+	if !errors.Is(err, ErrNoSummarizer) {
+		t.Errorf("expected error to wrap ErrNoSummarizer, got %v", err)
+	}
+}
+
+// TestSummarizeChatLogMapReduce covers the summarizer.max_prompt_bytes gate:
+// a prompt under the ceiling (or with chunking disabled) runs a single
+// summarizer invocation, while an oversized chat is split map-reduce style —
+// several summarize_chat_chunk passes followed by one final summarize_chat
+// reduce pass. Invocations are counted via SORTIE_PURPOSE lines the stub
+// appends to a file.
+func TestSummarizeChatLogMapReduce(t *testing.T) {
+	newSummarizerEngine := func(t *testing.T, maxPromptBytes int) (*Engine, string) {
+		t.Helper()
+		dir := t.TempDir()
+		callLog := filepath.Join(dir, "calls.log")
+		cmd := fmt.Sprintf(`cat > /dev/null; echo "$SORTIE_PURPOSE" >> %q; echo SUMMARY`, callLog)
+		cfg := &config.Config{
+			Summarizer: config.SummarizerConfig{Command: cmd, MaxPromptBytes: maxPromptBytes},
+		}
+		return &Engine{cfg: newEngineConfig(cfg), database: newFakeTaskStore()}, callLog
+	}
+	readCalls := func(t *testing.T, callLog string) []string {
+		t.Helper()
+		data, err := os.ReadFile(callLog)
+		if err != nil {
+			t.Fatalf("read call log: %v", err)
+		}
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+	tk := &task.Task{ID: 1, Title: "map reduce"}
+
+	t.Run("chunking disabled (max_prompt_bytes=0) runs one pass", func(t *testing.T) {
+		e, callLog := newSummarizerEngine(t, 0)
+		chat := strings.Repeat("line of chat content\n", 500)
+		summary, err := e.summarizeChatLog(context.Background(), tk, "grill", "", chat)
+		if err != nil {
+			t.Fatalf("summarizeChatLog: %v", err)
+		}
+		if summary != "SUMMARY" {
+			t.Errorf("summary = %q, want %q", summary, "SUMMARY")
+		}
+		calls := readCalls(t, callLog)
+		if len(calls) != 1 || calls[0] != "summarize_chat" {
+			t.Errorf("expected exactly one summarize_chat call, got %v", calls)
+		}
+	})
+
+	t.Run("oversized prompt runs map passes then a reduce pass", func(t *testing.T) {
+		// maxPromptBytes is far below the chunk headroom, so chunk size falls
+		// back to maxPromptBytes itself; ~6KB of chat across a 2KB ceiling
+		// yields multiple chunks.
+		e, callLog := newSummarizerEngine(t, 2048)
+		chat := strings.Repeat("line of chat content\n", 300)
+		summary, err := e.summarizeChatLog(context.Background(), tk, "grill", "", chat)
+		if err != nil {
+			t.Fatalf("summarizeChatLog: %v", err)
+		}
+		if summary != "SUMMARY" {
+			t.Errorf("summary = %q, want %q", summary, "SUMMARY")
+		}
+		calls := readCalls(t, callLog)
+		if len(calls) < 3 {
+			t.Fatalf("expected at least 2 map calls + 1 reduce call, got %v", calls)
+		}
+		for i, c := range calls[:len(calls)-1] {
+			if c != "summarize_chat_chunk" {
+				t.Errorf("call %d = %q, want summarize_chat_chunk", i, c)
 			}
-		})
-	}
-
-	// Empirically calibrated ordering — see scripts/measure-claude-limits.
-	// Haiku < sonnet < opus must hold for chooseSummarizationModel to keep
-	// preferring the cheapest fitting model.
-	if !(haikuPromptByteLimit < sonnetPromptByteLimit && sonnetPromptByteLimit < opusPromptByteLimit) {
-		t.Errorf("expected haiku(%d) < sonnet(%d) < opus(%d)", haikuPromptByteLimit, sonnetPromptByteLimit, opusPromptByteLimit)
-	}
+		}
+		if last := calls[len(calls)-1]; last != "summarize_chat" {
+			t.Errorf("final call = %q, want summarize_chat (the reduce pass)", last)
+		}
+	})
 }
 
-func TestChunkBytesForModel(t *testing.T) {
-	if got := chunkBytesForModel("haiku"); got >= maxPromptBytesForModel("haiku") {
-		t.Errorf("chunkBytesForModel(haiku)=%d should be strictly less than maxPromptBytesForModel(haiku)=%d to leave headroom for the instruction prompt", got, maxPromptBytesForModel("haiku"))
-	}
-	if got := chunkBytesForModel("opus"); got <= chunkBytesForModel("haiku") {
-		t.Errorf("chunkBytesForModel(opus)=%d should exceed haiku's chunk size %d", got, chunkBytesForModel("haiku"))
-	}
-}
+// TestLoadStepChatContentTmuxEnvContract verifies the tmux half of
+// loadStepChatContent: the agent record's chat_log_command runs with the
+// documented env contract (SORTIE_SESSION_ID from the recorded chat row,
+// SORTIE_TASK_ID/SORTIE_STEP, and SORTIE_TRANSCRIPT_PATH/SORTIE_SENTINEL_FILE
+// from the step's most recent sentinel), and its stdout becomes the chat
+// content. A failing chat_log_command surfaces an error naming the mechanism.
+func TestLoadStepChatContentTmuxEnvContract(t *testing.T) {
+	// Echoes each env-contract variable so the returned chat content doubles
+	// as an assertion surface; ${VAR:-none} pins the "absent" cases.
+	const envDumpCmd = `echo "sid=${SORTIE_SESSION_ID:-none} task=$SORTIE_TASK_ID step=$SORTIE_STEP tp=${SORTIE_TRANSCRIPT_PATH:-none} sf=${SORTIE_SENTINEL_FILE:-none}"`
 
-func TestChooseSummarizationModel(t *testing.T) {
-	all := []string{"haiku", "sonnet", "opus"}
-
-	tests := []struct {
-		name        string
-		promptBytes int
-		allowed     []string
-		wantModel   string
-		wantFits    bool
-	}{
-		{
-			name:        "tiny prompt with all allowed picks haiku",
-			promptBytes: 1024,
-			allowed:     all,
-			wantModel:   "haiku",
-			wantFits:    true,
-		},
-		{
-			name:        "past haiku ceiling picks sonnet",
-			promptBytes: haikuPromptByteLimit + 1,
-			allowed:     all,
-			wantModel:   "sonnet",
-			wantFits:    true,
-		},
-		{
-			name:        "past sonnet ceiling picks opus",
-			promptBytes: sonnetPromptByteLimit + 1,
-			allowed:     all,
-			wantModel:   "opus",
-			wantFits:    true,
-		},
-		{
-			name:        "past opus ceiling falls back to opus with fits=false",
-			promptBytes: opusPromptByteLimit + 1,
-			allowed:     all,
-			wantModel:   "opus",
-			wantFits:    false,
-		},
-		{
-			name:        "haiku disallowed skips to sonnet",
-			promptBytes: 1024,
-			allowed:     []string{"sonnet", "opus"},
-			wantModel:   "sonnet",
-			wantFits:    true,
-		},
-		{
-			name:        "only opus allowed always picks opus",
-			promptBytes: 1024,
-			allowed:     []string{"opus"},
-			wantModel:   "opus",
-			wantFits:    true,
-		},
-		{
-			name:        "only haiku allowed past haiku ceiling falls back to haiku with fits=false",
-			promptBytes: haikuPromptByteLimit + 1,
-			allowed:     []string{"haiku"},
-			wantModel:   "haiku",
-			wantFits:    false,
-		},
-		{
-			name:        "empty allowed list uses default allowlist",
-			promptBytes: 1024,
-			allowed:     nil,
-			wantModel:   "haiku",
-			wantFits:    true,
-		},
+	newTmuxChatEngine := func(t *testing.T, chatLogCommand string) (*Engine, *config.WorkflowConfig, config.StepConfig, *fakeTaskStore, *task.Task) {
+		t.Helper()
+		wt := t.TempDir()
+		cfg := &config.Config{
+			Agents: map[string]config.AgentConfig{
+				"claude-tmux": {Mode: config.AgentModeTmux, Command: "true", ChatLogCommand: chatLogCommand},
+			},
+			Workflows: []config.WorkflowConfig{{
+				Name:  "wf",
+				Agent: "claude-tmux",
+				Steps: []config.StepConfig{{Name: "grill"}},
+			}},
+		}
+		store := newFakeTaskStore()
+		e := &Engine{cfg: newEngineConfig(cfg), database: store}
+		tk := &task.Task{ID: 42, WorktreePath: wt}
+		wf := cfg.GetWorkflow("wf")
+		return e, wf, wf.Steps[0], store, tk
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			model, fits := chooseSummarizationModel(tt.promptBytes, tt.allowed)
-			if model != tt.wantModel || fits != tt.wantFits {
-				t.Errorf("chooseSummarizationModel(%d, %v) = (%q, %v), want (%q, %v)",
-					tt.promptBytes, tt.allowed, model, fits, tt.wantModel, tt.wantFits)
+	t.Run("recorded session and sentinel transcript_path reach the command", func(t *testing.T) {
+		e, wf, step, store, tk := newTmuxChatEngine(t, envDumpCmd)
+		if err := store.SetChatSessionID(tk.ID, "grill", "sess-123"); err != nil {
+			t.Fatalf("SetChatSessionID: %v", err)
+		}
+		writeSentinel(t, tk.WorktreePath, "grill-1234567890.json", `{"session_id":"sess-123","transcript_path":"/tmp/grill.jsonl"}`)
+		sentinelPath := filepath.Join(StepDoneDir(tk.WorktreePath), "grill-1234567890.json")
+
+		out, err := e.loadStepChatContent(context.Background(), tk, wf, step, true)
+		if err != nil {
+			t.Fatalf("loadStepChatContent: %v", err)
+		}
+		for _, want := range []string{
+			"sid=sess-123",
+			"task=42",
+			"step=grill",
+			"tp=/tmp/grill.jsonl",
+			"sf=" + sentinelPath,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("chat content = %q, expected it to contain %q", out, want)
 			}
-		})
-	}
+		}
+	})
+
+	t.Run("no session and no transcript_path degrade to absent env vars", func(t *testing.T) {
+		e, wf, step, _, tk := newTmuxChatEngine(t, envDumpCmd)
+		// Sentinel exists (so SORTIE_SENTINEL_FILE is set) but carries no
+		// payload fields; no chat row was ever recorded.
+		writeSentinel(t, tk.WorktreePath, "grill-1234567890.json", `{}`)
+		sentinelPath := filepath.Join(StepDoneDir(tk.WorktreePath), "grill-1234567890.json")
+
+		out, err := e.loadStepChatContent(context.Background(), tk, wf, step, true)
+		if err != nil {
+			t.Fatalf("loadStepChatContent: %v", err)
+		}
+		for _, want := range []string{"sid=none", "tp=none", "sf=" + sentinelPath} {
+			if !strings.Contains(out, want) {
+				t.Errorf("chat content = %q, expected it to contain %q", out, want)
+			}
+		}
+	})
+
+	t.Run("failing chat_log_command surfaces an error", func(t *testing.T) {
+		e, wf, step, _, tk := newTmuxChatEngine(t, "exit 1")
+		writeSentinel(t, tk.WorktreePath, "grill-1234567890.json", `{}`)
+
+		_, err := e.loadStepChatContent(context.Background(), tk, wf, step, true)
+		if err == nil {
+			t.Fatal("expected an error when the chat_log_command exits non-zero")
+		}
+		if !strings.Contains(err.Error(), "chat_log_command failed") {
+			t.Errorf("error = %q, expected it to name chat_log_command", err.Error())
+		}
+	})
 }
 
-func TestTruncateForLog(t *testing.T) {
-	t.Run("short string passes through", func(t *testing.T) {
-		if got := truncateForLog("hello"); got != "hello" {
-			t.Errorf("got %q, want %q", got, "hello")
-		}
-	})
+// TestSummarizeChatLogMapReduceHeadroom extends the map-reduce coverage to the
+// normal headroom path: with max_prompt_bytes comfortably above
+// chunkHeadroomBytes, chunks are sized to `max - headroom` (not the tiny-ceiling
+// fallback), every summarizer invocation's prompt stays under the ceiling, the
+// chunk-call count matches splitOnLineBoundary's arithmetic, and the final
+// reduce prompt joins the chunk summaries with the CHUNK BOUNDARY marker.
+func TestSummarizeChatLogMapReduceHeadroom(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	lastPrompt := filepath.Join(dir, "last-prompt.txt")
+	// The stub records "<purpose> <prompt bytes>" per call, keeps the most
+	// recent prompt (the reduce pass runs last), and returns a fixed summary.
+	cmd := fmt.Sprintf(`p=$(cat); printf '%%s %%s\n' "$SORTIE_PURPOSE" "${#p}" >> %q; printf '%%s' "$p" > %q; echo CHUNK-OK`, callLog, lastPrompt)
 
-	t.Run("trims surrounding whitespace", func(t *testing.T) {
-		if got := truncateForLog("  hello\n"); got != "hello" {
-			t.Errorf("got %q, want %q", got, "hello")
-		}
-	})
+	const maxPromptBytes = 40 * 1024 // well above chunkHeadroomBytes: normal path
+	cfg := &config.Config{
+		Summarizer: config.SummarizerConfig{Command: cmd, MaxPromptBytes: maxPromptBytes},
+	}
+	e := &Engine{cfg: newEngineConfig(cfg), database: newFakeTaskStore()}
+	tk := &task.Task{ID: 1, Title: "headroom"}
 
-	t.Run("long string is truncated with size suffix", func(t *testing.T) {
-		input := strings.Repeat("x", 1000)
-		got := truncateForLog(input)
-		if !strings.HasPrefix(got, strings.Repeat("x", 500)) {
-			t.Errorf("expected prefix of 500 x's")
+	// ~46KB of 20-char lines: over the 40KB ceiling, and sized to need
+	// several `max - headroom` chunks.
+	chat := strings.TrimSuffix(strings.Repeat(strings.Repeat("x", 20)+"\n", 2200), "\n")
+	chunkBytes := maxPromptBytes - chunkHeadroomBytes
+	if chunkBytes < 1024 {
+		t.Fatalf("test setup: chunkBytes = %d must exercise the normal headroom path", chunkBytes)
+	}
+	wantChunks := len(splitOnLineBoundary(chat, chunkBytes))
+	if wantChunks < 2 {
+		t.Fatalf("test setup: expected the chat to need >= 2 chunks, got %d", wantChunks)
+	}
+
+	summary, err := e.summarizeChatLog(context.Background(), tk, "grill", "", chat)
+	if err != nil {
+		t.Fatalf("summarizeChatLog: %v", err)
+	}
+	if summary != "CHUNK-OK" {
+		t.Errorf("summary = %q, want %q", summary, "CHUNK-OK")
+	}
+
+	data, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read call log: %v", err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(calls) != wantChunks+1 {
+		t.Fatalf("expected %d map calls + 1 reduce call, got %d: %v", wantChunks, len(calls), calls)
+	}
+	for i, c := range calls {
+		fields := strings.Fields(c)
+		if len(fields) != 2 {
+			t.Fatalf("call log line %d = %q, want \"<purpose> <bytes>\"", i, c)
 		}
-		if !strings.Contains(got, "1000 total bytes") {
-			t.Errorf("expected total-bytes annotation, got %q", got)
+		wantPurpose := "summarize_chat_chunk"
+		if i == len(calls)-1 {
+			wantPurpose = "summarize_chat" // the reduce pass
 		}
-	})
+		if fields[0] != wantPurpose {
+			t.Errorf("call %d purpose = %q, want %q", i, fields[0], wantPurpose)
+		}
+		// The headroom exists precisely so chunk + instruction prompt stays
+		// under the configured ceiling.
+		size, err := strconv.Atoi(fields[1])
+		if err != nil {
+			t.Fatalf("call %d prompt size %q not a number: %v", i, fields[1], err)
+		}
+		if size > maxPromptBytes {
+			t.Errorf("call %d prompt = %d bytes, exceeds max_prompt_bytes %d", i, size, maxPromptBytes)
+		}
+	}
+
+	reducePrompt, err := os.ReadFile(lastPrompt)
+	if err != nil {
+		t.Fatalf("read last prompt: %v", err)
+	}
+	if !strings.Contains(string(reducePrompt), "--- CHUNK BOUNDARY ---") {
+		t.Errorf("reduce prompt does not contain the chunk-boundary marker:\n%s", reducePrompt)
+	}
 }
 
 func TestExtractLatestStepRegion(t *testing.T) {
@@ -314,109 +441,45 @@ func TestExtractLatestStepRegion(t *testing.T) {
 	})
 }
 
-func TestEncodeClaudeProjectDir(t *testing.T) {
-	tests := []struct {
-		name    string
-		workdir string
-		want    string
-	}{
-		{
-			// Regression: underscores must encode to '-' like Claude Code does.
-			// Previously only '/' and '.' were replaced, so this project's tmux
-			// step chat JSONL was looked up at a non-existent path and its
-			// summarize_chat context was silently dropped.
-			name:    "underscore in path",
-			workdir: "/Users/aface/dev/github.com/Uscreen-video/uscreen_2",
-			want:    "-Users-aface-dev-github-com-Uscreen-video-uscreen-2",
-		},
-		{
-			name:    "dotted segment and slashes",
-			workdir: "/home/me/proj.app",
-			want:    "-home-me-proj-app",
-		},
-		{
-			// Consecutive separators are NOT collapsed: '/.sortie' -> '--sortie'.
-			name:    "worktree path keeps repeated separators",
-			workdir: "/Users/aface/uscreen_2/.sortie/worktrees/em-3-spec",
-			want:    "-Users-aface-uscreen-2--sortie-worktrees-em-3-spec",
-		},
-		{
-			name:    "case is preserved",
-			workdir: "/Users/Foo/Bar",
-			want:    "-Users-Foo-Bar",
-		},
-		{
-			name:    "hyphens pass through unchanged",
-			workdir: "/a/b-c/d",
-			want:    "-a-b-c-d",
-		},
+// TestBuildSummarizePrompt covers the user-facing summarization_prompt
+// contract: a custom prompt with a {{chat}} placeholder gets the chat spliced
+// in-place (task template vars also resolved); a custom prompt WITHOUT the
+// placeholder gets the chat appended under a conversation-log divider; and an
+// empty custom prompt falls back to the default, which must carry the step
+// name, task id, and chat content.
+func TestBuildSummarizePrompt(t *testing.T) {
+	engine := &Engine{
+		cfg:      newEngineConfig(&config.Config{}),
+		database: newFakeTaskStore(),
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := encodeClaudeProjectDir(tt.workdir); got != tt.want {
-				t.Errorf("encodeClaudeProjectDir(%q) = %q, want %q", tt.workdir, got, tt.want)
-			}
-		})
-	}
-}
+	tk := &task.Task{ID: 7, Title: "fix the widget"}
 
-// TestExtractSessionTranscript covers the parse-and-empty-guard fix for tmux step
-// context capture. The critical regression: a (re-)spawned grilling session that
-// contains only the injected prompt plus metadata lines — no assistant turn — must
-// report hasConversation == false so summarize_chat is skipped instead of
-// re-enacting the prompt's instructions and confabulating a bogus context.
-func TestExtractSessionTranscript(t *testing.T) {
-	// A grilling session that was spawned but never used: only the prompt (a user
-	// turn) and the non-conversational metadata lines Claude Code writes.
-	emptySession := strings.Join([]string{
-		`{"type":"mode","mode":"normal","sessionId":"s1"}`,
-		`{"type":"permission-mode","permissionMode":"bypassPermissions"}`,
-		`{"type":"file-history-snapshot","messageId":"m1"}`,
-		`{"type":"user","message":{"role":"user","content":"Grilling session: interview the user, ask one question at a time."}}`,
-		`{"type":"attachment","attachment":{}}`,
-		`{"type":"last-prompt"}`,
-		`{"type":"ai-title"}`,
-	}, "\n")
-
-	if tr, has := extractSessionTranscript(emptySession); has {
-		t.Errorf("empty session: hasConversation = true, want false (transcript=%q)", tr)
-	}
-
-	// A real conversation: user prompt, assistant text + tool use, tool result,
-	// and a follow-up answer.
-	realSession := strings.Join([]string{
-		`{"type":"mode","mode":"normal"}`,
-		`{"type":"user","message":{"role":"user","content":"Grill me on the plan."}}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal musing"},{"type":"text","text":"Reading the code first."},{"type":"tool_use","name":"Read","input":{"file_path":"/app/api.rb"}}]}}`,
-		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"class Api; end"}]}}`,
-		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Question 1: keep the legacy key?"}]}}`,
-		`{"type":"user","message":{"role":"user","content":"Yes, as a fallback."}}`,
-	}, "\n")
-
-	tr, has := extractSessionTranscript(realSession)
-	if !has {
-		t.Fatal("real session: hasConversation = false, want true")
-	}
-	for _, want := range []string{
-		"User: Grill me on the plan.",
-		"Assistant: Reading the code first.",
-		"[tool: Read",
-		"/app/api.rb",
-		"[tool result: class Api; end]",
-		"Assistant: Question 1: keep the legacy key?",
-		"User: Yes, as a fallback.",
-	} {
-		if !strings.Contains(tr, want) {
-			t.Errorf("real session transcript missing %q\n--- got ---\n%s", want, tr)
+	t.Run("custom prompt with chat placeholder", func(t *testing.T) {
+		got := engine.buildSummarizePrompt(tk, "implement",
+			"Summarize task {{task.id}} ({{task.title}}):\n{{chat}}\nEND", "THE CHAT LOG")
+		want := "Summarize task 7 (fix the widget):\nTHE CHAT LOG\nEND"
+		if got != want {
+			t.Errorf("prompt = %q, want %q", got, want)
 		}
-	}
-	// Internal reasoning must not leak into the summarizer prompt.
-	if strings.Contains(tr, "internal musing") {
-		t.Errorf("transcript leaked thinking block:\n%s", tr)
-	}
+		if strings.Contains(got, "--- CONVERSATION LOG ---") {
+			t.Errorf("placeholder prompt must not also append the log divider: %q", got)
+		}
+	})
 
-	// Whitespace/garbage only -> no conversation.
-	if tr, has := extractSessionTranscript("\n  \n{not json}\n"); has || tr != "" {
-		t.Errorf("garbage input: got (%q, %v), want (\"\", false)", tr, has)
-	}
+	t.Run("custom prompt without placeholder appends the log", func(t *testing.T) {
+		got := engine.buildSummarizePrompt(tk, "implement", "Summarize this.", "THE CHAT LOG")
+		want := "Summarize this.\n\n--- CONVERSATION LOG ---\nTHE CHAT LOG"
+		if got != want {
+			t.Errorf("prompt = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty custom prompt uses the default", func(t *testing.T) {
+		got := engine.buildSummarizePrompt(tk, "implement", "", "THE CHAT LOG")
+		for _, want := range []string{`"implement"`, "#7", "fix the widget", "--- CONVERSATION LOG ---\nTHE CHAT LOG"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("default prompt missing %q:\n%s", want, got)
+			}
+		}
+	})
 }

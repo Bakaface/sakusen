@@ -7,19 +7,88 @@ import (
 	"strings"
 )
 
-// StopSentinel is the subset of the Claude Code Stop-hook JSON payload that the
-// daemon reads back from a sentinel file. The hook writes the full payload (see
-// claudeHookCommandTemplate); SessionID and TranscriptPath identify the agent
-// session that actually ran the step, which is authoritative — unlike the
-// cwd-matched session finder, which can latch onto an unrelated session when
-// several agents share a working directory (notably non-worktree mode).
-type StopSentinel struct {
+// Step-done sentinel convention.
+//
+// When a step runs inside tmux, whatever runs inside the session — a Claude
+// Code Stop hook, the agent itself as its final action, a userland
+// idle-watcher — signals "turn ended" by writing a file into the step-done
+// directory sortie exports to the agent as SORTIE_DONE_DIR, named
+//
+//	$SORTIE_DONE_PREFIX-<nanosecond timestamp>.json
+//
+// (e.g. `"$SORTIE_DONE_DIR/$SORTIE_DONE_PREFIX-$(date +%s%N).json"`). The
+// daemon's tmuxMonitorLoop polls for these sentinels and uses them to
+// auto-advance the workflow (unless the step is marked `human: true`). Agents
+// that never write a sentinel are manual-advance: the task pauses at tmux
+// status until the user acts.
+//
+// Storage layout (per worktree):
+//
+//	<worktree>/.sortie/step-done/<prefix>-<ts>.json
+//
+// The file content MAY be a JSON object; two optional fields are understood by
+// sortie (StepSentinel below): "session_id" — an opaque, agent-native session
+// identifier recorded in the chats table (enables `resume_command` restore and
+// `chat_log_command` lookup) — and "transcript_path" — a chat transcript file
+// passed to the agent's chat_log_command as SORTIE_TRANSCRIPT_PATH. A Claude
+// Code Stop-hook payload carries both natively; other agents can write
+// whatever subset they have (or an empty file).
+
+// StepDoneDirName is the directory name (relative to a worktree's .sortie/)
+// that holds turn-end sentinel files for tmux step completion detection.
+const StepDoneDirName = "step-done"
+
+// StepDoneDir returns the absolute path to the directory holding turn-end
+// sentinel files inside a worktree. Exported to tmux agents as SORTIE_DONE_DIR.
+func StepDoneDir(worktreePath string) string {
+	return filepath.Join(worktreePath, ".sortie", StepDoneDirName)
+}
+
+// SentinelPrefix returns the filename prefix a sentinel for the given step
+// must use (the sanitised step name). Exported to tmux agents as
+// SORTIE_DONE_PREFIX.
+func SentinelPrefix(stepName string) string {
+	return shellSafeStepName(stepName)
+}
+
+// shellSafeStepName produces a sentinel-filename-safe version of a step name.
+// Step names are user-configurable strings and may contain shell-significant
+// characters (spaces, slashes, dollar signs) that would otherwise corrupt
+// filenames or the commands that reference them. We strip anything outside
+// [A-Za-z0-9_-] and substitute underscore; collisions across distinct step
+// names are acceptable because the timestamp suffix still disambiguates
+// per-turn sentinels.
+func shellSafeStepName(name string) string {
+	out := make([]byte, 0, len(name))
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9',
+			c == '_', c == '-':
+			out = append(out, c)
+		default:
+			out = append(out, '_')
+		}
+	}
+	if len(out) == 0 {
+		return "step"
+	}
+	return string(out)
+}
+
+// StepSentinel is the subset of a sentinel file's optional JSON payload that
+// sortie reads back. SessionID and TranscriptPath identify the agent session
+// that actually ran the step, which is authoritative — the sentinel is
+// written from inside that very session.
+type StepSentinel struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	Cwd            string `json:"cwd"`
 }
 
-// sentinelMatchesStep reports whether filename is a Stop-hook sentinel written
+// sentinelMatchesStep reports whether filename is a turn-end sentinel written
 // for the step whose sanitised name is stepPrefix. The hook names sentinels
 // "<stepPrefix>-<timestamp>.json" where <timestamp> is `$(date +%s%N)` — a run
 // of digits (with a trailing literal "N" when BSD date lacks %N support).
@@ -81,7 +150,7 @@ func latestStepSentinelFile(worktreePath, stepName string) (string, bool) {
 	return bestPath, bestFound
 }
 
-// StepSentinelExists reports whether at least one Stop-hook sentinel for the
+// StepSentinelExists reports whether at least one turn-end sentinel for the
 // given step is present. Read errors (missing dir, permission denied) are
 // treated as "no sentinel" — the daemon's idle fallback remains the safety net.
 func StepSentinelExists(worktreePath, stepName string) bool {
@@ -89,26 +158,35 @@ func StepSentinelExists(worktreePath, stepName string) bool {
 	return ok
 }
 
-// LatestStepSentinel parses the most recent Stop-hook sentinel for the given
-// step and returns its payload. ok is false when no sentinel exists or it
-// cannot be read or parsed.
-func LatestStepSentinel(worktreePath, stepName string) (StopSentinel, bool) {
-	path, ok := latestStepSentinelFile(worktreePath, stepName)
-	if !ok {
-		return StopSentinel{}, false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return StopSentinel{}, false
-	}
-	var s StopSentinel
-	if err := json.Unmarshal(data, &s); err != nil {
-		return StopSentinel{}, false
-	}
-	return s, true
+// LatestStepSentinel parses the most recent turn-end sentinel for the given
+// step and returns its payload. ok is false only when no sentinel exists; an
+// unreadable or unparseable payload returns ok=true with a zero StepSentinel
+// (the file's existence is the turn-end signal; payload fields are optional).
+func LatestStepSentinel(worktreePath, stepName string) (StepSentinel, bool) {
+	s, _, ok := LatestStepSentinelWithPath(worktreePath, stepName)
+	return s, ok
 }
 
-// ClearStepSentinels removes every Stop-hook sentinel for the given step from
+// LatestStepSentinelWithPath is LatestStepSentinel plus the sentinel file's
+// path, for callers that hand the raw file to an agent command
+// (SORTIE_SENTINEL_FILE). A sentinel that exists but holds no parseable JSON
+// still returns ok=true with a zero payload — the file's existence is the
+// turn-end signal; the payload fields are optional.
+func LatestStepSentinelWithPath(worktreePath, stepName string) (StepSentinel, string, bool) {
+	path, ok := latestStepSentinelFile(worktreePath, stepName)
+	if !ok {
+		return StepSentinel{}, "", false
+	}
+	var s StepSentinel
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return StepSentinel{}, path, true
+	}
+	_ = json.Unmarshal(data, &s)
+	return s, path, true
+}
+
+// ClearStepSentinels removes every turn-end sentinel for the given step from
 // the worktree's step-done directory. Scoping to the step name leaves sentinels
 // for other (concurrent or earlier) steps untouched. Errors are intentionally
 // swallowed: a leftover sentinel triggers at most one redundant advance

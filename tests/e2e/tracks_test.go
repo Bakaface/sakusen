@@ -12,17 +12,19 @@ import (
 )
 
 // trackWorkflowYAML defines a one-step workflow whose prompt interpolates the
-// track template vars, so the captured stub argv proves what the agent saw.
+// track template vars, so the captured stub prompt proves what the agent saw.
 func trackWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 on_complete: merge
 workflows:
   - name: simple
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task.\nCHAIN-START\n{{track.context}}\nCHAIN-END\nOWN-START\n{{track.own_context}}\nOWN-END"
@@ -63,8 +65,7 @@ func TestTracks_ContextInterpolationAndAccumulation(t *testing.T) {
 	if !strings.Contains(prompt, "sprint goal") || !strings.Contains(prompt, "seed") {
 		t.Errorf("expected both contexts in prompt, got:\n%s", prompt)
 	}
-	// Slice the section strictly between the first OWN-START/OWN-END pair
-	// (the argv carries the resolved prompt twice: -p and --system-prompt).
+	// Slice the section strictly between the first OWN-START/OWN-END pair.
 	ownSection := prompt
 	if s := strings.Index(prompt, "OWN-START"); s >= 0 {
 		ownSection = prompt[s:]
@@ -115,7 +116,7 @@ func TestTracks_TrackWorkflowSelected(t *testing.T) {
 	if err := os.MkdirAll(wfDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	wfYaml := "print: true\nsteps:\n  - name: implementing\n    prompt: \"Track workflow step\"\n"
+	wfYaml := "steps:\n  - name: implementing\n    prompt: \"Track workflow step\"\n"
 	if err := os.WriteFile(filepath.Join(wfDir, "impl.yml"), []byte(wfYaml), 0644); err != nil {
 		t.Fatal(err)
 	}

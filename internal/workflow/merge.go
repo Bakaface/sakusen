@@ -22,17 +22,34 @@ func (e *Engine) executeOnComplete(ctx context.Context, t *task.Task, _ func([]s
 }
 
 // bindConflictResolver returns a merge.ConflictResolver closure that spawns a
-// Claude agent to fix conflict markers in the task worktree. The closure is
+// headless agent to fix conflict markers in the task worktree. The closure is
 // captured once at Engine construction so the merge package never has to
-// import workflow or claude.
+// import workflow or runner.
 func (e *Engine) bindConflictResolver() func(ctx context.Context, t *task.Task, conflictFiles []string) error {
 	return func(ctx context.Context, t *task.Task, conflictFiles []string) error {
 		return e.resolveConflicts(ctx, t, conflictFiles, nil)
 	}
 }
 
-// resolveConflicts spawns a Claude Code agent to resolve merge conflicts in the worktree.
+// resolveConflicts spawns a headless agent to resolve merge conflicts in the
+// worktree. The agent is resolved at the workflow level (workflow.agent →
+// default_agent → "claude") and must be headless-mode: an interactive tmux
+// agent cannot run a synchronous conflict-resolution pass.
 func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFiles []string, outputFn func([]string)) error {
+	wf := e.cfg.GetWorkflow(t.Workflow)
+	slug, agent, err := e.cfg.WorkflowAgent(wf)
+	if err != nil {
+		return fmt.Errorf("failed to resolve merge conflicts: %w", err)
+	}
+	if agent.IsTmux() {
+		// Fall back to the implicit default headless agent when the workflow's
+		// agent is interactive.
+		if fallback, ok := e.cfg.ResolveAgent(config.DefaultAgentSlug); ok && !fallback.IsTmux() {
+			slug, agent = config.DefaultAgentSlug, fallback
+		} else {
+			return fmt.Errorf("failed to resolve merge conflicts: workflow agent %q is tmux-mode and no headless %q agent is configured", slug, config.DefaultAgentSlug)
+		}
+	}
 	var sb strings.Builder
 	sb.WriteString("You are resolving merge conflicts in an automated merge pipeline.\n\n")
 	sb.WriteString(fmt.Sprintf("The branch `%s` is being merged into `%s`, and the following files have conflicts:\n\n", e.cfg.BaseBranch, t.Branch))
@@ -48,27 +65,27 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 	sb.WriteString("6. Verify the code compiles after resolving conflicts (run `go build ./...` or equivalent)\n")
 	prompt := sb.String()
 
-	conflictSysPrompt := BuildSystemPrompt(prompt, e.cfg.SystemPrompt, nil)
-
 	step := config.StepConfig{
 		Name:    "resolve-conflicts",
 		Timeout: "10m",
 	}
 
 	env := map[string]string{
-		"SORTIE_TASK_ID":  fmt.Sprintf("%d", t.ID),
-		"SORTIE_STEP":     step.Name,
-		"SORTIE_WORKTREE": t.WorktreePath,
-		"SORTIE_PURPOSE":  "merge_conflict",
+		"SORTIE_TASK_ID":      fmt.Sprintf("%d", t.ID),
+		"SORTIE_STEP":         step.Name,
+		"SORTIE_WORKTREE":     t.WorktreePath,
+		"SORTIE_PROJECT_PATH": e.repoRoot,
+		"SORTIE_PURPOSE":      "merge_conflict",
+		"SORTIE_AGENT":        slug,
 	}
 	if t.TrackID != nil {
 		// Parity with step agents — merge-conflict agents belong to the same task.
 		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 
-	exitCode, _, _, outputTail, err := e.runClaudeStep(ctx, t, step, prompt, env, outputFn, conflictSysPrompt)
+	exitCode, _, outputTail, err := e.runHeadlessAgent(ctx, t, step, agent, prompt, env, outputFn)
 	if err != nil {
-		return fmt.Errorf("conflict resolution claude process failed: %w", err)
+		return fmt.Errorf("conflict resolution agent failed: %w", err)
 	}
 	if exitCode != 0 {
 		errMsg := fmt.Sprintf("conflict resolution exited with code %d", exitCode)

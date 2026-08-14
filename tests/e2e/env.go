@@ -26,8 +26,8 @@ type Env struct {
 	XDGDir       string // XDG_CONFIG_HOME for this test
 	ResponsesDir string // $E2E_RESPONSES_DIR — points at testdata/<scenario>/
 	StubLog      string // path to per-test stub invocation log
-	StubPath     string // absolute path to stub-claude.sh
-	PromptDir    string // $E2E_PROMPT_CAPTURE_DIR — per-invocation argv capture
+	StubPath     string // absolute path to stub-agent.sh
+	PromptDir    string // $E2E_PROMPT_CAPTURE_DIR — per-invocation step-prompt capture
 	daemonCmd    *exec.Cmd
 	daemonLog    string // path to daemon stdout+stderr log
 }
@@ -60,7 +60,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	})
 	stubLog := filepath.Join(xdgDir, "stub.log")
 	responsesDir := filepath.Join(repoRoot, "tests", "e2e", "testdata", scenario)
-	stubPath := filepath.Join(repoRoot, "tests", "e2e", "stub-claude.sh")
+	stubPath := filepath.Join(repoRoot, "tests", "e2e", "stub-agent.sh")
 
 	// Propagate test-specific env via t.Setenv (restored on cleanup automatically)
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
@@ -294,7 +294,7 @@ func (e *Env) AddProject(yaml string) string {
 // per-test values as "$HOME/<name>".
 //
 // HOME is set to e.XDGDir before the daemon starts and the daemon passes
-// os.Environ() through to the claude process, so this is the ONLY reliable way
+// os.Environ() through to the agent command, so this is the ONLY reliable way
 // to pass per-test values into a hook: a t.Setenv after setupE2E never reaches
 // the already-started daemon.
 func (e *Env) WriteHookFile(name, content string) {
@@ -347,9 +347,10 @@ func (e *Env) TaskField(id int64, key string) string {
 	}
 }
 
-// CapturedPrompt returns the argv the stub was invoked with for the given
-// task's step (captured via E2E_PROMPT_CAPTURE_DIR — the TSV log deliberately
-// omits argv). Waits briefly for the file, then t.Fatal on missing.
+// CapturedPrompt returns the resolved step prompt the stub saw for the given
+// task's step (a copy of $SORTIE_PROMPT_FILE written to E2E_PROMPT_CAPTURE_DIR
+// — the TSV log deliberately omits the prompt). Waits briefly for the file,
+// then t.Fatal on missing.
 func (e *Env) CapturedPrompt(taskID int64, step string) string {
 	e.t.Helper()
 	path := filepath.Join(e.PromptDir, fmt.Sprintf("prompt-%d-%s.txt", taskID, step))

@@ -11,53 +11,36 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/claude"
 	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sortie/internal/runner"
 	"github.com/Bakaface/sortie/internal/task"
 	"github.com/Bakaface/sortie/internal/tmux"
 )
 
-// buildTmuxClaudeCmd returns the claude command-line fragment used inside the
-// generated tmux wrapper script. The binary path is shell-quoted via %q so paths
-// with spaces don't break the script.
-//
-// settingsPath, if non-empty, is appended as `--settings <path>` so the
-// worktree-scoped Stop hook (see InstallStopHook) is layered on top of the
-// user's global config. We deliberately do NOT set CLAUDE_CONFIG_DIR here:
-// that env var is a full redirection of the entire Claude Code config
-// directory, which would hide ~/.claude/.credentials.json and ~/.claude.json
-// (OAuth, onboarding state, per-project trust acceptance) from the spawned
-// agent and force re-onboarding on every launch.
-func buildTmuxClaudeCmd(claudeBin string, yolo bool, settingsPath string, defaultArgs []string) string {
-	if claudeBin == "" {
-		claudeBin = "claude"
-	}
-	cmd := fmt.Sprintf("%q", claudeBin)
-	if yolo {
-		cmd += " --dangerously-skip-permissions"
-	}
-	// Configured default_args (e.g. --plugin-dir for the sortie plugin) must
-	// apply to interactive tmux steps too, not just headless ones — otherwise
-	// the chat launches without sortie's MCP tools (update_step_context, etc.).
-	for _, a := range defaultArgs {
-		cmd += fmt.Sprintf(" %q", a)
-	}
-	if settingsPath != "" {
-		cmd += fmt.Sprintf(" --settings %q", settingsPath)
-	}
-	return cmd
+// StepPromptFile returns the path the fully-resolved step prompt is written to
+// before an agent spawn. Exported to the agent via SORTIE_PROMPT_FILE, and used
+// by the daemon to re-feed the prompt when restoring a step session.
+func StepPromptFile(worktreePath, stepName string) string {
+	return filepath.Join(worktreePath, ".sortie", fmt.Sprintf("step-prompt-%s.txt", stepName))
+}
+
+// stepResultFile returns the path a headless agent's pipeline is expected to
+// write its final result text to. Exported via SORTIE_RESULT_FILE and read
+// back after exit (with a crude stdout-tail fallback when absent).
+func stepResultFile(worktreePath, stepName string) string {
+	return filepath.Join(worktreePath, ".sortie", fmt.Sprintf("step-result-%s.txt", stepName))
 }
 
 // agentRunner is the AGENT-RUNNER seam between the engine's step-execution
-// driver (runStep, engine.go) and how a headless step's Claude agent
-// actually runs. runStep calls e.runner.runHeadlessStep instead of calling
-// runClaudeStep directly, so tests can substitute a fake that returns
-// scripted results without spawning a real claude subprocess. NewEngine sets
+// driver (runStep, engine.go) and how a headless step's agent command
+// actually runs. runStep calls e.runner.runHeadlessStep instead of spawning a
+// runner.Process directly, so tests can substitute a fake that returns
+// scripted results without spawning a real subprocess. NewEngine sets
 // e.runner to realAgentRunner{} by default; tests in this package override
 // the field directly after construction (the same pattern already used for
 // e.repo in fasttrack_test.go — see Engine.runner's doc comment).
 //
-// The tmux path (runClaudeStepTmux) is deliberately NOT behind this seam.
+// The tmux path (runStepTmux) is deliberately NOT behind this seam.
 // Tmux steps don't return a synchronous outcome the way headless steps do —
 // they spawn a detached session and return immediately (exitCode 0, no
 // resultText) so the engine can pause at the approval gate; the actual
@@ -69,22 +52,45 @@ func buildTmuxClaudeCmd(claudeBin string, yolo bool, settingsPath string, defaul
 // essentially all of the exercisable workflow logic lives (loop evaluation,
 // step-context capture, no-output validation, waits-on suspension) —
 // seaming it alone is enough to exercise that logic in-process without a
-// real claude binary.
+// real agent binary.
 type agentRunner interface {
-	runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, prompt string, envVars map[string]string, outputFn func([]string), systemPrompt ...string) (exitCode int, resultText, sessionID, outputTail string, err error)
+	runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (exitCode int, resultText, outputTail string, err error)
 }
 
 // realAgentRunner is the production agentRunner: it delegates to
-// Engine.runClaudeStep, which spawns a real claude.Process. This is the
+// Engine.runHeadlessAgent, which spawns a real runner.Process. This is the
 // default runner NewEngine wires up.
 type realAgentRunner struct{}
 
-func (realAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, prompt string, envVars map[string]string, outputFn func([]string), systemPrompt ...string) (int, string, string, string, error) {
-	return e.runClaudeStep(ctx, t, step, prompt, envVars, outputFn, systemPrompt...)
+func (realAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
+	return e.runHeadlessAgent(ctx, t, step, agent, prompt, envVars, outputFn)
 }
 
-func (e *Engine) runClaudeStep(ctx context.Context, t *task.Task, step config.StepConfig, prompt string, envVars map[string]string, outputFn func([]string), systemPrompt ...string) (int, string, string, string, error) {
-	proc := claude.NewProcess(fmt.Sprintf("%d", t.ID), t.WorktreePath, &e.cfg.Claude)
+// runHeadlessAgent executes a step's headless agent command synchronously:
+// writes the resolved prompt to the step prompt file, spawns the agent's
+// shell command via runner.Process with the sortie env contract exported,
+// streams its stdout into the unified task log, and returns the exit code,
+// result text (from SORTIE_RESULT_FILE, stdout-tail fallback), and — on
+// failure — a tail of the step log for diagnostics.
+func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
+	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
+	if err := os.MkdirAll(sortieDir, 0755); err != nil {
+		return 1, "", "", fmt.Errorf("failed to create sortie dir: %w", err)
+	}
+	promptFile := StepPromptFile(t.WorktreePath, step.Name)
+	resultFile := stepResultFile(t.WorktreePath, step.Name)
+	if err := os.WriteFile(promptFile, []byte(prompt), 0644); err != nil {
+		return 1, "", "", fmt.Errorf("failed to write prompt file: %w", err)
+	}
+	// Clear any stale result from a previous pass of this step so the
+	// fallback logic can't pick up a previous iteration's output.
+	_ = os.Remove(resultFile)
+
+	env := runner.MergeEnv(envVars, agent.Env)
+	env["SORTIE_PROMPT_FILE"] = promptFile
+	env["SORTIE_RESULT_FILE"] = resultFile
+
+	proc := runner.NewProcess(fmt.Sprintf("%d", t.ID), t.WorktreePath, agent.Command, resultFile)
 
 	// Apply step timeout
 	timeout := e.cfg.GetStepTimeout(step)
@@ -96,11 +102,11 @@ func (e *Engine) runClaudeStep(ctx context.Context, t *task.Task, step config.St
 	// of events.
 	logPath := ProjectLogPath(e.dataDir, t.ID)
 	if err := os.MkdirAll(ProjectLogsDir(e.dataDir, t.ID), 0755); err != nil {
-		return 1, "", "", "", fmt.Errorf("failed to create log dir: %w", err)
+		return 1, "", "", fmt.Errorf("failed to create log dir: %w", err)
 	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return 1, "", "", "", fmt.Errorf("failed to open task log: %w", err)
+		return 1, "", "", fmt.Errorf("failed to open task log: %w", err)
 	}
 	defer logFile.Close()
 
@@ -142,10 +148,10 @@ func (e *Engine) runClaudeStep(ctx context.Context, t *task.Task, step config.St
 	}
 
 	// Set environment on the child process (not the daemon's global env)
-	proc.SetEnv(envVars)
+	proc.SetEnv(env)
 
-	if err := proc.StartWithPrompt(prompt, systemPrompt...); err != nil {
-		return 1, "", "", "", fmt.Errorf("failed to start claude: %w", err)
+	if err := proc.Start(); err != nil {
+		return 1, "", "", fmt.Errorf("failed to start agent: %w", err)
 	}
 
 	// Wait for process to exit
@@ -156,7 +162,7 @@ func (e *Engine) runClaudeStep(ctx context.Context, t *task.Task, step config.St
 		select {
 		case <-ctx.Done():
 			proc.Stop()
-			return 1, "", "", "", ctx.Err()
+			return 1, "", "", ctx.Err()
 		case <-ticker.C:
 			if proc.HasExited() {
 				exitCode := proc.ExitCode()
@@ -174,13 +180,12 @@ func (e *Engine) runClaudeStep(ctx context.Context, t *task.Task, step config.St
 
 				var outputTail string
 				if exitCode != 0 {
-					// Read last 20 lines from the per-step log (not raw JSON)
+					// Read last 20 lines from the per-step log
 					if lines, err := readLastLines(logPath, 20); err == nil && len(lines) > 0 {
 						outputTail = strings.Join(lines, "\n")
 					}
 				}
-				sessionID := proc.SessionID()
-				return exitCode, resultText, sessionID, outputTail, nil
+				return exitCode, resultText, outputTail, nil
 			}
 		}
 	}
@@ -196,7 +201,7 @@ func readLastLines(path string, n int) ([]string, error) {
 
 	var lines []string
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer for large NDJSON lines
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer for long lines
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
@@ -220,13 +225,14 @@ func readLogTail(path string, maxLines int) string {
 	return strings.Join(lines, "\n")
 }
 
-// runClaudeStepTmux starts a Claude session in a detached tmux session and returns
-// immediately. The tmux session persists for the user to attach and interact with.
-// The workflow engine treats tmux steps as human steps, so the task will pause
-// at tmux status until the user manually approves.
-func (e *Engine) runClaudeStepTmux(ctx context.Context, t *task.Task, step config.StepConfig, prompt string, envVars map[string]string, outputFn func([]string), systemPrompt ...string) (int, string, error) {
+// runStepTmux starts a step's tmux-mode agent in a detached tmux session and
+// returns immediately. The tmux session persists for the user to attach and
+// interact with. The workflow engine treats tmux steps as human steps, so the
+// task will pause at tmux status until the step's sentinel lands (see
+// sentinel.go) or the user manually advances.
+func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, error) {
 	if !tmux.IsAvailable() {
-		return 1, "", fmt.Errorf("tmux is not installed or not in PATH (required for tmux mode)")
+		return 1, "", fmt.Errorf("tmux is not installed or not in PATH (required for tmux-mode agents)")
 	}
 
 	taskID := fmt.Sprintf("%d", t.ID)
@@ -238,22 +244,20 @@ func (e *Engine) runClaudeStepTmux(ctx context.Context, t *task.Task, step confi
 	}
 
 	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
-	promptFile := filepath.Join(sortieDir, fmt.Sprintf("step-prompt-%s.txt", step.Name))
+	promptFile := StepPromptFile(t.WorktreePath, step.Name)
 	scriptFile := filepath.Join(sortieDir, fmt.Sprintf("run-step-%s.sh", step.Name))
 	logPath := ProjectLogPath(e.dataDir, t.ID)
 	if err := os.MkdirAll(ProjectLogsDir(e.dataDir, t.ID), 0755); err != nil {
 		return 1, "", fmt.Errorf("failed to create log dir: %w", err)
 	}
 
-	// Install the Claude Code Stop hook so the daemon can detect turn-end
-	// events and auto-advance the workflow. The daemon falls back to the
-	// hash-stability monitor if the hook never fires (e.g. user disabled
-	// hooks via managed-settings policy). Failure here is non-fatal.
-	if err := InstallStopHook(t.WorktreePath, step.Name); err != nil {
-		log.Printf("Warning: failed to install Claude Stop hook for task #%d step %q: %v", t.ID, step.Name, err)
+	// Ensure the sentinel directory exists so agents (hooks, idle-watchers)
+	// can write turn-end sentinels without having to mkdir themselves.
+	if err := os.MkdirAll(StepDoneDir(t.WorktreePath), 0755); err != nil {
+		log.Printf("Warning: failed to create step-done dir for task #%d: %v", t.ID, err)
 	}
 
-	// Clear any Stop-hook sentinels left from a previous pass of THIS step.
+	// Clear any sentinels left from a previous pass of THIS step.
 	// Without this, a stale turn-end marker (e.g. from a per-step retry, or one
 	// that survived a daemon restart) would let the monitor auto-advance the
 	// freshly-launched session before its agent does any work — handing the next
@@ -266,53 +270,22 @@ func (e *Engine) runClaudeStepTmux(ctx context.Context, t *task.Task, step confi
 		return 1, "", fmt.Errorf("failed to write prompt file: %w", err)
 	}
 
-	// Build env exports for the wrapper script. We do NOT inject
-	// CLAUDE_CONFIG_DIR — that env var is a full config-dir redirection that
-	// would hide the user's OAuth/onboarding state and trigger re-auth prompts.
-	// The Stop-hook settings.json is wired in via `--settings` on the claude
-	// command line instead (see buildTmuxClaudeCmd).
-	var envExports strings.Builder
-	for k, v := range envVars {
-		envExports.WriteString(fmt.Sprintf("export %s=%q\n", k, v))
-	}
+	// Build the env the agent command sees inside the wrapper script: the
+	// engine's per-step contract, the agent record's extra env, and the
+	// tmux-specific additions (prompt file + sentinel contract).
+	env := runner.MergeEnv(envVars, agent.Env)
+	env["SORTIE_PROMPT_FILE"] = promptFile
+	env["SORTIE_DONE_DIR"] = StepDoneDir(t.WorktreePath)
+	env["SORTIE_DONE_PREFIX"] = SentinelPrefix(step.Name)
 
-	// Write wrapper script: run Claude interactively, then drop to bash for inspection.
-	// Honor cfg.Claude.Command so e2e tests / custom installs route through a stub.
-	sortieSettingsFile := filepath.Join(SortieSettingsDir(t.WorktreePath), "settings.json")
-	claudeCmd := buildTmuxClaudeCmd(e.cfg.Claude.Command, e.cfg.Claude.Yolo, sortieSettingsFile, e.cfg.Claude.DefaultArgs)
-	if len(systemPrompt) > 0 && systemPrompt[0] != "" {
-		// Write system prompt to file to avoid shell quoting issues
-		sysPromptFile := filepath.Join(sortieDir, fmt.Sprintf("step-sysprompt-%s.txt", step.Name))
-		if err := os.WriteFile(sysPromptFile, []byte(systemPrompt[0]), 0644); err != nil {
-			return 1, "", fmt.Errorf("failed to write system prompt file: %w", err)
-		}
-		claudeCmd += fmt.Sprintf(" --system-prompt \"$(cat %q)\"", sysPromptFile)
-	}
-	var script string
-	if strings.TrimSpace(prompt) == "" {
-		// Empty prompt: launch Claude as a blank interactive session
-		script = fmt.Sprintf("#!/bin/bash\n%s%s\nexec bash\n", envExports.String(), claudeCmd)
-	} else {
-		script = fmt.Sprintf(`#!/bin/bash
-%sPROMPT=$(cat %q)
-%s "$PROMPT"
-exec bash
-`, envExports.String(), promptFile, claudeCmd)
-	}
-
+	script := runner.BuildWrapperScript(agent.Command, env)
 	if err := os.WriteFile(scriptFile, []byte(script), 0755); err != nil {
 		return 1, "", fmt.Errorf("failed to write wrapper script: %w", err)
 	}
 
-	// Snapshot pre-existing Claude sessions in this workdir BEFORE spawning so
-	// the async session-ID poller below can distinguish the one we are about to
-	// launch from any unrelated chat the user already has open in the same
-	// directory (e.g. an interactive `claude` running in the worktree).
-	preExistingSessions := claude.SnapshotSessionsByWorkdir(t.WorktreePath)
-
-	// If the setup command contains {{run_agent}} or {{claude_command}}, the user
+	// If the setup command contains {{run_agent}} or {{agent_command}}, the user
 	// controls which window/pane runs the agent — create a bare session instead
-	// of auto-starting Claude in window 0.
+	// of auto-starting the agent in window 0.
 	setupCmd := e.cfg.TmuxSetupCommand
 	if tmux.SetupCommandControlsAgent(setupCmd) {
 		// Create bare session (just a shell), setup command will place the agent
@@ -329,8 +302,8 @@ exec bash
 	// Run tmux setup command if configured (e.g. create additional windows/panes)
 	if setupCmd != "" {
 		vars := &tmux.SetupVars{
-			ClaudeCommand: claudeCmd,
-			RunAgent:      scriptFile,
+			AgentCommand: agent.Command,
+			RunAgent:     scriptFile,
 		}
 		if err := session.RunSetupCommand(setupCmd, vars); err != nil {
 			log.Printf("Warning: tmux setup command failed: %v", err)
@@ -346,17 +319,9 @@ exec bash
 	log.Printf("Tmux session %q started for task #%d step %q (attach with: sortie attach %s)",
 		session.Name, t.ID, step.Name, taskID)
 
-	// Async: discover the freshly-spawned Claude session ID and record it.
-	// Filtering against preExistingSessions prevents locking onto an unrelated
-	// pre-existing chat in the same worktree.
-	go func() {
-		sid, _ := claude.FindNewSessionByWorkdir(t.WorktreePath, preExistingSessions, 15*time.Second)
-		if sid != "" {
-			if err := e.database.UpsertChat(t.ID, step.Name, sid, session.Name); err != nil {
-				log.Printf("Warning: failed to upsert chat for tmux task #%d step %q: %v", t.ID, step.Name, err)
-			}
-		}
-	}()
+	// Session-id discovery is sentinel-driven: when the agent's turn-end
+	// sentinel lands with a session_id payload, the daemon's monitor records
+	// it via RecordTmuxStepSentinelSession. No launch-time discovery runs.
 
 	// Fire-and-forget: return immediately, workflow will pause at approval gate
 	return 0, "", nil

@@ -1,107 +1,132 @@
 package daemon
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Bakaface/sortie/internal/config"
 )
 
-func TestWriteClaudeScript_HonorsClaudeBin(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "run.sh")
+// interactiveAgent picks the agent record for ad-hoc tmux sessions (continue,
+// tmux_direct, restore fallback). Resolution rule: the top-level default agent
+// when it is tmux-mode, else the conventional "claude-tmux" slug, else error.
 
-	if err := writeClaudeScript(script, "/tmp/stub-claude", false, "", "", nil); err != nil {
-		t.Fatalf("writeClaudeScript failed: %v", err)
+func TestInteractiveAgent_UsesTmuxModeDefaultAgent(t *testing.T) {
+	cfg := &config.Config{
+		DefaultAgent: "pair",
+		Agents: map[string]config.AgentConfig{
+			"pair":        {Mode: config.AgentModeTmux, Command: "run-pair"},
+			"claude-tmux": {Mode: config.AgentModeTmux, Command: "run-claude"},
+		},
 	}
 
-	data, err := os.ReadFile(script)
+	slug, agent, err := interactiveAgent(cfg)
 	if err != nil {
-		t.Fatalf("read script: %v", err)
+		t.Fatalf("interactiveAgent failed: %v", err)
 	}
-	got := string(data)
-
-	if !strings.Contains(got, "/tmp/stub-claude") {
-		t.Errorf("expected script to contain configured claude path /tmp/stub-claude\nscript:\n%s", got)
+	if slug != "pair" {
+		t.Errorf("expected tmux-mode default agent %q to win, got %q", "pair", slug)
 	}
-	if !strings.Contains(got, "exec bash") {
-		t.Errorf("expected script to drop to bash\nscript:\n%s", got)
-	}
-
-	// Script must be syntactically valid bash
-	if err := exec.Command("bash", "-n", script).Run(); err != nil {
-		t.Errorf("bash -n rejected generated script: %v\nscript:\n%s", err, got)
+	if agent.Command != "run-pair" {
+		t.Errorf("expected the default agent's command, got %q", agent.Command)
 	}
 }
 
-func TestWriteClaudeScript_FallsBackToClaude(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "run.sh")
-
-	if err := writeClaudeScript(script, "", false, "", "", nil); err != nil {
-		t.Fatalf("writeClaudeScript failed: %v", err)
+func TestInteractiveAgent_FallsBackToClaudeTmuxSlug(t *testing.T) {
+	// The default agent resolves headless, so the conventional "claude-tmux"
+	// slug must be used instead.
+	cfg := &config.Config{
+		Agents: map[string]config.AgentConfig{
+			"claude":      {Command: "claude -p"}, // headless implicit default
+			"claude-tmux": {Mode: config.AgentModeTmux, Command: "claude"},
+		},
 	}
 
-	data, _ := os.ReadFile(script)
-	got := string(data)
-
-	if !strings.Contains(got, `"claude"`) {
-		t.Errorf("expected fallback to literal claude\nscript:\n%s", got)
+	slug, agent, err := interactiveAgent(cfg)
+	if err != nil {
+		t.Fatalf("interactiveAgent failed: %v", err)
 	}
-}
-
-func TestWriteClaudeScript_YoloAddsFlag(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "run.sh")
-
-	if err := writeClaudeScript(script, "/tmp/stub", true, "", "", nil); err != nil {
-		t.Fatalf("writeClaudeScript failed: %v", err)
+	if slug != interactiveAgentSlug {
+		t.Errorf("expected fallback slug %q, got %q", interactiveAgentSlug, slug)
 	}
-
-	data, _ := os.ReadFile(script)
-	got := string(data)
-
-	if !strings.Contains(got, "--dangerously-skip-permissions") {
-		t.Errorf("expected --dangerously-skip-permissions when yolo\nscript:\n%s", got)
+	if agent.Command != "claude" {
+		t.Errorf("expected claude-tmux record's command, got %q", agent.Command)
 	}
 }
 
-func TestWriteClaudeScript_QuotesPathWithSpaces(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "run.sh")
-
-	if err := writeClaudeScript(script, "/path with spaces/claude", false, "", "", nil); err != nil {
-		t.Fatalf("writeClaudeScript failed: %v", err)
+// TestInteractiveAgent_NonexistentDefaultFallsThroughToClaudeTmux verifies
+// that a default_agent slug with NO record (possible on hand-built configs;
+// load-time validation isn't in play here) falls through the chain to the
+// conventional "claude-tmux" record when one exists.
+func TestInteractiveAgent_NonexistentDefaultFallsThroughToClaudeTmux(t *testing.T) {
+	cfg := &config.Config{
+		DefaultAgent: "ghost",
+		Agents: map[string]config.AgentConfig{
+			"claude-tmux": {Mode: config.AgentModeTmux, Command: "claude"},
+		},
 	}
 
-	if err := exec.Command("bash", "-n", script).Run(); err != nil {
-		data, _ := os.ReadFile(script)
-		t.Errorf("bash -n rejected script with spaced path: %v\nscript:\n%s", err, string(data))
+	slug, agent, err := interactiveAgent(cfg)
+	if err != nil {
+		t.Fatalf("interactiveAgent failed: %v", err)
+	}
+	if slug != interactiveAgentSlug {
+		t.Errorf("expected fall-through to %q for a nonexistent default slug, got %q", interactiveAgentSlug, slug)
+	}
+	if agent.Command != "claude" {
+		t.Errorf("expected claude-tmux record's command, got %q", agent.Command)
 	}
 }
 
-// TestWriteClaudeScript_IncludesDefaultArgs verifies configured default_args
-// (e.g. --plugin-dir for the sortie plugin) are written into the resume/restore
-// wrapper, so a resumed session keeps sortie's MCP tools. Regression guard for
-// resumed chats silently losing update_step_context.
-func TestWriteClaudeScript_IncludesDefaultArgs(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "run.sh")
-
-	if err := writeClaudeScript(script, "", false, "sess-abc", "", []string{"--plugin-dir", "/path with spaces/plugin"}); err != nil {
-		t.Fatalf("writeClaudeScript failed: %v", err)
+func TestInteractiveAgent_ErrorsWhenNoTmuxAgent(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Config
+	}{
+		{
+			name: "no agents at all",
+			cfg:  &config.Config{},
+		},
+		{
+			name: "only headless agents",
+			cfg: &config.Config{
+				DefaultAgent: "worker",
+				Agents: map[string]config.AgentConfig{
+					"worker": {Command: "run-worker"},
+				},
+			},
+		},
+		{
+			// End of the chain: the default slug has no record and there is no
+			// claude-tmux record to fall through to.
+			name: "nonexistent default slug and no claude-tmux record",
+			cfg: &config.Config{
+				DefaultAgent: "ghost",
+				Agents: map[string]config.AgentConfig{
+					"worker": {Command: "run-worker"},
+				},
+			},
+		},
+		{
+			// The slug alone is not enough — the record's mode decides.
+			name: "claude-tmux record exists but is headless",
+			cfg: &config.Config{
+				Agents: map[string]config.AgentConfig{
+					"claude-tmux": {Mode: config.AgentModeHeadless, Command: "claude -p"},
+				},
+			},
+		},
 	}
 
-	data, _ := os.ReadFile(script)
-	got := string(data)
-	if !strings.Contains(got, `"--plugin-dir" "/path with spaces/plugin"`) {
-		t.Errorf("expected quoted --plugin-dir default args in resume script\nscript:\n%s", got)
-	}
-	if !strings.Contains(got, "--resume sess-abc") {
-		t.Errorf("expected resume flag alongside default args\nscript:\n%s", got)
-	}
-	if err := exec.Command("bash", "-n", script).Run(); err != nil {
-		t.Errorf("bash -n rejected script: %v\nscript:\n%s", err, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := interactiveAgent(tt.cfg)
+			if err == nil {
+				t.Fatal("expected an error when no tmux-mode agent is configured")
+			}
+			if !strings.Contains(err.Error(), interactiveAgentSlug) {
+				t.Errorf("error should name the conventional slug %q for guidance, got: %v", interactiveAgentSlug, err)
+			}
+		})
 	}
 }

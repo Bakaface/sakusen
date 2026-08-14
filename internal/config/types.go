@@ -72,11 +72,18 @@ func (w WorktreeSyncPathsConfig) AllPaths() []string {
 type ProjectConfig struct {
 	MaxWorkers      int                 `yaml:"max_workers"`
 	DefaultPriority string              `yaml:"default_priority"`
-	Yolo            *bool               `yaml:"yolo,omitempty"`
 	PollInterval    string              `yaml:"poll_interval,omitempty"`
-	Claude          *ClaudeConfig       `yaml:"claude,omitempty"`
 	Verification    *VerificationConfig `yaml:"verification,omitempty"`
 	Git             GitConfig           `yaml:"git"`
+	// Agents is the project-tier agent registry (slug → record). Merged over
+	// the global tier per slug: a slug redefined here wins wholesale.
+	Agents map[string]AgentConfig `yaml:"agents,omitempty"`
+	// DefaultAgent names the agent slug steps fall back to when neither the
+	// step nor the workflow sets `agent:`. Empty → "claude".
+	DefaultAgent string `yaml:"default_agent,omitempty"`
+	// Summarizer configures the utility LLM command for summarization/title
+	// generation. See SummarizerConfig.
+	Summarizer *SummarizerConfig `yaml:"summarizer,omitempty"`
 	// OnComplete is the project-level finalization action run after a task's
 	// workflow finishes ("commit" | "merge" | "none"). Overridable per-workflow
 	// via WorkflowConfig.OnComplete. Moved here from the former git.on_complete.
@@ -84,19 +91,11 @@ type ProjectConfig struct {
 	Workflows                []WorkflowEntry         `yaml:"workflows"`
 	Notifications            *NotificationsConfig    `yaml:"notifications,omitempty"`
 	TmuxNestedAttachBehavior string                  `yaml:"tmux_nested_attach_behavior"`
-	SystemPrompt             string                  `yaml:"system_prompt"`
 	WorktreeSyncPaths        WorktreeSyncPathsConfig `yaml:"worktree-sync-paths"`
 	WorktreeSetupCommand     string                  `yaml:"worktree-setup-command"`
 	WorktreeSetupCommands    []string                `yaml:"worktree-setup-commands"`
 	TmuxSetupCommand         string                  `yaml:"tmux-setup-command"`
 	Options                  *OptionsConfig          `yaml:"options,omitempty"`
-	// AllowedSummarizationModels restricts which Claude model aliases the
-	// summarizer is allowed to pick from. The actual model is chosen
-	// automatically per-call based on prompt size — the smallest allowed model
-	// whose ceiling fits the prompt wins. Valid aliases: "haiku", "sonnet",
-	// "opus". When empty, defaults to DefaultAllowedSummarizationModels (all
-	// three). Per-step overrides live on StepConfig.AllowedSummarizationModels.
-	AllowedSummarizationModels []string `yaml:"allowed_summarization_models,omitempty"`
 }
 
 // WorkflowEntry is a single item in the flat workflows: list. It is either
@@ -120,7 +119,7 @@ var knownWorkflowFields = map[string]bool{
 	"name":                    true,
 	"description":             true,
 	"input":                   true,
-	"print":                   true,
+	"agent":                   true,
 	"on_complete":             true,
 	"steps":                   true,
 	"summarizer_prompt":       true,
@@ -128,7 +127,8 @@ var knownWorkflowFields = map[string]bool{
 	"worktree-setup-command":  true,
 	"worktree-setup-commands": true,
 	"tmux-setup-command":      true,
-	"tmux":                    true, // deprecated — routed to the migration error
+	"tmux":                    true, // removed — routed to the migration error
+	"print":                   true, // removed — routed to the migration error
 }
 
 // UnmarshalYAML accepts three shapes:
@@ -266,11 +266,12 @@ type WorkflowConfig struct {
 	Checkout string `yaml:"checkout,omitempty"`
 	Target   string `yaml:"target,omitempty"`
 
-	// Print controls the workflow-level default execution mode for Claude steps.
-	//   false (default): run each step in tmux (interactive Claude Code TUI).
-	//   true:            run each step headless via `claude -p`.
-	// Step-level Print overrides this default. Replaces the previous `tmux` field.
-	Print bool `yaml:"print,omitempty"`
+	// Agent, when non-empty, is the agent slug every step of this workflow
+	// runs with unless the step sets its own `agent:`. Resolution cascade:
+	// step.agent → workflow.agent → top-level default_agent → "claude" (see
+	// Config.StepAgent). The agent's mode (headless vs tmux) decides how the
+	// step executes — mode lives on the agent record, not the step.
+	Agent string `yaml:"agent,omitempty"`
 	// OnComplete, when non-empty, overrides the project-level on_complete action
 	// for tasks running this workflow ("commit" | "merge" | "none"). Empty means
 	// inherit the project-level setting. Precedence is locality-based (see
@@ -306,10 +307,11 @@ type WorkflowConfig struct {
 	FromGlobal bool `yaml:"-"`
 }
 
-// UnmarshalYAML decodes a WorkflowConfig and rejects the legacy `tmux:` field
-// with a migration error. The replacement is the inverted `print:` field.
+// UnmarshalYAML decodes a WorkflowConfig and rejects the removed `tmux:` and
+// `print:` fields with migration errors. The replacement is the agent's mode
+// (see the `agent:` field).
 func (wf *WorkflowConfig) UnmarshalYAML(value *yaml.Node) error {
-	if err := checkDeprecatedTmuxField(value, "workflow"); err != nil {
+	if err := checkRemovedModeFields(value, "workflow"); err != nil {
 		return err
 	}
 	type raw WorkflowConfig
@@ -358,12 +360,10 @@ type StepConfig struct {
 	Description string `yaml:"description,omitempty"`
 	Prompt      string `yaml:"prompt"`
 	Mode        string `yaml:"mode"`
-	// Print, when non-nil, overrides the workflow-level Print default for this step.
-	//   nil (default):    inherit workflow.Print
-	//   *false:           tmux
-	//   *true:            headless `claude -p`
-	// Replaces the previous step-level `tmux` field.
-	Print                 *bool       `yaml:"print,omitempty"`
+	// Agent, when non-empty, selects the agent record this step runs with,
+	// overriding the workflow-level `agent:` and the top-level default_agent.
+	// The agent's mode (headless vs tmux) decides how the step executes.
+	Agent                 string      `yaml:"agent,omitempty"`
 	Timeout               string      `yaml:"timeout"`
 	Human                 bool        `yaml:"human"`
 	Loop                  *LoopConfig `yaml:"loop,omitempty"`
@@ -372,11 +372,6 @@ type StepConfig struct {
 	// "summarize_chat". Supports {{task.id}}, {{task.title}}, etc. template variables.
 	// When empty, the default summarization prompt is used.
 	SummarizationPrompt string `yaml:"summarization_prompt,omitempty"`
-	// AllowedSummarizationModels narrows which models the summarizer may pick
-	// for this step's `summarize_chat` pass. Same semantics as the project-level
-	// field — auto-selection picks the cheapest allowed model that fits the
-	// prompt. When empty, the project-level setting is used.
-	AllowedSummarizationModels []string `yaml:"allowed_summarization_models,omitempty"`
 	// RequireContext, when true, makes a failure to capture this step's
 	// `summarize_chat` context BLOCK the task instead of advancing with an
 	// empty context. Use it on steps whose output later steps template via
@@ -399,7 +394,8 @@ type StepConfig struct {
 // named step is pulled from the same-named base (global) workflow during
 // resolution (see resolveWorkflowSteps), mirroring how a scalar workflow entry
 // references a workflow by name. A mapping is an inline step definition; the
-// legacy `tmux:` field is rejected with a migration error.
+// removed `tmux:`, `print:`, and `allowed_summarization_models:` fields are
+// rejected with migration errors.
 func (s *StepConfig) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
 		var name string
@@ -409,7 +405,11 @@ func (s *StepConfig) UnmarshalYAML(value *yaml.Node) error {
 		*s = StepConfig{Name: name, ref: true}
 		return nil
 	}
-	if err := checkDeprecatedTmuxField(value, "step"); err != nil {
+	if err := checkRemovedModeFields(value, "step"); err != nil {
+		return err
+	}
+	if err := checkRemovedMappingKey(value, "allowed_summarization_models",
+		"step field `allowed_summarization_models` was removed: summarization now runs the top-level `summarizer:` command; pick the model inside that command"); err != nil {
 		return err
 	}
 	type raw StepConfig
@@ -421,20 +421,28 @@ func (s *StepConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// checkDeprecatedTmuxField scans a YAML mapping node for the removed `tmux:`
-// field and returns a migration-friendly error pointing at the new `print:`
-// field. scope is the noun reported in the error (e.g. "workflow" or "step").
-func checkDeprecatedTmuxField(node *yaml.Node, scope string) error {
+// checkRemovedModeFields scans a YAML mapping node for the removed `tmux:` and
+// `print:` fields and returns a migration-friendly error pointing at the agent
+// mechanism. scope is the noun reported in the error ("workflow" or "step").
+func checkRemovedModeFields(node *yaml.Node, scope string) error {
+	if err := checkRemovedMappingKey(node, "tmux",
+		fmt.Sprintf("%s field `tmux` was removed: execution mode now comes from the agent record — set `agent: <slug>` where the agent's `mode` is \"tmux\" or \"headless\"", scope)); err != nil {
+		return err
+	}
+	return checkRemovedMappingKey(node, "print",
+		fmt.Sprintf("%s field `print` was removed: execution mode now comes from the agent record — set `agent: <slug>` where the agent's `mode` is \"headless\" (print) or \"tmux\"", scope))
+}
+
+// checkRemovedMappingKey returns errMsg as an error when the given mapping
+// node contains key at its top level.
+func checkRemovedMappingKey(node *yaml.Node, keyName, errMsg string) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i]
-		if key.Kind != yaml.ScalarNode {
-			continue
-		}
-		if key.Value == "tmux" {
-			return fmt.Errorf("%s field `tmux` was removed in favour of `print` (inverted): replace `tmux: true` with `print: false` and `tmux: false` with `print: true`", scope)
+		if key.Kind == yaml.ScalarNode && key.Value == keyName {
+			return fmt.Errorf("%s", errMsg)
 		}
 	}
 	return nil
@@ -487,12 +495,11 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 			return fmt.Errorf("step %q: loop max_iterations must be >= 1", step.Name)
 		}
 
-		// A step with loop cannot have human or run inside tmux
+		// A step with loop cannot have human (the tmux-mode constraint is
+		// enforced against the resolved agent in validateAgents, which runs
+		// once all config tiers are merged).
 		if step.Human {
 			return fmt.Errorf("step %q: loop steps cannot have human: true", step.Name)
-		}
-		if !step.UsePrint(wf.Print) {
-			return fmt.Errorf("step %q: loop steps cannot run in tmux (set print: true on the step or workflow)", step.Name)
 		}
 
 		// Validate exit condition
@@ -539,43 +546,8 @@ func (wf *WorkflowConfig) ValidateSteps() error {
 				step.Name, step.SummarizationStrategy,
 				SummarizationStrategyLastMessage, SummarizationStrategySummarizeChat, SummarizationStrategyNone)
 		}
-		for _, m := range step.AllowedSummarizationModels {
-			if !ValidSummarizationModels[m] {
-				return fmt.Errorf("step %q: invalid allowed_summarization_models entry %q (must be one of %q, %q, %q)",
-					step.Name, m,
-					SummarizationModelHaiku, SummarizationModelSonnet, SummarizationModelOpus)
-			}
-		}
 	}
 	return nil
-}
-
-// UsePrint returns whether this step should execute via `claude -p` (headless).
-// Step-level setting overrides the workflow default. When false (the default), the
-// step runs inside a tmux session housing the Claude Code TUI.
-func (s *StepConfig) UsePrint(workflowDefault bool) bool {
-	if s.Print != nil {
-		return *s.Print
-	}
-	return workflowDefault
-}
-
-// UseTmux is the inverse of UsePrint: it returns whether this step runs inside a
-// tmux session. Kept as a thin helper because most call sites still care about
-// the tmux side of the decision.
-func (s *StepConfig) UseTmux(workflowDefault bool) bool {
-	return !s.UsePrint(workflowDefault)
-}
-
-// FirstStepIsTmux returns true when this workflow has at least one step and the
-// first step runs in tmux (i.e. `print` is false at both workflow and step level
-// for the first step). Tmux-first workflows may be started without a description
-// since the user drives the session interactively.
-func (wf *WorkflowConfig) FirstStepIsTmux() bool {
-	if wf == nil || len(wf.Steps) == 0 {
-		return false
-	}
-	return wf.Steps[0].UseTmux(wf.Print)
 }
 
 const (
@@ -606,31 +578,7 @@ const (
 	// DefaultSummarizationStrategy is the strategy used when StepConfig.SummarizationStrategy
 	// is left empty. See EffectiveSummarizationStrategy().
 	DefaultSummarizationStrategy = SummarizationStrategySummarizeChat
-
-	// SummarizationModelHaiku, SummarizationModelSonnet, SummarizationModelOpus
-	// are the three Claude model aliases the summarizer auto-selects from.
-	// Ordered cheapest → most capable.
-	SummarizationModelHaiku  = "haiku"
-	SummarizationModelSonnet = "sonnet"
-	SummarizationModelOpus   = "opus"
 )
-
-// DefaultAllowedSummarizationModels is the allowlist used when neither the
-// step nor the project specifies one. All three models are allowed by default;
-// the summarizer picks the cheapest one whose prompt-size ceiling fits.
-var DefaultAllowedSummarizationModels = []string{
-	SummarizationModelHaiku,
-	SummarizationModelSonnet,
-	SummarizationModelOpus,
-}
-
-// ValidSummarizationModels enumerates accepted aliases for the
-// allowed_summarization_models config field.
-var ValidSummarizationModels = map[string]bool{
-	SummarizationModelHaiku:  true,
-	SummarizationModelSonnet: true,
-	SummarizationModelOpus:   true,
-}
 
 // ValidSummarizationStrategies enumerates accepted values for StepConfig.SummarizationStrategy.
 var ValidSummarizationStrategies = map[string]bool{
@@ -650,33 +598,17 @@ func (s *StepConfig) EffectiveSummarizationStrategy() string {
 	return s.SummarizationStrategy
 }
 
-// EffectiveAllowedSummarizationModels resolves the allowlist used to pick a
-// summarization model for this step. Precedence: step-level >
-// project-level > DefaultAllowedSummarizationModels. Returns a copy so callers
-// can safely mutate.
-func (s *StepConfig) EffectiveAllowedSummarizationModels(projectDefault []string) []string {
-	src := s.AllowedSummarizationModels
-	if len(src) == 0 {
-		src = projectDefault
-	}
-	if len(src) == 0 {
-		src = DefaultAllowedSummarizationModels
-	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out
-}
-
 // GlobalConfig from ~/.config/sortie/config.yaml
 type GlobalConfig struct {
-	MaxWorkers               int                 `yaml:"max_workers"`
-	Yolo                     *bool               `yaml:"yolo,omitempty"`
-	PollInterval             string              `yaml:"poll_interval,omitempty"`
-	Claude                   *ClaudeConfig       `yaml:"claude,omitempty"`
-	Verification             *VerificationConfig `yaml:"verification,omitempty"`
-	Notifications            NotificationsConfig `yaml:"notifications"`
-	TmuxNestedAttachBehavior string              `yaml:"tmux_nested_attach_behavior"`
-	Options                  *OptionsConfig      `yaml:"options,omitempty"`
+	MaxWorkers               int                    `yaml:"max_workers"`
+	PollInterval             string                 `yaml:"poll_interval,omitempty"`
+	Verification             *VerificationConfig    `yaml:"verification,omitempty"`
+	Notifications            NotificationsConfig    `yaml:"notifications"`
+	TmuxNestedAttachBehavior string                 `yaml:"tmux_nested_attach_behavior"`
+	Options                  *OptionsConfig         `yaml:"options,omitempty"`
+	Agents                   map[string]AgentConfig `yaml:"agents,omitempty"`
+	DefaultAgent             string                 `yaml:"default_agent,omitempty"`
+	Summarizer               *SummarizerConfig      `yaml:"summarizer,omitempty"`
 }
 
 type NotificationsConfig struct {
@@ -684,21 +616,6 @@ type NotificationsConfig struct {
 	OnComplete     bool `yaml:"on_complete"`
 	OnFailed       bool `yaml:"on_failed"`
 	OnWaitingInput bool `yaml:"on_waiting_input"`
-}
-
-type ClaudeConfig struct {
-	Command     string   `yaml:"command"`
-	DefaultArgs []string `yaml:"default_args"`
-	Yolo        bool     // whether to pass --dangerously-skip-permissions
-}
-
-// Args returns the effective argument list, including --dangerously-skip-permissions if Yolo is enabled.
-func (c *ClaudeConfig) Args() []string {
-	args := append([]string{}, c.DefaultArgs...)
-	if c.Yolo {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	return args
 }
 
 // CommandsConfig is used during init for project detection
@@ -730,8 +647,16 @@ type Config struct {
 	OnCompleteFromProject bool
 	Workflows             []WorkflowConfig // flat resolved workflow list
 
-	// System prompt preamble passed via --system-prompt to Claude agents
-	SystemPrompt string
+	// Agents is the merged agent registry (global tier overlaid by the
+	// project tier, per slug). See AgentConfig and Config.StepAgent.
+	Agents map[string]AgentConfig
+
+	// DefaultAgent is the resolved top-level `default_agent:` slug (project
+	// beats global). Empty means the implicit "claude" fallback.
+	DefaultAgent string
+
+	// Summarizer is the merged utility-LLM command configuration.
+	Summarizer SummarizerConfig
 
 	// Paths to sync from project root into new worktrees
 	WorktreeSyncPaths WorktreeSyncPathsConfig
@@ -745,21 +670,12 @@ type Config struct {
 	// Command to run after creating a tmux session (e.g. layout setup)
 	TmuxSetupCommand string
 
-	// AllowedSummarizationModels is the project-level allowlist used to
-	// auto-pick a summarization model. Empty means
-	// DefaultAllowedSummarizationModels. Resolved per-step via
-	// StepConfig.EffectiveAllowedSummarizationModels(cfg.AllowedSummarizationModels).
-	AllowedSummarizationModels []string
-
 	// From global config
 	Notifications            NotificationsConfig
 	TmuxNestedAttachBehavior string // "switch" (default) or "nest"
 
 	// TUI display options (from .sortie.yml options section)
 	Options OptionsConfig
-
-	// Internal defaults (not in yaml)
-	Claude ClaudeConfig
 
 	// Whether a project config (.sortie.yml) was found
 	ProjectConfigFound bool

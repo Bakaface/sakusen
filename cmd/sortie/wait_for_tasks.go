@@ -11,7 +11,7 @@ import (
 
 // waitForTasksCmd exposes the daemon's MsgWaitForTasks RPC as a CLI command.
 // Primary use cases:
-//   - tests (the e2e suite invokes it from the stub-claude.sh harness so a
+//   - tests (the e2e suite invokes it from the stub-agent.sh harness so a
 //     fake step can record waits-on edges without speaking MCP)
 //   - power users / scripts that want to suspend an already-running parent
 //     step on a hand-picked set of children

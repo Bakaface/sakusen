@@ -29,6 +29,13 @@ import (
 // without spawning merge/summarizer subprocesses.
 func newAdvanceTestServer(t *testing.T, sortieYML string) (*Server, *db.DB, int64) {
 	t.Helper()
+
+	// Isolate config loading from the developer's real global config
+	// (~/.sortie.yml and ~/.config/sortie/config.yaml): the workflows these
+	// tests rely on must come from the project .sortie.yml written below.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	repoDir := initRecoveryTestRepo(t)
 
 	if err := os.WriteFile(filepath.Join(repoDir, ".sortie.yml"), []byte(sortieYML), 0644); err != nil {

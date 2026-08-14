@@ -1,6 +1,6 @@
 # Sortie
 
-A daemon that orchestrates Claude Code agents to work through tasks in parallel.
+A daemon that orchestrates user-configured coding agents to work through tasks in parallel.
 Each task runs in an isolated git worktree through a configurable multi-step workflow.
 
 ## Architecture
@@ -10,8 +10,10 @@ cmd/sortie/          CLI entry points (daemon, tui, task CRUD)
 internal/
   config/            .sortie.yml parsing, project type detection
   daemon/            Background daemon that schedules and runs tasks
-  workflow/          Task execution engine, system prompt injection, template resolution
-  claude/            Claude Code process spawning and output parsing
+  workflow/          Task execution engine, template resolution, step context capture
+  runner/            Generic agent command spawning: headless Process (SORTIE_PROMPT_FILE/
+                     SORTIE_RESULT_FILE contract), RunSync for the summarizer command,
+                     BuildWrapperScript for tmux wrapper scripts
   tui/               BubbleTea terminal UI for monitoring and approval
   db/                SQLite persistence for tasks and projects
   git/               Git worktree operations
@@ -32,7 +34,7 @@ claude-code-plugin/  Claude Code plugin with sortie-configurer + worktree-parity
 ## Key Concepts
 
 - **Workflow steps** are defined in `.sortie.yml` with templated prompts (`{{task.id}}`, `{{task.title}}`, etc.)
-- **`BuildSystemPrompt()`** in `internal/workflow/system-prompt.go` constructs the system prompt passed to spawned Claude agents via `--system-prompt`
+- **User-defined agents**: the top-level `agents:` map (slug → record with `mode`, `command`, `resume_command`, `chat_log_command`, `env`) declares what runs a step; workflows and steps select one via `agent: <slug>` with the cascade step → workflow → `default_agent:` → `"claude"` (`Config.StepAgent`). Execution mode (`headless` | `tmux`) lives on the agent record, not the step. The separate `summarizer:` command handles summaries and AI titles.
 - **Template resolution** (`internal/workflow/template.go`) interpolates task variables and prior step contexts into prompts
 - **Git worktrees** isolate each task so parallel agents don't conflict
 - **Tracks** (`tracks` table in the global DB) are named, hierarchical context containers; tasks attach at create time and step prompts opt in via `{{track.context}}` / `{{track.own_context}}`; track workflows live under `.sortie/tracks/<slug>/workflows/` (project) and `~/.sortie/tracks/<slug>/workflows/` (global) as hidden `<slug>:<name>` entries
@@ -46,7 +48,7 @@ All shortcuts are in `mise.toml` — prefer `mise run <task>` over raw `go` comm
 | Build everything (no install) | `go build ./...` | Compiles every package. |
 | Build the `sortie` binary | `mise run build` (alias `b`) | Installs to `~/bin/sortie`. |
 | Unit tests | `mise run test` → `go test ./...` | Excludes `integration`- and `e2e`-tagged files. |
-| Integration tests | `mise run test:integration` (alias `ti`) → `go test -tags integration ./...` | Only `internal/claude/process_test.go` is tagged today. |
+| Integration tests | `mise run test:integration` (alias `ti`) → `go test -tags integration ./...` | Only `internal/runner/process_test.go` is tagged today. |
 | End-to-end tests | `mise run test:e2e` → `go test -tags=e2e ./tests/e2e/...` | **Not picked up by `go test ./...`** — the build tag gates compilation. See [tests/e2e/README.md](tests/e2e/README.md). |
 | Lint | `mise run lint` → `go vet ./...` + `gofmt -l .` check | No `golangci-lint` is configured. |
 
@@ -55,7 +57,7 @@ All shortcuts are in `mise.toml` — prefer `mise run <task>` over raw `go` comm
 Before reporting work complete:
 
 1. **Always** run `mise run test`.
-2. If you touched `internal/claude/`, also run `mise run ti` (covers the `integration` build tag).
+2. If you touched `internal/runner/`, also run `mise run ti` (covers the `integration` build tag).
 3. If you touched `internal/workflow/`, `internal/daemon/`, `internal/merge/`, `cmd/sortie/`, or anything that affects task execution end-to-end, also run `mise run test:e2e`.
 4. Run `mise run lint` for any non-trivial code change.
 

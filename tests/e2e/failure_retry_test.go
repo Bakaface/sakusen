@@ -4,20 +4,23 @@ package e2e
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
 func failingWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 workflows:
   - name: failing
-    print: true
     steps:
       - name: implementing
         prompt: "Implement the task"
@@ -46,9 +49,12 @@ func TestStepFailureAndRetry(t *testing.T) {
 	}
 
 	// Swap to success responses: write success subdir pointer
-	// The success NDJSON is at testdata/failure_retry/success/step-implementing.ndjson
-	// We swap the stub to use the regular stub-claude.sh pointing at the success subdir.
+	// The success response is at testdata/failure_retry/success/step-implementing.txt
+	// We swap the stub to use the regular stub-agent.sh pointing at the success subdir.
+	// SwapResponses writes .current-subdir into the shared testdata dir; remove
+	// it on cleanup so it doesn't leak into other runs (or the repo).
 	e.SwapResponses("success")
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(e.ResponsesDir, ".current-subdir")) })
 
 	// Now retry with the regular stub (which will read from success/ subdir)
 	// Update .sortie.yml to use the regular stub
@@ -56,7 +62,7 @@ func TestStepFailureAndRetry(t *testing.T) {
 
 	// Also update E2E_RESPONSES_DIR to point at failure_retry (SwapResponses handles subdir)
 	// E2E_RESPONSES_DIR is already failure_retry — SwapResponses wrote "success" as .current-subdir
-	// So stub will look at failure_retry/success/step-implementing.ndjson
+	// So stub will look at failure_retry/success/step-implementing.txt
 
 	e.MustSortie("retry", "1")
 

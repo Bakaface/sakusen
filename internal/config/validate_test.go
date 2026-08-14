@@ -162,9 +162,9 @@ workflows:
 }
 
 func TestValidateFile_LegacyWorkflowTmuxFieldFails(t *testing.T) {
-	// The legacy `tmux:` field at the workflow level was removed in favour of
-	// the inverted `print:` field; loading an old config should surface a clear
-	// migration error rather than silently dropping the setting.
+	// The legacy `tmux:` field at the workflow level was removed — execution
+	// mode now comes from the agent record; loading an old config should
+	// surface a clear migration error rather than silently dropping the setting.
 	path := writeTempConfig(t, `
 workflows:
   - name: w
@@ -174,8 +174,8 @@ workflows:
         prompt: "do"
 `)
 	err := ValidateFile(path)
-	if err == nil || !strings.Contains(err.Error(), "tmux") || !strings.Contains(err.Error(), "print") {
-		t.Fatalf("expected migration error mentioning tmux and print, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "tmux") || !strings.Contains(err.Error(), "agent") {
+		t.Fatalf("expected migration error mentioning tmux and the agent replacement, got: %v", err)
 	}
 }
 
@@ -191,8 +191,132 @@ workflows:
         tmux: false
 `)
 	err := ValidateFile(path)
-	if err == nil || !strings.Contains(err.Error(), "tmux") || !strings.Contains(err.Error(), "print") {
-		t.Fatalf("expected migration error mentioning tmux and print, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "tmux") || !strings.Contains(err.Error(), "agent") {
+		t.Fatalf("expected migration error mentioning tmux and the agent replacement, got: %v", err)
+	}
+}
+
+func TestValidateFile_LegacyPrintFieldFails(t *testing.T) {
+	// The `print:` field (workflow and step level) was removed; both levels
+	// must surface the agent-mechanism migration error.
+	t.Run("workflow level", func(t *testing.T) {
+		path := writeTempConfig(t, `
+workflows:
+  - name: w
+    print: true
+    steps:
+      - name: s
+        prompt: "do"
+`)
+		err := ValidateFile(path)
+		if err == nil || !strings.Contains(err.Error(), "print") || !strings.Contains(err.Error(), "agent") {
+			t.Fatalf("expected migration error mentioning print and agent, got: %v", err)
+		}
+	})
+
+	t.Run("step level", func(t *testing.T) {
+		path := writeTempConfig(t, `
+workflows:
+  - name: w
+    steps:
+      - name: s
+        prompt: "do"
+        print: true
+`)
+		err := ValidateFile(path)
+		if err == nil || !strings.Contains(err.Error(), "print") || !strings.Contains(err.Error(), "agent") {
+			t.Fatalf("expected migration error mentioning print and agent, got: %v", err)
+		}
+	})
+}
+
+// TestValidateFile_RemovedTopLevelKeys verifies the removed top-level keys are
+// caught by single-file validation with their migration messages, before the
+// strict decoder can turn them into generic "field not found" errors.
+func TestValidateFile_RemovedTopLevelKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"claude block", "claude:\n  command: /tmp/foo\n", "`claude:` block was removed"},
+		{"yolo", "yolo: true\n", "`yolo:` was removed"},
+		{"system_prompt", "system_prompt: \"be terse\"\n", "`system_prompt:` was removed"},
+		{"allowed_summarization_models", "allowed_summarization_models: [haiku]\n", "`allowed_summarization_models` was removed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, tt.yaml)
+			err := ValidateFile(path)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected migration error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateFile_StepAllowedSummarizationModelsRemoved verifies the removed
+// step-level `allowed_summarization_models:` field errors with a pointer at
+// the top-level summarizer command.
+func TestValidateFile_StepAllowedSummarizationModelsRemoved(t *testing.T) {
+	path := writeTempConfig(t, `
+workflows:
+  - name: w
+    steps:
+      - name: s
+        prompt: "do"
+        allowed_summarization_models: [haiku]
+`)
+	err := ValidateFile(path)
+	if err == nil || !strings.Contains(err.Error(), "allowed_summarization_models") || !strings.Contains(err.Error(), "summarizer") {
+		t.Fatalf("expected migration error pointing at `summarizer:`, got: %v", err)
+	}
+}
+
+// TestValidateFile_AgentRecordShapeChecked verifies single-file diagnosis
+// validates agent record shapes (mode, command, tmux-only fields, slug).
+func TestValidateFile_AgentRecordShapeChecked(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"invalid mode", "agents:\n  a:\n    mode: quantum\n    command: x\n", "invalid mode"},
+		{"missing command", "agents:\n  a:\n    mode: tmux\n", "command is required"},
+		{"resume_command on headless", "agents:\n  a:\n    command: x\n    resume_command: y\n", "resume_command is only valid for tmux-mode agents"},
+		{"chat_log_command on headless", "agents:\n  a:\n    command: x\n    chat_log_command: y\n", "chat_log_command is only valid for tmux-mode agents"},
+		{"invalid slug", "agents:\n  Bad_Slug:\n    command: x\n", "kebab-case"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, tt.yaml)
+			err := ValidateFile(path)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateFile_AgentRefsNotResolved verifies single-file diagnosis does
+// NOT resolve agent references (default_agent, workflow/step agent:) — they may
+// point at agents defined in the global tier, which only the full Load path
+// merges and validates.
+func TestValidateFile_AgentRefsNotResolved(t *testing.T) {
+	path := writeTempConfig(t, `
+default_agent: defined-elsewhere
+workflows:
+  - name: w
+    agent: also-elsewhere
+    steps:
+      - name: s
+        prompt: "do"
+        agent: elsewhere-too
+`)
+	if err := ValidateFile(path); err != nil {
+		t.Fatalf("agent refs must not be resolved by single-file validation, got: %v", err)
 	}
 }
 

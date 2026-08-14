@@ -9,15 +9,17 @@ import (
 )
 
 func threeStepWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 on_complete: merge
 workflows:
   - name: plan-impl-review
-    print: true
     steps:
       - name: planning
         prompt: "Plan the task"

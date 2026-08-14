@@ -4,7 +4,7 @@
 # First invocation (parent's initial run of the spawn step):
 #   1. Read the child project path and the child workflow specs from files the
 #      test dropped in $HOME (see Env.WriteHookFile — HOME is the per-test
-#      XDG dir and the daemon passes os.Environ() to the claude process, so
+#      XDG dir and the daemon passes os.Environ() to the agent process, so
 #      this is the only channel that reaches an already-started daemon).
 #   2. cd into the CHILD project (sortie resolves the project from cwd) and
 #      create one child task per spec line.

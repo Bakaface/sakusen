@@ -24,7 +24,7 @@ type CreateTaskArgs struct {
 	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override (defaults to git.base_branch from .sortie.yml)."`
 	CheckoutBranch string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one. Mutually exclusive with branch_name."`
 	Worktree       *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree. Defaults to the project's preference (usually true)."`
-	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive Claude session in tmux."`
+	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this task runs."`
 	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). The track's context becomes available to step prompts via {{track.context}}. For create_tasks_and_wait children: empty inherits the parent task's track; pass 'none' to explicitly detach."`

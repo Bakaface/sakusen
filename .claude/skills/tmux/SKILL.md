@@ -54,18 +54,21 @@ KillSessionsForTask(projectName, taskID string) error      // Kill all sessions 
 ```go
 // SetupVars holds template variables for tmux setup command interpolation.
 type SetupVars struct {
-    ClaudeCommand string  // full claude CLI invocation
-    RunAgent      string  // path to wrapper script that runs Claude agent TUI
+    AgentCommand string  // raw agent shell command from the agent record
+    RunAgent     string  // path to the wrapper script that runs the agent with the SORTIE_* env exported (prefer this)
 }
 
-// Returns true if setup command contains {{run_agent}} or {{claude_command}},
+// Returns true if setup command contains {{run_agent}} or {{agent_command}},
 // meaning the user controls where the agent runs.
 SetupCommandControlsAgent(command string) bool
 
 // Runs a user-configured command after tmux session creation.
-// Template variables: {{session_name}}, {{worktree_path}}, {{claude_command}}, {{run_agent}}.
+// Template variables: {{session_name}}, {{worktree_path}}, {{agent_command}}, {{run_agent}}.
 (s *Session) RunSetupCommand(command string, vars *SetupVars) error
 ```
+
+`{{claude_command}}` was renamed `{{agent_command}}`; the old variable in a
+`tmux-setup-command` is rejected at config load with a migration error.
 
 ## Interaction
 

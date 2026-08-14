@@ -11,6 +11,7 @@ import (
 
 	"github.com/Bakaface/sortie/internal/config"
 	"github.com/Bakaface/sortie/internal/db"
+	"github.com/Bakaface/sortie/internal/runner"
 	"github.com/Bakaface/sortie/internal/task"
 )
 
@@ -30,6 +31,78 @@ func setupServerWithProject(t *testing.T) (*Server, int64) {
 	cfg := &config.Config{}
 	s := NewServer(cfg, database)
 	return s, proj.ID
+}
+
+// TestTruncateTitleInput verifies the no-summarizer fallback title source:
+// only the input's first line is kept, surrounding whitespace is trimmed, and
+// lines longer than 80 bytes are clipped (with a re-trim so a clip landing on
+// a space doesn't leave a trailing one).
+//
+// Multi-byte inputs whose 80th byte falls mid-rune are deliberately NOT
+// covered: truncateTitleInput byte-slices with line[:80], which can split a
+// rune and return invalid UTF-8 — that is a bug to fix in production code,
+// not a behavior to pin down here.
+func TestTruncateTitleInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "whitespace-only input",
+			input: "   \n\t  ",
+			want:  "",
+		},
+		{
+			name:  "short input unchanged",
+			input: "fix the login bug",
+			want:  "fix the login bug",
+		},
+		{
+			name:  "exactly 80 chars unchanged",
+			input: strings.Repeat("a", 80),
+			want:  strings.Repeat("a", 80),
+		},
+		{
+			name:  "multi-line input keeps first line only",
+			input: "fix the login bug\nwith more detail\nand even more",
+			want:  "fix the login bug",
+		},
+		{
+			name:  "first line is trimmed",
+			input: "  fix the login bug  \nsecond line",
+			want:  "fix the login bug",
+		},
+		{
+			name:  "long line clipped to 80 bytes",
+			input: strings.Repeat("x", 100),
+			want:  strings.Repeat("x", 80),
+		},
+		{
+			name:  "clip landing on a space is re-trimmed",
+			input: strings.Repeat("y", 79) + " tail words",
+			want:  strings.Repeat("y", 79),
+		},
+		{
+			name:  "leading whitespace before a newline-only remainder",
+			input: "\n\nactual input on a later line",
+			want:  "actual input on a later line",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateTitleInput(tt.input)
+			if got != tt.want {
+				t.Errorf("truncateTitleInput(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestValidateTaskRefs_NoRefs(t *testing.T) {
@@ -629,4 +702,24 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			t.Errorf("persisted project DefaultWorktree: got true, want false (pin-derived worktree must not leak into project defaults)")
 		}
 	})
+}
+
+// TestNoiseFiles pins both halves of the noise-file list: the runner's raw
+// capture file .sortie-output.log is noise when deciding whether a task
+// produced meaningful output, and CLAUDE.md is NOT — sortie never writes one
+// into worktrees, so a CLAUDE.md edit is real agent work that must not be
+// fast-tracked away.
+func TestNoiseFiles(t *testing.T) {
+	want := []string{runner.OutputLogFileName}
+	if len(noiseFiles) != len(want) || noiseFiles[0] != ".sortie-output.log" {
+		t.Errorf("noiseFiles = %v, want %v (.sortie-output.log only)", noiseFiles, want)
+	}
+	for _, f := range noiseFiles {
+		if f == "CLAUDE.md" {
+			t.Error("CLAUDE.md must not be a noise file: real CLAUDE.md edits would be fast-tracked away")
+		}
+		if f == ".claude-output.log" {
+			t.Error("stale pre-rename noise entry .claude-output.log present")
+		}
+	}
 }

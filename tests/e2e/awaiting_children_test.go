@@ -22,22 +22,21 @@ import (
 // We use on_complete: commit (not merge) so finalization is single-step and we
 // don't need to coordinate per-task branch names across the bundle.
 func awaitChildrenWorkflowYAML(stubPath string) string {
-	return fmt.Sprintf(`claude:
-  command: %s
-poll_interval: 100ms
+	return fmt.Sprintf(`default_agent: stub
 agents:
-  max_concurrent: 5
+  stub:
+    mode: headless
+    command: "%s"
+poll_interval: 100ms
 git:
   base_branch: main
 on_complete: commit
 workflows:
   - name: parent
-    print: true
     steps:
       - name: spawn
         prompt: "Spawn 2 children and wait for them; on resume read {{children.summary}}"
   - name: child
-    print: true
     steps:
       - name: do-work
         prompt: "Do the work for child task #{{task.id}}"

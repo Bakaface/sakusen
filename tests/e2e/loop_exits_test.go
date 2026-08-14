@@ -34,15 +34,17 @@ func TestLoopExitsOnEmptyContext(t *testing.T) {
 
 	counterScript := filepath.Join(repoRoot, "tests", "e2e", "testdata", "loop_exits", "counter.sh")
 
-	yaml := fmt.Sprintf(`claude:
-  command: %s
+	yaml := fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
 poll_interval: 100ms
 git:
   base_branch: main
 on_complete: merge
 workflows:
   - name: looping
-    print: true
     steps:
       - name: implementing
         prompt: "Do the work"

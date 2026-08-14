@@ -34,20 +34,20 @@ func (s *Server) handleListWorkflows(conn net.Conn, req ListWorkflowsRequest) {
 	resp := ListWorkflowsResponse{
 		ProjectPath: proj.Path,
 		ProjectName: pc.cfg.Project.Name,
-		Workflows:   summarizeWorkflows(pc.cfg.Workflows),
+		Workflows:   summarizeWorkflows(pc.cfg, pc.cfg.Workflows),
 	}
 
 	// If no workflows are configured, expose the built-in default so the MCP
 	// caller sees the same surface as `sortie create -w default`.
 	if len(resp.Workflows) == 0 {
 		def := config.DefaultWorkflow()
-		resp.Workflows = summarizeWorkflows([]config.WorkflowConfig{def})
+		resp.Workflows = summarizeWorkflows(pc.cfg, []config.WorkflowConfig{def})
 	}
 
 	s.sendMessage(conn, MsgListWorkflows, resp)
 }
 
-func summarizeWorkflows(workflows []config.WorkflowConfig) []WorkflowSummary {
+func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) []WorkflowSummary {
 	out := make([]WorkflowSummary, 0, len(workflows))
 	for i := range workflows {
 		wf := &workflows[i]
@@ -60,18 +60,20 @@ func summarizeWorkflows(workflows []config.WorkflowConfig) []WorkflowSummary {
 			Checkout:        wf.Checkout,
 			Target:          wf.Target,
 			FullySpec:       wf.IsFullySpec(),
-			Print:           wf.Print,
-			FirstStepIsTmux: wf.FirstStepIsTmux(),
+			Agent:           wf.Agent,
+			FirstStepIsTmux: cfg.FirstStepIsTmux(wf),
 			Hidden:          wf.Hidden,
 			Source:          wf.Source,
 			Steps:           make([]WorkflowStepSummary, 0, len(wf.Steps)),
 		}
-		for _, step := range wf.Steps {
+		for j := range wf.Steps {
+			step := &wf.Steps[j]
 			summary.Steps = append(summary.Steps, WorkflowStepSummary{
 				Name:        step.Name,
 				Description: step.Description,
 				Mode:        step.Mode,
-				Tmux:        step.UseTmux(wf.Print),
+				Agent:       cfg.StepAgentSlug(wf, step),
+				Tmux:        cfg.StepIsTmux(wf, step),
 				Human:       step.Human,
 				Loop:        step.Loop != nil,
 			})

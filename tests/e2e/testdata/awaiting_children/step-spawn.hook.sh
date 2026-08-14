@@ -76,7 +76,7 @@ if [[ -z "$CHILD2_ID" ]]; then
 fi
 
 # Register waits-on edges. SORTIE_TASK_ID is set by the engine for the spawn
-# step's Claude subprocess; we use --use-env to pick it up.
+# step's subprocess; we use --use-env to pick it up.
 "$SORTIE_BIN" wait-for-tasks --use-env "$CHILD1_ID" "$CHILD2_ID" >/dev/null
 
 # Mark spawn done so the resume run does NOT spawn again.

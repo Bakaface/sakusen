@@ -1,2 +1,0 @@
-{"type":"system","subtype":"init","session_id":"e2e-session-spawn"}
-{"type":"result","result":"Spawned children and recorded waits-on edges.","duration_ms":42,"total_cost_usd":0.0001}

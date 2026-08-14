@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +17,6 @@ import (
 type fakeAgentResult struct {
 	exitCode   int
 	resultText string
-	sessionID  string
 	outputTail string
 	err        error
 }
@@ -25,10 +26,10 @@ type fakeAgentResult struct {
 // runner (e.g. that a later step's resolved prompt contains an earlier
 // step's captured context).
 type fakeAgentCall struct {
-	stepName     string
-	prompt       string
-	systemPrompt string
-	env          map[string]string
+	stepName string
+	prompt   string
+	agent    config.AgentConfig
+	env      map[string]string
 }
 
 // fakeAgentRunner is the AGENT-RUNNER seam's test double (see agentRunner in
@@ -56,27 +57,23 @@ func (f *fakeAgentRunner) script(stepName string, r fakeAgentResult) {
 	f.results[stepName] = append(f.results[stepName], r)
 }
 
-func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, prompt string, envVars map[string]string, outputFn func([]string), systemPrompt ...string) (int, string, string, string, error) {
+func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	sp := ""
-	if len(systemPrompt) > 0 {
-		sp = systemPrompt[0]
-	}
 	envCopy := make(map[string]string, len(envVars))
 	for k, v := range envVars {
 		envCopy[k] = v
 	}
-	f.calls = append(f.calls, fakeAgentCall{stepName: step.Name, prompt: prompt, systemPrompt: sp, env: envCopy})
+	f.calls = append(f.calls, fakeAgentCall{stepName: step.Name, prompt: prompt, agent: agent, env: envCopy})
 
 	queue := f.results[step.Name]
 	if len(queue) == 0 {
-		return 0, "ok", "", "", nil
+		return 0, "ok", "", nil
 	}
 	res := queue[0]
 	f.results[step.Name] = queue[1:]
-	return res.exitCode, res.resultText, res.sessionID, res.outputTail, res.err
+	return res.exitCode, res.resultText, res.outputTail, res.err
 }
 
 // callsFor returns the recorded calls for stepName, in invocation order.
@@ -122,6 +119,11 @@ func newFakeRunnerTestEngine(t *testing.T, wf config.WorkflowConfig) (*Engine, *
 	cfg := &config.Config{
 		OnComplete: "none",
 		Workflows:  []config.WorkflowConfig{wf},
+		// The implicit "claude" fallback agent must resolve (headless) so
+		// runStep routes through the agentRunner seam instead of failing with
+		// "no agent configured". The command is never spawned — the fake
+		// runner intercepts the call.
+		Agents: map[string]config.AgentConfig{"claude": {Command: "true"}},
 	}
 	engine := NewEngine(cfg, database, nil, dir)
 
@@ -138,8 +140,7 @@ func newFakeRunnerTestEngine(t *testing.T, wf config.WorkflowConfig) (*Engine, *
 // store. Previously only tests/e2e exercised this multi-step flow.
 func TestRunTaskFakeRunner_MultiStepHappyPath(t *testing.T) {
 	wf := config.WorkflowConfig{
-		Name:  "default",
-		Print: true, // headless: routes through the agentRunner seam, not tmux
+		Name: "default", // resolves to the headless "claude" agent: routes through the agentRunner seam, not tmux
 		Steps: []config.StepConfig{
 			{Name: "implement", Prompt: "implement the thing"},
 			{Name: "review", Prompt: "review this: {{steps.implement.context}}"},
@@ -147,8 +148,8 @@ func TestRunTaskFakeRunner_MultiStepHappyPath(t *testing.T) {
 	}
 	engine, tk, runner, database := newFakeRunnerTestEngine(t, wf)
 
-	runner.script("implement", fakeAgentResult{exitCode: 0, resultText: "IMPLEMENTATION SUMMARY", sessionID: "sess-implement"})
-	runner.script("review", fakeAgentResult{exitCode: 0, resultText: "REVIEW SUMMARY", sessionID: "sess-review"})
+	runner.script("implement", fakeAgentResult{exitCode: 0, resultText: "IMPLEMENTATION SUMMARY"})
+	runner.script("review", fakeAgentResult{exitCode: 0, resultText: "REVIEW SUMMARY"})
 
 	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
 		t.Fatalf("RunTask failed: %v", err)
@@ -208,8 +209,7 @@ func TestRunTaskFakeRunner_MultiStepHappyPath(t *testing.T) {
 // without running any further steps.
 func TestRunTaskFakeRunner_FailedStepFailsTask(t *testing.T) {
 	wf := config.WorkflowConfig{
-		Name:  "default",
-		Print: true,
+		Name: "default",
 		Steps: []config.StepConfig{
 			{Name: "implement", Prompt: "implement the thing"},
 			{Name: "review", Prompt: "review the thing"},
@@ -249,8 +249,7 @@ func TestRunTaskFakeRunner_FailedStepFailsTask(t *testing.T) {
 // counter reset, no further looping) instead of pausing or failing.
 func TestRunTaskFakeRunner_LoopExitsAtMaxIterations(t *testing.T) {
 	wf := config.WorkflowConfig{
-		Name:  "default",
-		Print: true,
+		Name: "default",
 		Steps: []config.StepConfig{
 			{Name: "plan", Prompt: "plan iteration {{loop.iteration}}"},
 			{
@@ -313,5 +312,126 @@ func TestRunTaskFakeRunner_LoopExitsAtMaxIterations(t *testing.T) {
 	}
 	if workCtx != "work v2" {
 		t.Errorf("work step context = %q, want %q (the final iteration's value)", workCtx, "work v2")
+	}
+}
+
+// TestRunTaskFakeRunner_UnresolvableAgentFailsStep verifies the engine-level
+// agent-resolution failure path (runStep, engine.go): a step whose `agent:`
+// slug has no record fails the step with an instructive error BEFORE anything
+// is spawned. An in-memory Config literal skips load-time validation, so the
+// unresolvable slug is only caught here.
+func TestRunTaskFakeRunner_UnresolvableAgentFailsStep(t *testing.T) {
+	wf := config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{
+			{Name: "implement", Prompt: "implement the thing", Agent: "no-such-agent"},
+		},
+	}
+	engine, tk, runner, database := newFakeRunnerTestEngine(t, wf)
+
+	err := engine.RunTask(context.Background(), tk, nil)
+	if err == nil {
+		t.Fatal("expected RunTask to fail for an unresolvable step agent")
+	}
+	if !strings.Contains(err.Error(), `step "implement" failed`) {
+		t.Errorf("error = %q, expected it to name the failing step", err.Error())
+	}
+	if !strings.Contains(err.Error(), `no agent "no-such-agent" configured`) {
+		t.Errorf("error = %q, expected the instructive no-agent message", err.Error())
+	}
+
+	// The failure happens before the spawn: the fake runner must never be called.
+	if calls := runner.callsFor("implement"); len(calls) != 0 {
+		t.Errorf("expected the runner never to be called, got %d calls", len(calls))
+	}
+
+	refreshed, err := database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if refreshed.ExitCode == nil || *refreshed.ExitCode != 1 {
+		t.Errorf("persisted ExitCode = %v, want 1", refreshed.ExitCode)
+	}
+	if !strings.Contains(refreshed.ErrorMessage, `no agent "no-such-agent" configured`) {
+		t.Errorf("persisted ErrorMessage = %q, expected the no-agent message", refreshed.ErrorMessage)
+	}
+}
+
+// TestRunTaskFakeRunner_AgentEnvAndRecord verifies that runStep hands the
+// runner the RESOLVED agent record and exports the resolved slug as
+// SORTIE_AGENT: a step-level `agent:` override wins over the workflow default,
+// and a step without one falls back to the implicit "claude" record.
+func TestRunTaskFakeRunner_AgentEnvAndRecord(t *testing.T) {
+	wf := config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{
+			{Name: "implement", Prompt: "implement the thing"},
+			{Name: "review", Prompt: "review the thing", Agent: "alt"},
+		},
+	}
+	engine, tk, runner, _ := newFakeRunnerTestEngine(t, wf)
+	// newFakeRunnerTestEngine only injects the "claude" record; add the
+	// override target to the shared registry.
+	engine.cfg.full.Agents["alt"] = config.AgentConfig{Command: "alt-agent-cmd"}
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	implCalls := runner.callsFor("implement")
+	if len(implCalls) != 1 {
+		t.Fatalf("expected 1 implement call, got %d", len(implCalls))
+	}
+	if got := implCalls[0].env["SORTIE_AGENT"]; got != "claude" {
+		t.Errorf("implement SORTIE_AGENT = %q, want %q (the implicit default)", got, "claude")
+	}
+	if got := implCalls[0].agent.Command; got != "true" {
+		t.Errorf("implement resolved agent command = %q, want %q", got, "true")
+	}
+
+	reviewCalls := runner.callsFor("review")
+	if len(reviewCalls) != 1 {
+		t.Fatalf("expected 1 review call, got %d", len(reviewCalls))
+	}
+	if got := reviewCalls[0].env["SORTIE_AGENT"]; got != "alt" {
+		t.Errorf("review SORTIE_AGENT = %q, want %q (the step-level override)", got, "alt")
+	}
+	if got := reviewCalls[0].agent.Command; got != "alt-agent-cmd" {
+		t.Errorf("review resolved agent command = %q, want %q", got, "alt-agent-cmd")
+	}
+}
+
+// TestRunTaskFakeRunner_AttachedImagesAppendedToPrompt verifies that attached
+// images surface as an "## Attached Images" section appended to the step
+// prompt itself — the prompt is the only agent-agnostic channel to point an
+// agent at them.
+func TestRunTaskFakeRunner_AttachedImagesAppendedToPrompt(t *testing.T) {
+	wf := config.WorkflowConfig{
+		Name:  "default",
+		Steps: []config.StepConfig{{Name: "implement", Prompt: "implement the thing"}},
+	}
+	engine, tk, runner, _ := newFakeRunnerTestEngine(t, wf)
+
+	img := filepath.Join(t.TempDir(), "screenshot.png")
+	if err := os.WriteFile(img, []byte("fake png data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tk.Images = []string{img}
+
+	runner.script("implement", fakeAgentResult{exitCode: 0, resultText: "done"})
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	calls := runner.callsFor("implement")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	prompt := calls[0].prompt
+	if !strings.Contains(prompt, "## Attached Images") {
+		t.Errorf("expected prompt to contain the Attached Images section, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "screenshot.png") {
+		t.Errorf("expected prompt to reference the copied image, got:\n%s", prompt)
 	}
 }

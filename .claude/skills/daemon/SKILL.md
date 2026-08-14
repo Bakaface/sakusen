@@ -53,6 +53,7 @@ type Server struct {
 | `handlers_task.go` | Task CRUD & metadata: create, get, list, delete, retry, update priority/field/dependency, revert, step contexts, title generation |
 | `handlers_agent.go` | Agent ops, subscriptions, logs: list/start/stop agents, get output, subscribe/unsubscribe, get logs |
 | `handlers_continue.go` | Continuation flow: continue/finalize tasks, worktree/branch management, tmux setup, detach/attach branch |
+| `agent_spawn.go` | `spawnInteractiveSession(pc, t, interactiveSpawnOpts)` — shared ad-hoc tmux session spawn (continue fallback, tmux_direct, restart restore); `interactiveAgent(cfg)` resolves the tmux-mode agent record (default agent if tmux, else the `"claude-tmux"` slug, else error) |
 | `handlers_workflows.go` | `list_workflows` handler — projects → flat workflow listing |
 | `handlers_tracks.go` | Track ops: create/get/list tracks, set track context (CLI), own-track-only context write (MCP), `resolveTrackRef`, `trackToInfo` |
 | `tmux_monitor.go` | Background tmux activity monitoring loop, broadcasts activity changes to subscribers |
@@ -113,7 +114,7 @@ type TaskInfo struct {
 ## Handler Patterns
 
 - Handlers receive `(conn, payload)`, respond via `sendMessage()` or `sendError()`
-- `handleCreateTask`: creates task + async AI title refinement (haiku model, 30s timeout). For non-worktree tasks, branch resolution is skipped.
+- `handleCreateTask`: creates task + async AI title refinement via the configured `summarizer:` command (`runner.RunSync`, `SORTIE_PURPOSE=title`, 30s timeout); with no summarizer configured it falls back to a sanitized truncated input as title (no error). For non-worktree tasks, branch resolution is skipped.
 - `handleContinueTask`: complex — resumes approval/tmux, or creates tmux for terminal tasks. Non-worktree tasks use project root as `WorktreePath`.
 - `handleAdvanceTask`: resumes the engine when more workflow steps remain; on the last step fast-tracks if no changes (worktree only), otherwise runs async summarizer (StatusSummarizing) + on_complete. Non-worktree tasks skip the fast-track check.
 

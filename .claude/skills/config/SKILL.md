@@ -27,25 +27,28 @@ LoadForProject(projectDir string) (*Config, error)  // From specific path
 
 ```go
 type ProjectConfig struct {
-    MaxWorkers                 int
-    DefaultPriority            string
-    Yolo                       *bool                   // Skip Claude permissions (pointer for merge)
-    PollInterval               string                  // Daemon task poll cadence (e.g. "2s")
-    Claude                     *ClaudeConfig           // Per-project claude binary / default args
-    Verification               *VerificationConfig
-    Git                        GitConfig               // BaseBranch, BranchTemplate, OnComplete
-    Workflows                  []WorkflowEntry         `yaml:"workflows"` // flat list (string ref or inline)
-    SystemPrompt               string
-    WorktreeSyncPaths          WorktreeSyncPathsConfig // Paths to copy/link into worktrees
-    WorktreeSetupCommand       string                  // Single setup command (legacy)
-    WorktreeSetupCommands      []string                // Ordered list of setup commands
-    TmuxSetupCommand           string                  // Command to run after tmux session creation
-    Notifications              *NotificationsConfig
-    TmuxNestedAttachBehavior   string                  // "switch" (default) or "nest"
-    Options                    *OptionsConfig          // TUI display options
-    AllowedSummarizationModels []string                // Allowlist of haiku/sonnet/opus for the summarizer
+    MaxWorkers               int
+    DefaultPriority          string
+    PollInterval             string                  // Daemon task poll cadence (e.g. "2s")
+    Verification             *VerificationConfig
+    Git                      GitConfig               // BaseBranch, BranchTemplate
+    Agents                   map[string]AgentConfig  // Project-tier agent registry (slug → record)
+    DefaultAgent             string                  // Fallback agent slug; empty → "claude"
+    Summarizer               *SummarizerConfig       // Utility LLM command (summaries, titles)
+    OnComplete               string                  // Top-level finalization action (moved out of git:)
+    Workflows                []WorkflowEntry         `yaml:"workflows"` // flat list (string ref or inline)
+    WorktreeSyncPaths        WorktreeSyncPathsConfig // Paths to copy/link into worktrees
+    WorktreeSetupCommand     string                  // Single setup command (legacy)
+    WorktreeSetupCommands    []string                // Ordered list of setup commands
+    TmuxSetupCommand         string                  // Command to run after tmux session creation
+    Notifications            *NotificationsConfig
+    TmuxNestedAttachBehavior string                  // "switch" (default) or "nest"
+    Options                  *OptionsConfig          // TUI display options
 }
 ```
+
+Removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`) are hard
+load-time migration errors surfaced by `checkRemovedProjectKeys` (agents.go) on the raw YAML.
 
 `WorkflowEntry` is a single item in the flat `workflows:` list — exactly one of `Ref` (string) or `Inline` (`*WorkflowConfig`) is set. String entries resolve to `.sortie/workflows/<name>.yml` (local first, then global pool).
 
@@ -83,7 +86,8 @@ type WorkflowConfig struct {
     Branch                string                  // pins a new-branch template (forces branch-mode "new")
     Checkout              string                  // pins an existing branch to check out (forces branch-mode "existing")
     Target                string                  // pins the target/base branch
-    Print                 bool                    // workflow-level default: true = headless `claude -p`, false = tmux. Step-level Print overrides.
+    Agent                 string                  // workflow-level agent slug; steps inherit unless they set their own
+    OnComplete            string                  // per-workflow override of the finalization action
     Steps                 []StepConfig
     SummarizerPrompt      string
     WorktreeSyncPaths     WorktreeSyncPathsConfig // Per-workflow sync paths (override project-level)
@@ -94,30 +98,62 @@ type WorkflowConfig struct {
     // Populated by the loader, not from YAML:
     Hidden                bool                    // file-based workflow not referenced from .sortie.yml
     Source                string                  // "inline" or path under .sortie/workflows/
+    FromGlobal            bool                    // definition adopted from the global scope
 }
 ```
 
 Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped — note `description` is metadata and does NOT gate skip); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false).
 
-The legacy `tmux:` field is rejected at parse time with a migration error — the replacement is the inverted `Print` field.
+The removed `tmux:` and `print:` fields are rejected at parse time (workflow and step level) with migration errors — execution mode now comes from the resolved agent record's `mode` (see the Agents section below).
 
 ### GlobalConfig (~/.config/sortie/config.yaml)
 
 ```go
 type GlobalConfig struct {
     MaxWorkers               int
-    Yolo                     *bool
     PollInterval             string
-    Claude                   *ClaudeConfig
     Verification             *VerificationConfig
     Notifications            NotificationsConfig
     TmuxNestedAttachBehavior string
     Options                  *OptionsConfig
+    Agents                   map[string]AgentConfig
+    DefaultAgent             string
+    Summarizer               *SummarizerConfig
 }
 ```
 
-The merged runtime `Config` (in `config.go`) flattens project + global settings and also holds
-`AllowedSummarizationModels`, `SystemPrompt`, and the resolved `WorktreeSyncPaths`.
+The merged runtime `Config` (in `types.go`) flattens project + global settings and also holds
+the merged `Agents` registry, `DefaultAgent`, `Summarizer`, and the resolved `WorktreeSyncPaths`.
+
+### Agents (agents.go)
+
+```go
+type AgentConfig struct {
+    Mode           string            // "headless" (default when empty) or "tmux"
+    Command        string            // required; run via `sh -c` in the task workdir
+    ResumeCommand  string            // tmux-only: resume with SORTIE_SESSION_ID after daemon restart
+    ChatLogCommand string            // tmux-only: prints the chat log on stdout for summarize_chat
+    Env            map[string]string // extra env for every spawn of this agent
+}
+
+type SummarizerConfig struct {
+    Command        string // prompt on stdin, response on stdout; SORTIE_PURPOSE tags the call site
+    MaxPromptBytes int    // >0 → map-reduce chunking ceiling; 0 disables chunking
+}
+```
+
+Resolution cascade (`Config.StepAgent(wf, &step)`): `step.agent` → `workflow.agent` →
+top-level `default_agent:` → `"claude"` (`DefaultAgentSlug`). Helpers: `StepAgentSlug`,
+`WorkflowAgentSlug`, `StepIsTmux`, `FirstStepIsTmux`, `ResolveAgent`,
+`EffectiveDefaultAgentSlug`. The agent's mode decides headless vs tmux execution.
+
+Merging: `mergeAgents` overlays project-tier records onto global-tier per slug (a redefined
+slug wins wholesale). `validateAgents` runs in `Load()`/`LoadForProject()` AFTER all tiers
+merge: record shape (kebab-case slug, required command, valid mode, tmux-only fields),
+explicit `agent:`/`default_agent:` refs must resolve (the implicit `"claude"` fallback is
+exempt — it fails at step-run time with an instructive error), loop steps must not resolve to
+tmux agents, and `{{claude_command}}` in any tmux-setup-command is rejected (use
+`{{agent_command}}` / `{{run_agent}}`).
 
 ### VerificationConfig
 
@@ -157,19 +193,21 @@ Per-track workflow files live under `.sortie/tracks/<slug>/workflows/*.yml` (pro
 type StepConfig struct {
     Name, Prompt, Mode    string
     Description           string         // human-readable step metadata (surfaced via MCP); never interpolated
-    Print                 *bool          // Override workflow-level Print; nil = inherit
+    Agent                 string         // agent slug override; empty = inherit workflow/default
     Timeout               string         // Parsed duration, default 30m (DefaultStepTimeout)
     Human                 bool           // Approval gate
     Loop                  *LoopConfig    // Optional retry loop
     SummarizationStrategy string         // Strategy for summarizing step output
+    SummarizationPrompt   string         // Custom summarize_chat prompt ({{chat}} placeholder)
+    RequireContext        bool           // Fail the task when summarize_chat context capture fails
 }
 ```
 
-**Summarization strategies**: `summarize_chat` (default when unset) runs a haiku pass over the full chat log; `last_message` uses the Claude result event text — cheaper but often misleading and unusable for tmux steps (which have no result event). The default is resolved via `StepConfig.EffectiveSummarizationStrategy()` and lives in `DefaultSummarizationStrategy`. Validated at config load via `ValidateSteps()`.
+**Summarization strategies**: `summarize_chat` (default when unset) runs the configured `summarizer:` command over the full chat log; `last_message` keeps the headless agent's result text — cheaper but often misleading and unusable for tmux steps (which have no result text). The default is resolved via `StepConfig.EffectiveSummarizationStrategy()` and lives in `DefaultSummarizationStrategy`. Validated at config load via `ValidateSteps()`.
 
-**Summarization model selection**: the summarizer auto-picks a model per-call based on prompt size. Users do not name a model — they pass an `allowed_summarization_models` allowlist instead. Valid aliases: `haiku`, `sonnet`, `opus` (validated at config load and in `ValidateSteps`). Resolved via `StepConfig.EffectiveAllowedSummarizationModels(projectDefault)` — step-level > project-level (`ProjectConfig.AllowedSummarizationModels` → merged into runtime `Config.AllowedSummarizationModels`) > `DefaultAllowedSummarizationModels` (all three). The selector (`chooseSummarizationModel` in `internal/workflow/summarizer.go`) picks the **cheapest** allowed model whose prompt-byte ceiling (`maxPromptBytesForModel`: haiku 380 KB, sonnet 700 KB, opus 1500 KB — empirically calibrated) fits the resolved prompt; if no allowed model fits, the summarizer falls back to map-reduce on the largest allowed model and re-selects on the reduced prompt. The same allowlist drives both step-level `summarize_chat` passes and the final-task summarizer.
+**Summarizer command**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles, backfill-context) runs the single top-level `summarizer:` command via `runner.RunSync` — prompt on stdin, response on stdout, `SORTIE_PURPOSE` tagging the call site. `SummarizerConfig.MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; there is no model selection in sortie — pick the model inside the command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
 
-**Loop validation**: goto must reference earlier step, max_iterations >= 1, no human/tmux on looped steps, no overlapping ranges.
+**Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 
 ### LoopConfig
 
@@ -234,9 +272,10 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 |------|---------|
 | `types.go` | All struct/type definitions and their methods (`Config`, `ProjectConfig`, `WorkflowConfig`, `StepConfig`, etc.) |
 | `config.go` | Loading, parsing, merging, defaults (`Load()`, `LoadForProject()`, `defaultConfig()`, `resolveWorkflows()`) |
+| `agents.go` | `AgentConfig`/`SummarizerConfig`, the step→workflow→default_agent→"claude" cascade (`StepAgent` etc.), `validateAgents`, `mergeAgents`, `checkRemovedProjectKeys` (removed-key migration errors) |
 | `accessors.go` | Workflow accessors, branch templates, save (`GetWorkflow()`, `ListWorkflowNames()`, `ResolveBranchTemplate()`, `Save()`) |
 | `detect.go` | Project type detection (`DetectProject()`) |
-| `validate.go` | Cross-field validation (loop targets, model allowlist, deprecated fields) — invoked from `Load()` |
+| `validate.go` | Single-file validation for `sortie validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |
 
 ## Project Detection (detect.go)
 
@@ -245,6 +284,6 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 ## Patterns
 
 - Access workflows via `ListWorkflowNames()`, `GetWorkflow()`, `GetTaskWorkflow()`
-- `ClaudeConfig.Args()` adds `--dangerously-skip-permissions` if Yolo
+- Resolve a step's agent via `Config.StepAgent()` (never read `step.Agent` directly — the cascade and registry lookup live in one place)
 - Config validation at parse time; invalid configs return errors
 - New fields: add to struct + YAML tag + merge logic + test fixtures

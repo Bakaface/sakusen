@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Bakaface/sortie/internal/db"
+	"github.com/Bakaface/sortie/internal/runner"
 	"github.com/Bakaface/sortie/internal/task"
 	"github.com/Bakaface/sortie/internal/workflow"
 	"github.com/spf13/cobra"
@@ -18,7 +18,6 @@ var (
 	backfillContextDryRun   bool
 	backfillContextIDs      []int64
 	backfillContextProject  string
-	backfillContextModel    string
 	backfillContextAllowAll bool
 )
 
@@ -30,8 +29,9 @@ var backfillContextCmd = &cobra.Command{
 Targets tasks where status='completed', context is NULL/empty, and the
 commits field has at least one recorded commit SHA. For each candidate the
 command computes a diff stat against the parent of the first stored commit
-and runs ` + "`claude -p`" + ` with the same diff-stat-fallback prompt the
-live summarizer uses, then writes the result via UpdateTaskContext.
+and runs the configured ` + "`summarizer:`" + ` command with the same
+diff-stat-fallback prompt the live summarizer uses, then writes the result
+via UpdateTaskContext.
 
 Tasks whose merge failed (no stored commits) are skipped because there is
 no merge artifact to summarize from.`,
@@ -39,10 +39,9 @@ no merge artifact to summarize from.`,
 }
 
 func init() {
-	backfillContextCmd.Flags().BoolVar(&backfillContextDryRun, "dry-run", false, "Print candidates and prompts without invoking claude or writing the DB")
+	backfillContextCmd.Flags().BoolVar(&backfillContextDryRun, "dry-run", false, "Print candidates and prompts without invoking the summarizer or writing the DB")
 	backfillContextCmd.Flags().Int64SliceVar(&backfillContextIDs, "id", nil, "Restrict to these task IDs (repeatable, comma-separated). Default: all matching candidates.")
 	backfillContextCmd.Flags().StringVar(&backfillContextProject, "project", "", "Restrict to project at this absolute path (default: cwd's project)")
-	backfillContextCmd.Flags().StringVar(&backfillContextModel, "model", "haiku", "Claude model alias to use for summarization")
 	backfillContextCmd.Flags().BoolVar(&backfillContextAllowAll, "all-projects", false, "Process candidates across every registered project (overrides --project)")
 }
 
@@ -143,7 +142,7 @@ func runBackfillContext(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		summary, err := runClaudeBackfill(ctx, prompt, projectPath, backfillContextModel)
+		summary, err := runSummarizerBackfill(ctx, prompt, projectPath)
 		if err != nil {
 			fmt.Printf("[#%d] FAILED: %v\n", t.ID, err)
 			failures++
@@ -151,7 +150,7 @@ func runBackfillContext(cmd *cobra.Command, args []string) error {
 		}
 		summary = strings.TrimSpace(summary)
 		if summary == "" {
-			fmt.Printf("[#%d] FAILED: claude returned empty output\n", t.ID)
+			fmt.Printf("[#%d] FAILED: summarizer returned empty output\n", t.ID)
 			failures++
 			continue
 		}
@@ -226,29 +225,14 @@ func computeBackfillDiffStat(repoPath string, commits []string) (string, error) 
 	return string(out), nil
 }
 
-// runClaudeBackfill invokes the configured claude binary synchronously with
-// the prompt on stdin and the project path as cwd, mirroring the live
-// summarizer's invocation shape.
-func runClaudeBackfill(ctx context.Context, prompt, workDir, model string) (string, error) {
-	if model == "" {
-		model = "haiku"
+// runSummarizerBackfill invokes the configured summarizer command
+// synchronously with the prompt on stdin and the project path as cwd,
+// mirroring the live summarizer's invocation shape.
+func runSummarizerBackfill(ctx context.Context, prompt, workDir string) (string, error) {
+	if !cfg.Summarizer.Configured() {
+		return "", fmt.Errorf("no summarizer configured: set a top-level `summarizer:` command in .sortie.yml")
 	}
-	args := []string{"-p", "--output-format", "text", "--model", model}
-	args = append(args, cfg.Claude.Args()...)
-
-	cmd := exec.CommandContext(ctx, cfg.Claude.Command, args...)
-	cmd.Dir = workDir
-	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Env = append(os.Environ(), "SORTIE_PURPOSE=backfill_context")
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("claude failed: %w (stderr: %s)", err, truncateForPreview(stderr.String(), 400))
-	}
-	return stdout.String(), nil
+	return runner.RunSync(ctx, cfg.Summarizer.Command, workDir, map[string]string{"SORTIE_PURPOSE": "backfill_context"}, prompt)
 }
 
 func truncateForPreview(s string, max int) string {

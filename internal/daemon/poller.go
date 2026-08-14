@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/Bakaface/sortie/internal/agent"
+	"github.com/Bakaface/sortie/internal/config"
 	gitpkg "github.com/Bakaface/sortie/internal/git"
 	"github.com/Bakaface/sortie/internal/task"
 	"github.com/Bakaface/sortie/internal/tmux"
+	"github.com/Bakaface/sortie/internal/workflow"
 )
 
 func (s *Server) taskPollerLoop() {
@@ -259,9 +260,9 @@ func (s *Server) recoverOrphanedTasks() error {
 			if err != nil {
 				log.Printf("%sFailed to restore tmux session for task #%d: %v", prefix, t.ID, err)
 			} else if resumed {
-				log.Printf("%sRestored tmux session for task #%d (auto-resumed previous Claude chat)", prefix, t.ID)
+				log.Printf("%sRestored tmux session for task #%d (auto-resumed previous agent session)", prefix, t.ID)
 			} else {
-				log.Printf("%sRestored tmux session for task #%d (no prior chat found; started fresh — use /resume to restore manually)", prefix, t.ID)
+				log.Printf("%sRestored tmux session for task #%d (no resumable agent session; started fresh)", prefix, t.ID)
 			}
 		}
 	}
@@ -270,14 +271,15 @@ func (s *Server) recoverOrphanedTasks() error {
 }
 
 // restoreTmuxSession recreates a tmux session for a task whose session was
-// lost during a daemon restart. If a previous Claude chat session ID is
-// recorded for the task in the chats table, the spawned Claude process is
-// invoked with `--resume <id>` so the chat is automatically restored.
+// lost during a daemon restart. The agent is re-resolved from the CURRENT
+// config: the paused step's agent when the task sits on a workflow step, else
+// the interactive fallback agent. When a previous agent session id is
+// recorded in the chats table AND the agent defines a resume_command, the
+// session is resumed; otherwise a fresh session starts (with the still-on-disk
+// step prompt for step restores).
 // Returns (resumed, error) where resumed indicates whether a prior session
 // was found and resumed.
 func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
-	taskID := fmt.Sprintf("%d", t.ID)
-
 	pc, _ := s.getProjectContext(t.ProjectID)
 	projectName := ""
 	if pc != nil {
@@ -294,16 +296,40 @@ func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
 		return false, fmt.Errorf("worktree path does not exist: %s", t.WorktreePath)
 	}
 
-	session := tmux.NewSession(projectName, taskID, t.WorktreePath)
-
+	session := tmux.NewSession(projectName, fmt.Sprintf("%d", t.ID), t.WorktreePath)
 	if session.Exists() {
 		log.Printf("%sTmux session already exists for task #%d, skipping restore", s.projectLogPrefix(t.ProjectID), t.ID)
 		return false, nil
 	}
+	if pc == nil {
+		return false, fmt.Errorf("no project context for task #%d", t.ID)
+	}
 
-	// Look up the most recent Claude chat session for this task so we can
-	// auto-resume it. Failures here are non-fatal: we fall back to a fresh
-	// `claude` invocation, matching the pre-resume behavior.
+	// Resolve the agent from the current config. A task paused on a workflow
+	// step restores that step's agent; ad-hoc sessions (continue/tmux-direct)
+	// restore the interactive fallback.
+	label := "continue"
+	var slug string
+	var agentCfg config.AgentConfig
+	wf := pc.cfg.GetWorkflow(t.Workflow)
+	if step, ok := workflow.PausedStep(t, wf); ok && pc.cfg.StepIsTmux(wf, &step) {
+		var agentErr error
+		slug, agentCfg, agentErr = pc.cfg.StepAgent(wf, &step)
+		if agentErr != nil {
+			return false, agentErr
+		}
+		label = step.Name
+	} else {
+		var agentErr error
+		slug, agentCfg, agentErr = interactiveAgent(pc.cfg)
+		if agentErr != nil {
+			return false, agentErr
+		}
+	}
+
+	// Look up the most recent recorded agent session for this task so we can
+	// auto-resume it (only effective when the agent defines resume_command).
+	// Failures here are non-fatal: we fall back to a fresh session.
 	var resumeSessionID string
 	if chat, err := s.database.GetLatestChat(t.ID); err != nil {
 		log.Printf("%sWarning: failed to look up chat for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
@@ -311,48 +337,22 @@ func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
 		resumeSessionID = chat.SessionID
 	}
 
-	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
-	if err := os.MkdirAll(sortieDir, 0755); err != nil {
-		return false, fmt.Errorf("failed to create sortie dir: %w", err)
-	}
-
-	yolo := pc != nil && pc.cfg.Claude.Yolo
-	var claudeBin string
-	var defaultArgs []string
-	if pc != nil {
-		claudeBin = pc.cfg.Claude.Command
-		defaultArgs = pc.cfg.Claude.DefaultArgs
-	}
-	scriptFile := filepath.Join(sortieDir, "run-restore.sh")
-	if err := writeClaudeScript(scriptFile, claudeBin, yolo, resumeSessionID, "", defaultArgs); err != nil {
-		return false, fmt.Errorf("failed to write wrapper script: %w", err)
-	}
-
-	var setupCmd string
-	if pc != nil {
-		setupCmd = pc.cfg.TmuxSetupCommand
-	}
-
-	if tmux.SetupCommandControlsAgent(setupCmd) {
-		if err := session.Create(""); err != nil {
-			return false, fmt.Errorf("failed to create tmux session: %w", err)
-		}
-	} else {
-		if err := session.Create("bash", scriptFile); err != nil {
-			return false, fmt.Errorf("failed to create tmux session: %w", err)
+	// For step restores, re-feed the step prompt still on disk so a
+	// non-resumed session at least starts with its instructions. Ad-hoc
+	// restores start blank.
+	prompt := ""
+	if label != "continue" {
+		if data, err := os.ReadFile(workflow.StepPromptFile(t.WorktreePath, label)); err == nil {
+			prompt = string(data)
 		}
 	}
 
-	// Run tmux setup command if configured
-	if setupCmd != "" {
-		vars := &tmux.SetupVars{
-			ClaudeCommand: buildClaudeCommand(claudeBin, yolo, resumeSessionID, "", defaultArgs),
-			RunAgent:      scriptFile,
-		}
-		if err := session.RunSetupCommand(setupCmd, vars); err != nil {
-			log.Printf("%sWarning: tmux setup command failed for restored task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-		}
-	}
-
-	return resumeSessionID != "", nil
+	return s.spawnInteractiveSession(pc, t, interactiveSpawnOpts{
+		label:           label,
+		prompt:          prompt,
+		resumeSessionID: resumeSessionID,
+		slug:            slug,
+		agent:           agentCfg,
+		keepSentinels:   true,
+	})
 }

@@ -18,11 +18,6 @@ import (
 func TestRunTask_NoWorktreePersistsWorktreePath(t *testing.T) {
 	dir := t.TempDir()
 
-	script := filepath.Join(t.TempDir(), "fake-claude.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho done\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
 	dbPath := filepath.Join(dir, ".sortie", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
@@ -46,7 +41,7 @@ func TestRunTask_NoWorktreePersistsWorktreePath(t *testing.T) {
 	// Intentionally leave tk.WorktreePath empty — simulates a fresh task.
 
 	cfg := &config.Config{
-		Claude:     config.ClaudeConfig{Command: script},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SORTIE_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{Name: "default", Steps: []config.StepConfig{{Name: "step1", Prompt: "do it"}}},

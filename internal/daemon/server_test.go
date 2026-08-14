@@ -236,21 +236,26 @@ func TestTmuxFirstTitle(t *testing.T) {
 
 func TestCreateTaskRequest_EmptyDescriptionAllowedForTmuxFirstWorkflow(t *testing.T) {
 	tmuxFirst := config.WorkflowConfig{
-		// Default mode is tmux — no explicit `print` needed.
-		Name: "interact",
+		// First step resolves to a tmux-mode agent.
+		Name:  "interact",
+		Agent: "interactive",
 		Steps: []config.StepConfig{
 			{Name: "shell"},
 		},
 	}
 	plain := config.WorkflowConfig{
-		// Force headless mode so this workflow demands a description.
-		Name:  "default",
-		Print: true,
+		// Resolves to the headless "claude" fallback, so this workflow
+		// demands a description.
+		Name: "default",
 		Steps: []config.StepConfig{
 			{Name: "implement"},
 		},
 	}
 	cfg := &config.Config{
+		Agents: map[string]config.AgentConfig{
+			"claude":      {Mode: config.AgentModeHeadless, Command: "true"},
+			"interactive": {Mode: config.AgentModeTmux, Command: "true"},
+		},
 		Workflows: []config.WorkflowConfig{plain, tmuxFirst},
 	}
 
@@ -296,7 +301,7 @@ func TestCreateTaskRequest_EmptyDescriptionAllowedForTmuxFirstWorkflow(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			description := strings.TrimSpace(tt.description)
 			wf := cfg.GetWorkflow(tt.workflow)
-			tmuxFirstStep := wf != nil && wf.FirstStepIsTmux()
+			tmuxFirstStep := cfg.FirstStepIsTmux(wf)
 
 			rejected := description == "" && tt.checkoutBranch == "" && !tmuxFirstStep
 			if rejected != tt.wantReject {

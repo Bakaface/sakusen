@@ -25,7 +25,7 @@ type ChildTaskSpec struct {
 	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override."`
 	CheckoutBranch string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one."`
 	Worktree       *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree."`
-	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive Claude session in tmux."`
+	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this child runs."`
 	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). Empty inherits the parent task's track ONLY when the child is in the parent's project — a child in a different project starts trackless unless you pass an explicit track, which is resolved in the child's own project. Pass 'none' to explicitly detach."`

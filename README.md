@@ -1,6 +1,6 @@
 # ✈ Sortie
 
-Sortie is a daemon that orchestrates [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents through long-lived, multi-step workflows. Each task runs in its own git worktree on its own branch, advances through whatever steps you define in config — anything from a single "implement" step to a full plan/implement/review/approve/merge chain with loops and human gates — and reports back to a terminal UI where you stay in the driver's seat.
+Sortie is a daemon that orchestrates coding agents through long-lived, multi-step workflows. An agent is just a shell command you declare in config — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), opencode, aider, a raw model CLI, anything — and Sortie talks to it through a small environment-variable contract. Each task runs in its own git worktree on its own branch, advances through whatever steps you define in config — anything from a single "implement" step to a full plan/implement/review/approve/merge chain with loops and human gates — and reports back to a terminal UI where you stay in the driver's seat.
 
 You decide what runs, how many run at once, where the human gates go, and how finished work lands on your base branch. Sortie just keeps the agents on the rails.
 
@@ -8,9 +8,9 @@ You decide what runs, how many run at once, where the human gates go, and how fi
 
 ```
 ┌─────────────┐    ┌────────────────┐    ┌─────────────────┐
-│  sortie tui │ ←→ │ sortie daemon  │ ←→ │ Claude Code     │
-│  (control)  │    │ (orchestrator) │    │ agents in       │
-└─────────────┘    └────────────────┘    │ git worktrees   │
+│  sortie tui │ ←→ │ sortie daemon  │ ←→ │ coding agents   │
+│  (control)  │    │ (orchestrator) │    │ (your commands) │
+└─────────────┘    └────────────────┘    │ in git worktrees│
                           │              └─────────────────┘
                           ↓
                     ┌──────────┐
@@ -52,10 +52,12 @@ go build -o sortie ./cmd/sortie
 
 ```bash
 # Inside any git repo:
-sortie init               # writes .sortie.yml + .sortie/ data dir
+sortie init               # writes .sortie.yml + user-owned agent scripts under .sortie/agents/
 sortie daemon start       # starts the background daemon (Unix socket)
 sortie tui                # opens the TUI
 ```
+
+The scaffolded config defines two Claude Code agent records (`claude` headless, `claude-tmux` interactive) backed by editable scripts in `.sortie/agents/` (they require `claude` and `jq` on `PATH`). Swap the commands to use any other tool — Sortie itself has no agent hardcoded.
 
 In the TUI, press `n` to create a new task, pick a workflow, and watch it run. Press `enter` on a task to follow its live logs.
 
@@ -73,9 +75,9 @@ sortie tasks                                     # list, or `sortie tasks <id>` 
 1. **You create a task** (TUI or `sortie create`) and pick a workflow.
 2. **The daemon picks it up** when a worker slot is free (`max_workers` controls concurrency).
 3. **A worktree is provisioned** at `.worktrees/<branch>` on a new branch derived from `git.branch_template`. `worktree-sync-paths` and `worktree-setup-commands` run here (e.g. copy `.env`, run `bun install`).
-4. **Each workflow step spawns a Claude Code agent** in that worktree with the rendered prompt and a Sortie-built system prompt. Output is parsed live (NDJSON), persisted to per-step log files, and broadcast to the TUI.
-5. **Step context is captured** at the end of each step (the agent's last message by default, or a Haiku summary when `summarization_strategy: summarize_chat`) and made available to later steps via `{{steps.<name>.context}}`.
-6. **Human gates pause** the workflow on `human: true` steps; **tmux gates** suspend until you detach from the agent's tmux session. **Loops** jump back to an earlier step until an exit condition is met or `max_iterations` is reached.
+4. **Each workflow step spawns an agent** in that worktree: Sortie resolves the step's agent record (step → workflow → `default_agent` → `claude`), writes the rendered prompt to a file, and runs the agent's shell command with the `SORTIE_*` env contract exported (`SORTIE_PROMPT_FILE`, `SORTIE_RESULT_FILE`, ...). Stdout is streamed to the unified task log and broadcast to the TUI.
+5. **Step context is captured** at the end of each step (the agent's result text from `$SORTIE_RESULT_FILE` by default, or a summary produced by your `summarizer:` command when `summarization_strategy: summarize_chat`) and made available to later steps via `{{steps.<name>.context}}`.
+6. **Human gates pause** the workflow on `human: true` steps; **tmux-mode agents** suspend the workflow at an interactive session until a turn-end sentinel lands or you advance manually. **Loops** jump back to an earlier step until an exit condition is met or `max_iterations` is reached.
 7. **On completion**, depending on `on_complete` (project-level, or the running workflow's override), Sortie either leaves the work as a `commit` on the branch or `merge`s it into the base branch.
 
 ## Workflow configuration
@@ -88,7 +90,12 @@ Minimal `.sortie.yml`:
 
 ```yaml
 max_workers: 3
-yolo: false                       # pass --dangerously-skip-permissions to claude
+
+default_agent: claude
+agents:
+  claude:                         # any shell command; this one is Claude Code headless
+    mode: headless
+    command: 'claude --dangerously-skip-permissions -p "$(cat "$SORTIE_PROMPT_FILE")" | tee "$SORTIE_RESULT_FILE"'
 
 git:
   base_branch: main
@@ -127,7 +134,6 @@ workflows:
     steps:
       - name: cleaning
         prompt: "Audit and clean the codebase."
-        print: true
 ```
 
 File pool is flat: `.sortie/workflows/<name>.yml` (no `tasks/`, `one-off/`, or `init/` subdirectories). Global pool: `~/.sortie/workflows/<name>.yml`.
@@ -138,10 +144,10 @@ File pool is flat: `.sortie/workflows/<name>.yml` (no `tasks/`, `one-off/`, or `
 |---|---|---|
 | `name` | string | Step ID, used in `{{steps.<name>.context}}` and loop targets. |
 | `prompt` | string | Templated prompt sent to the agent. |
+| `agent` | string | Agent slug for this step. Step-level overrides workflow-level `agent:`, which overrides `default_agent:`. The agent's `mode` (headless/tmux) decides how the step executes. |
 | `timeout` | duration | e.g. `30m`. Default: 30 minutes. |
 | `human` | bool | Pause and wait for explicit approval in the TUI. |
-| `print` | bool | `true` = headless `claude -p`; `false` (default) = tmux. Step-level overrides workflow-level. |
-| `summarization_strategy` | enum | `last_message`, `summarize_chat` (default, Haiku-summarized chat log), or `none` (no context captured). |
+| `summarization_strategy` | enum | `last_message`, `summarize_chat` (default; runs your `summarizer:` command over the chat log), or `none` (no context captured). |
 | `loop` | object | Jump back to an earlier step. See below. |
 
 ### Loops
@@ -159,7 +165,7 @@ File pool is flat: `.sortie/workflows/<name>.yml` (no `tasks/`, `one-off/`, or `
       step_context_empty: reviewing   # exit early when this step's output is empty
 ```
 
-Loops must point to an earlier step, can't be `human:` or run in tmux (set `print: true`), and can't overlap with other loops.
+Loops must point to an earlier step, can't be `human:` or resolve to a tmux-mode agent, and can't overlap with other loops.
 
 ### Template variables
 
@@ -201,10 +207,10 @@ tmux-setup-command: |               # run once after tmux session creation
 ```
 cmd/sortie/         CLI entry points (daemon, tui, task CRUD)
 internal/
-  config/           .sortie.yml parsing, project type auto-detection
+  config/           .sortie.yml parsing, agent registry, project type auto-detection
   daemon/           Background daemon: Unix socket server, scheduling, pub/sub
   workflow/         Step engine, prompt templating, summarizer, merge logic
-  claude/           Claude Code process spawning, NDJSON stream parsing
+  runner/           Agent command spawning (headless Process, RunSync, tmux wrapper scripts)
   agent/            Agent state machine, concurrent worker manager
   task/             Task model, status state machine, priority, dependencies
   tui/              BubbleTea terminal UI (list, detail, prompt, animation)
@@ -242,43 +248,56 @@ Common keys (full help with `ctrl+h`):
 
 In the detail view, `j/k/G/gg/ctrl+u/ctrl+d` scroll logs; `esc` toggles between follow and normal mode; `e` opens the log file in `$EDITOR`.
 
-## Tmux integration
+## Agents
 
-Tmux is the **default** execution mode: every step runs inside a named tmux session (`sortie/<project>/<task_id>/<step>`) hosting an interactive Claude Code TUI. The daemon installs a project-scoped Claude Code `Stop` hook so it can detect turn-end events and either auto-advance to the next workflow step or finalize the task — no human "approve" keystroke needed unless the step has `human: true`. If the Stop hook never fires (e.g. managed-settings policy disabled hooks), the daemon falls back to a tmux pane hash-stability detector with a 30 s idle threshold.
+Every workflow step runs an **agent**: a shell command declared under the top-level `agents:` map. Steps pick one via `agent: <slug>` (step-level beats workflow-level beats `default_agent:`, which falls back to the `claude` slug). The agent record's `mode` decides how the step executes:
 
-To opt into headless execution via `claude -p` (e.g. for short, deterministic steps where you don't need to watch), set `print: true`:
+- **`headless`** (default) — Sortie spawns the command, streams its stdout to the task log, and reads the final result text from `$SORTIE_RESULT_FILE` when it exits.
+- **`tmux`** — Sortie runs the command inside a detached tmux session (`<project>-<task_id>`); the workflow pauses at the interactive session.
 
 ```yaml
-workflows:
-  - name: ship-it
-    print: true         # workflow-level default: headless
-    steps:
-      - name: implement
-        prompt: "..."
-      - name: review
-        print: false    # this step still uses tmux
-        prompt: "..."
+default_agent: claude
+
+agents:
+  claude:
+    mode: headless
+    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-headless.sh"'
+  claude-tmux:
+    mode: tmux
+    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-tmux.sh"'
+    resume_command: 'claude --dangerously-skip-permissions --resume "$SORTIE_SESSION_ID"'
+    chat_log_command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-chat-log.sh"'
+
+summarizer:                 # utility LLM: chat/step/task summaries + AI task titles
+  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  max_prompt_bytes: 380000
 ```
 
-| `print` | `human` | Behavior |
+Sortie communicates with agents purely through environment variables: `SORTIE_PROMPT_FILE` (the fully-resolved step prompt), `SORTIE_RESULT_FILE` (headless result text), `SORTIE_DONE_DIR`/`SORTIE_DONE_PREFIX` (tmux turn-end sentinels), plus `SORTIE_TASK_ID`, `SORTIE_STEP`, `SORTIE_WORKTREE`, `SORTIE_PROJECT_PATH`, `SORTIE_AGENT`, and `SORTIE_PURPOSE`.
+
+**Tmux auto-advance is sentinel-driven**: when the agent finishes a turn, something inside the session (a hook, the agent itself, an idle-watcher) writes `"$SORTIE_DONE_DIR/$SORTIE_DONE_PREFIX-$(date +%s%N).json"`; the daemon polls for these files and advances the workflow (unless the step has `human: true`). The file may carry a JSON payload with `session_id` (enables `resume_command` restore and `chat_log_command` lookup) and `transcript_path`. The scaffolded `claude-tmux` agent wires this up via a Claude Code `Stop` hook; agents that never write a sentinel are **manual-advance** — the task waits in `tmux` status until you advance it. Agents without a `chat_log_command` can't capture `summarize_chat` context for tmux steps. Without a `summarizer:` there are no AI titles or summaries (titles fall back to truncated input).
+
+| agent `mode` | `human` | Behavior |
 |---|---|---|
-| false (default) | false | tmux + auto-advance via Stop hook (with hash fallback) |
-| false | true | tmux + manual approval (drop into the session, then press `a`/`c`) |
-| true | false | headless `claude -p` + auto-advance on exit (legacy non-tmux flow) |
-| true | true | headless `claude -p`, then pause at `awaiting_approval` |
+| headless (default) | false | headless spawn + auto-advance on exit |
+| headless | true | headless spawn, then pause at `awaiting_approval` |
+| tmux | false | tmux + auto-advance on turn-end sentinel (manual-advance if the agent writes none) |
+| tmux | true | tmux + manual approval (drop into the session, then press `a`/`c`) |
 
 Press `t` in the TUI to attach to a tmux session. Sortie detects nested-tmux situations (you're already inside tmux) and either switches client or nests a session, controlled by `tmux_nested_attach_behavior` (`switch` / `nest`).
 
 `sortie attach <task_id>` does the same from the shell.
 
-### Migrating from `tmux:` to `print:`
+### Migrating from `claude:` / `yolo:` / `print:` configs
 
-The pre-Sortie-54 `tmux:` field was removed. Inversion mapping:
+The old Claude-specific keys were removed and are now hard load errors with migration messages:
 
-- `tmux: true`  → `print: false` (or drop the line entirely — tmux is now the default)
-- `tmux: false` → `print: true`
-
-The daemon refuses to load a config containing the old `tmux:` field, with an error pointing at the new field.
+- `claude:` (binary override) → define agents under `agents:` (run `sortie init` in a fresh project for scaffolded records)
+- `yolo:` → put permission flags (e.g. `--dangerously-skip-permissions`) directly in the agent's `command`
+- `system_prompt:` → bake system-prompt flags into the agent's `command` or fold the text into step prompts
+- `allowed_summarization_models:` → the `summarizer:` command; pick the model inside it
+- `print:` / `tmux:` (workflow and step level) → select an agent whose `mode` is `headless` (was `print: true`) or `tmux` (was `print: false`)
+- `{{claude_command}}` in `tmux-setup-command` → `{{agent_command}}` or `{{run_agent}}`
 
 ## CLI reference
 
@@ -330,5 +349,5 @@ sortie tui [-g]               # -g for cross-project view
 
 - Go 1.25+
 - git (worktree support, ≥ 2.5)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on `PATH` as `claude`
-- tmux (only required if you use tmux steps or `sortie attach`)
+- Whatever your configured agent commands need — the `sortie init` scaffold uses the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI (`claude`) and `jq`
+- tmux (only required if you use tmux-mode agents or `sortie attach`)

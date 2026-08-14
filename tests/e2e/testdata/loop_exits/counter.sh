@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Counter script for loop_exits scenario.
+# Counter agent command for the loop_exits scenario.
 # Workflow: implementing → checking [loop back if checking non-empty].
 # To exercise loop_iteration >= 1, we need implementing+checking to return
 # non-empty for the first pass (iteration 0), then iteration 1's checking
@@ -32,10 +32,9 @@ printf '%d' "$NEXT_COUNT" > "$STATE_FILE"
 
 if [[ "$COUNT" -lt 3 ]]; then
     # implementing+checking iter 0, implementing iter 1 — return non-empty
-    printf '{"type":"system","subtype":"init","session_id":"e2e-session-loop-%d"}\n' "$COUNT"
-    printf '{"type":"result","result":"work done %d","duration_ms":10,"total_cost_usd":0.0001}\n' "$COUNT"
+    printf 'work done %d' "$COUNT" > "${SORTIE_RESULT_FILE:?}"
+    printf 'work done %d\n' "$COUNT"
 else
     # checking iter 1+ — empty result triggers loop exit
-    printf '{"type":"system","subtype":"init","session_id":"e2e-session-loop-%d"}\n' "$COUNT"
-    printf '{"type":"result","result":"","duration_ms":10,"total_cost_usd":0.0001}\n'
+    : > "${SORTIE_RESULT_FILE:?}"
 fi

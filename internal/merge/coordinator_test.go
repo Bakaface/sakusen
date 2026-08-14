@@ -305,8 +305,8 @@ func TestCleanupOnConflictResolverFailure(t *testing.T) {
 
 	wt := makeWorktree(t, dir, "feat")
 
-	// Inject a resolver that simulates Claude failing to resolve the conflict.
-	resolverFailure := errors.New("simulated Claude failure")
+	// Inject a resolver that simulates the agent failing to resolve the conflict.
+	resolverFailure := errors.New("simulated agent failure")
 	resolveCalled := 0
 	resolver := func(ctx context.Context, t *task.Task, conflictFiles []string) error {
 		resolveCalled++
@@ -324,7 +324,7 @@ func TestCleanupOnConflictResolverFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Finalize to return error when resolver fails")
 	}
-	if !strings.Contains(err.Error(), "simulated Claude failure") &&
+	if !strings.Contains(err.Error(), "simulated agent failure") &&
 		!strings.Contains(err.Error(), "conflict resolution failed") {
 		t.Fatalf("error should propagate resolver failure, got: %v", err)
 	}

@@ -20,7 +20,7 @@ func TestSummarizeWorkflows_PropagatesHiddenAndSource(t *testing.T) {
 		},
 	}
 
-	out := summarizeWorkflows(in)
+	out := summarizeWorkflows(&config.Config{}, in)
 	if len(out) != 2 {
 		t.Fatalf("want 2 summaries, got %d", len(out))
 	}
@@ -63,7 +63,7 @@ func TestSummarizeWorkflows_PinFieldsAndFullySpec(t *testing.T) {
 		},
 	}
 
-	out := summarizeWorkflows(in)
+	out := summarizeWorkflows(&config.Config{}, in)
 	if len(out) != 2 {
 		t.Fatalf("want 2 summaries, got %d", len(out))
 	}
@@ -87,5 +87,64 @@ func TestSummarizeWorkflows_PinFieldsAndFullySpec(t *testing.T) {
 	}
 	if out[1].Worktree != nil {
 		t.Errorf("partial.Worktree: got %v, want nil (no worktree pin)", *out[1].Worktree)
+	}
+}
+
+// TestSummarizeWorkflows_ResolvesAgents verifies the agent projection added
+// for the MCP surface: WorkflowSummary.Agent carries the workflow's EXPLICIT
+// agent slug (empty when inherited), while each step's Agent is the fully
+// RESOLVED slug (step → workflow → default_agent cascade) and Tmux reflects
+// the resolved agent's mode.
+func TestSummarizeWorkflows_ResolvesAgents(t *testing.T) {
+	cfg := &config.Config{
+		DefaultAgent: "worker",
+		Agents: map[string]config.AgentConfig{
+			"worker": {Command: "run-worker"},
+			"pair":   {Mode: config.AgentModeTmux, Command: "run-pair"},
+		},
+	}
+	in := []config.WorkflowConfig{
+		{
+			Name:  "mixed",
+			Agent: "pair",
+			Steps: []config.StepConfig{
+				{Name: "shell"},                      // inherits workflow agent (tmux)
+				{Name: "implement", Agent: "worker"}, // step-level override
+			},
+		},
+		{
+			Name:  "plain",
+			Steps: []config.StepConfig{{Name: "implement"}},
+		},
+	}
+
+	out := summarizeWorkflows(cfg, in)
+	if len(out) != 2 {
+		t.Fatalf("want 2 summaries, got %d", len(out))
+	}
+
+	mixed := out[0]
+	if mixed.Agent != "pair" {
+		t.Errorf("mixed.Agent: got %q, want the explicit workflow slug %q", mixed.Agent, "pair")
+	}
+	if !mixed.FirstStepIsTmux {
+		t.Error("mixed.FirstStepIsTmux: got false, want true (first step inherits the tmux workflow agent)")
+	}
+	if got := mixed.Steps[0]; got.Agent != "pair" || !got.Tmux {
+		t.Errorf("mixed.Steps[0]: got agent=%q tmux=%v, want inherited pair/tmux", got.Agent, got.Tmux)
+	}
+	if got := mixed.Steps[1]; got.Agent != "worker" || got.Tmux {
+		t.Errorf("mixed.Steps[1]: got agent=%q tmux=%v, want step override worker/headless", got.Agent, got.Tmux)
+	}
+
+	plain := out[1]
+	if plain.Agent != "" {
+		t.Errorf("plain.Agent: got %q, want empty (no explicit workflow agent)", plain.Agent)
+	}
+	if plain.FirstStepIsTmux {
+		t.Error("plain.FirstStepIsTmux: got true, want false (default agent is headless)")
+	}
+	if got := plain.Steps[0]; got.Agent != "worker" || got.Tmux {
+		t.Errorf("plain.Steps[0]: got agent=%q tmux=%v, want default_agent worker/headless", got.Agent, got.Tmux)
 	}
 }

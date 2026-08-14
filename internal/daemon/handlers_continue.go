@@ -7,12 +7,9 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Bakaface/sortie/internal/agent"
-	"github.com/Bakaface/sortie/internal/claude"
 	gitpkg "github.com/Bakaface/sortie/internal/git"
 	"github.com/Bakaface/sortie/internal/task"
 	"github.com/Bakaface/sortie/internal/tmux"
@@ -78,92 +75,43 @@ func (s *Server) handleContinueTask(conn net.Conn, req ContinueTaskRequest) {
 		return
 	}
 
-	var claudeMD strings.Builder
-	fmt.Fprintf(&claudeMD, "# Continue Task #%d: %s\n\n", t.ID, t.Title)
-	claudeMD.WriteString("You are continuing work on a previously completed task.\n\n")
-	claudeMD.WriteString("## Task Description\n\n")
-	claudeMD.WriteString(t.Input)
-	claudeMD.WriteString("\n\n")
+	// Build the continue prompt: task input plus any previously captured
+	// context, handed to the interactive agent as its initial prompt.
+	var prompt strings.Builder
+	fmt.Fprintf(&prompt, "# Continue Task #%d: %s\n\n", t.ID, t.Title)
+	prompt.WriteString("You are continuing work on a previously completed task.\n\n")
+	prompt.WriteString("## Task Description\n\n")
+	prompt.WriteString(t.Input)
+	prompt.WriteString("\n\n")
 	if t.Context != "" {
-		claudeMD.WriteString("## Previous Context\n\n")
-		claudeMD.WriteString(t.Context)
-		claudeMD.WriteString("\n\n")
+		prompt.WriteString("## Previous Context\n\n")
+		prompt.WriteString(t.Context)
+		prompt.WriteString("\n\n")
 	}
-	claudeMD.WriteString("The user wants to continue working on this task. Help them with whatever they need.\n")
+	prompt.WriteString("The user wants to continue working on this task. Help them with whatever they need.\n")
 
-	claudeMDPath := filepath.Join(t.WorktreePath, "CLAUDE.md")
-	if err := os.WriteFile(claudeMDPath, []byte(claudeMD.String()), 0644); err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to write CLAUDE.md: %v", err))
+	slug, agentCfg, err := interactiveAgent(pc.cfg)
+	if err != nil {
+		s.sendError(conn, err.Error())
 		return
 	}
 
-	taskID := fmt.Sprintf("%d", t.ID)
-	session := tmux.NewSession(pc.cfg.Project.Name, taskID, t.WorktreePath)
-
-	if session.Exists() {
-		session.Kill()
-	}
-
-	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
-	if err := os.MkdirAll(sortieDir, 0755); err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to create sortie dir: %v", err))
+	if _, err := s.spawnInteractiveSession(pc, t, interactiveSpawnOpts{
+		label:  "continue",
+		prompt: prompt.String(),
+		slug:   slug,
+		agent:  agentCfg,
+	}); err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to start continue session: %v", err))
 		return
 	}
-	scriptFile := filepath.Join(sortieDir, "run-continue.sh")
-
-	if err := writeClaudeScript(scriptFile, pc.cfg.Claude.Command, pc.cfg.Claude.Yolo, "", "", pc.cfg.Claude.DefaultArgs); err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to write wrapper script: %v", err))
-		return
-	}
-
-	// Snapshot pre-existing Claude sessions in this workdir BEFORE spawning so
-	// the async session-ID poller below can distinguish the one we are about to
-	// launch from any unrelated chat the user already has open in the same
-	// directory.
-	preExistingSessions := claude.SnapshotSessionsByWorkdir(t.WorktreePath)
-
-	setupCmd := pc.cfg.TmuxSetupCommand
-	if tmux.SetupCommandControlsAgent(setupCmd) {
-		if err := session.Create(""); err != nil {
-			s.sendError(conn, fmt.Sprintf("failed to create tmux session: %v", err))
-			return
-		}
-	} else {
-		if err := session.Create("bash", scriptFile); err != nil {
-			s.sendError(conn, fmt.Sprintf("failed to create tmux session: %v", err))
-			return
-		}
-	}
-
-	// Run tmux setup command if configured
-	if setupCmd != "" {
-		vars := &tmux.SetupVars{
-			ClaudeCommand: buildClaudeCommand(pc.cfg.Claude.Command, pc.cfg.Claude.Yolo, "", "", pc.cfg.Claude.DefaultArgs),
-			RunAgent:      scriptFile,
-		}
-		if err := session.RunSetupCommand(setupCmd, vars); err != nil {
-			log.Printf("%sWarning: tmux setup command failed for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-		}
-	}
-
-	// Async: discover the freshly-spawned Claude session ID and record it.
-	// Filtering against preExistingSessions prevents locking onto an unrelated
-	// pre-existing chat in the same worktree.
-	go func() {
-		sid, _ := claude.FindNewSessionByWorkdir(t.WorktreePath, preExistingSessions, 15*time.Second)
-		if sid != "" {
-			if err := s.database.UpsertChat(t.ID, "continue", sid, session.Name); err != nil {
-				log.Printf("%sWarning: failed to upsert chat for continue task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-			}
-		}
-	}()
 
 	if err := s.database.UpdateTaskStatus(t.ID, task.StatusTmux); err != nil {
 		s.sendError(conn, fmt.Sprintf("failed to update task status: %v", err))
 		return
 	}
 
-	log.Printf("%sContinue session started for task #%d (tmux: %s)", s.projectLogPrefix(t.ProjectID), t.ID, session.Name)
+	log.Printf("%sContinue session started for task #%d (agent: %s)", s.projectLogPrefix(t.ProjectID), t.ID, slug)
 	s.respondWithContinueTask(conn, req.TaskID)
 }
 
@@ -517,70 +465,21 @@ func (s *Server) setupTmuxDirect(taskID, projectID int64, title string) {
 		return
 	}
 
-	// Create tmux session
-	taskIDStr := fmt.Sprintf("%d", taskID)
-	session := tmux.NewSession(pc.cfg.Project.Name, taskIDStr, t.WorktreePath)
-
-	if session.Exists() {
-		session.Kill()
-	}
-
-	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
-	if err := os.MkdirAll(sortieDir, 0755); err != nil {
-		log.Printf("%sFailed to create sortie dir for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-		return
-	}
-	scriptFile := filepath.Join(sortieDir, "run-continue.sh")
-
-	initialPrompt := strings.TrimSpace(t.Input)
-	if err := writeClaudeScript(scriptFile, pc.cfg.Claude.Command, pc.cfg.Claude.Yolo, "", initialPrompt, pc.cfg.Claude.DefaultArgs); err != nil {
-		log.Printf("%sFailed to write claude script for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
+	slug, agentCfg, err := interactiveAgent(pc.cfg)
+	if err != nil {
+		log.Printf("%sFailed to resolve interactive agent for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
 		return
 	}
 
-	// Snapshot pre-existing Claude sessions in this workdir BEFORE spawning so
-	// the async session-ID poller below can distinguish the one we are about to
-	// launch from any unrelated chat the user already has open in the same
-	// directory.
-	preExistingSessions := claude.SnapshotSessionsByWorkdir(t.WorktreePath)
-
-	setupCmd := pc.cfg.TmuxSetupCommand
-	if tmux.SetupCommandControlsAgent(setupCmd) {
-		if err := session.Create(""); err != nil {
-			log.Printf("%sFailed to create tmux session for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-			return
-		}
-	} else {
-		if err := session.Create("bash", scriptFile); err != nil {
-			log.Printf("%sFailed to create tmux session for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-			return
-		}
+	if _, err := s.spawnInteractiveSession(pc, t, interactiveSpawnOpts{
+		label:  "tmux-direct",
+		prompt: strings.TrimSpace(t.Input),
+		slug:   slug,
+		agent:  agentCfg,
+	}); err != nil {
+		log.Printf("%sFailed to start tmux-direct session for task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
+		return
 	}
-
-	// Run tmux setup command if configured
-	if setupCmd != "" {
-		vars := &tmux.SetupVars{
-			ClaudeCommand: buildClaudeCommand(pc.cfg.Claude.Command, pc.cfg.Claude.Yolo, "", initialPrompt, pc.cfg.Claude.DefaultArgs),
-			RunAgent:      scriptFile,
-		}
-		if err := session.RunSetupCommand(setupCmd, vars); err != nil {
-			log.Printf("%sWarning: tmux setup command failed for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-		}
-	}
-
-	// Async: discover the freshly-spawned Claude session ID and record it.
-	// Filtering against preExistingSessions prevents locking onto an unrelated
-	// pre-existing chat in the same worktree.
-	worktreePath := t.WorktreePath
-	sessionName := session.Name
-	go func() {
-		sid, _ := claude.FindNewSessionByWorkdir(worktreePath, preExistingSessions, 15*time.Second)
-		if sid != "" {
-			if err := s.database.UpsertChat(taskID, "tmux-direct", sid, sessionName); err != nil {
-				log.Printf("%sWarning: failed to upsert chat for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-			}
-		}
-	}()
 
 	if err := s.database.UpdateTaskStatus(taskID, task.StatusTmux); err != nil {
 		log.Printf("%sFailed to update status for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
@@ -588,7 +487,7 @@ func (s *Server) setupTmuxDirect(taskID, projectID int64, title string) {
 	}
 
 	s.broadcastTaskUpdate(taskID)
-	log.Printf("%sTmux-direct session started for task #%d (tmux: %s)", s.projectLogPrefix(projectID), taskID, session.Name)
+	log.Printf("%sTmux-direct session started for task #%d (agent: %s)", s.projectLogPrefix(projectID), taskID, slug)
 }
 
 func (s *Server) handleDetachBranch(conn net.Conn, req DetachBranchRequest) {
@@ -681,49 +580,4 @@ func (s *Server) handleAttachBranch(conn net.Conn, req AttachBranchRequest) {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-// writeClaudeScript writes a bash wrapper script that runs claude and drops to a shell.
-// claudeBin is the configured Claude binary (cfg.Claude.Command); falls back to "claude".
-// If resumeSessionID is non-empty, the script invokes `claude --resume <id>` to
-// restore a previous chat session.
-func writeClaudeScript(scriptPath string, claudeBin string, yolo bool, resumeSessionID string, initialPrompt string, defaultArgs []string) error {
-	script := fmt.Sprintf("#!/bin/bash\n%s\nexec bash\n", buildClaudeCommand(claudeBin, yolo, resumeSessionID, initialPrompt, defaultArgs))
-	return os.WriteFile(scriptPath, []byte(script), 0755)
-}
-
-// buildClaudeCommand assembles the `claude` CLI invocation with the appropriate
-// flags. claudeBin is the configured Claude binary (cfg.Claude.Command); falls
-// back to "claude". If resumeSessionID is non-empty, `--resume <id>` is appended
-// so the chat is automatically restored. If initialPrompt is non-empty, it is
-// appended as the positional prompt so Claude opens with that message as the
-// user's first turn (mutually exclusive with --resume in practice; resume wins).
-func buildClaudeCommand(claudeBin string, yolo bool, resumeSessionID string, initialPrompt string, defaultArgs []string) string {
-	if claudeBin == "" {
-		claudeBin = "claude"
-	}
-	cmd := fmt.Sprintf("%q", claudeBin)
-	if yolo {
-		cmd += " --dangerously-skip-permissions"
-	}
-	// Configured default_args (e.g. --plugin-dir for the sortie plugin) must be
-	// reapplied on resume/restore/continue — otherwise a session that had
-	// sortie's MCP tools loses them the moment it is resumed.
-	for _, a := range defaultArgs {
-		cmd += fmt.Sprintf(" %q", a)
-	}
-	if resumeSessionID != "" {
-		cmd += " --resume " + resumeSessionID
-	} else if initialPrompt != "" {
-		cmd += " " + shellSingleQuote(initialPrompt)
-	}
-	return cmd
-}
-
-// shellSingleQuote wraps s in POSIX-safe single quotes. Single quotes inside
-// the string are escaped via the standard close-escape-reopen sequence (the
-// replacement string below) so the result is safe to drop into a bash command
-// line.
-func shellSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

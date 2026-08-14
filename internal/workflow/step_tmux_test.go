@@ -1,94 +1,199 @@
 package workflow
 
+// Tests for the generic tmux-mode step runner (runStepTmux). These require a
+// real tmux binary (skip otherwise) and verify the on-disk artifacts a tmux
+// spawn produces (wrapper script, prompt file, sentinel contract) rather than
+// interacting with the session, following internal/daemon/restore_resume_test.go.
+
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sortie/internal/db"
+	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sortie/internal/tmux"
 )
 
-func TestBuildTmuxClaudeCmd_HonorsCommand(t *testing.T) {
-	got := buildTmuxClaudeCmd("/tmp/stub-claude", false, "", nil)
-	if !strings.Contains(got, "/tmp/stub-claude") {
-		t.Errorf("expected configured path in command, got %q", got)
+// newTmuxStepEngine wires a real DB-backed Engine whose workflow's single step
+// resolves to a tmux-mode agent. The project name is nanosecond-unique so
+// parallel test runs can't collide on tmux session names. Returns the engine,
+// the (non-worktree) task, and the worktree dir.
+func newTmuxStepEngine(t *testing.T, tmuxSetupCommand string) (*Engine, *task.Task, string) {
+	t.Helper()
+	if !tmux.IsAvailable() {
+		t.Skip("tmux not available")
 	}
-	if strings.Contains(got, "--dangerously-skip-permissions") {
-		t.Errorf("expected no yolo flag when yolo=false, got %q", got)
-	}
-}
-
-func TestBuildTmuxClaudeCmd_FallsBackToClaude(t *testing.T) {
-	got := buildTmuxClaudeCmd("", false, "", nil)
-	if got != `"claude"` {
-		t.Errorf("expected fallback %q, got %q", `"claude"`, got)
-	}
-}
-
-func TestBuildTmuxClaudeCmd_YoloAddsFlag(t *testing.T) {
-	got := buildTmuxClaudeCmd("/tmp/stub", true, "", nil)
-	if !strings.Contains(got, "--dangerously-skip-permissions") {
-		t.Errorf("expected --dangerously-skip-permissions, got %q", got)
-	}
-}
-
-// TestBuildTmuxClaudeCmd_IncludesDefaultArgs verifies configured default_args
-// (e.g. --plugin-dir for the sortie plugin) reach interactive tmux steps, so
-// the chat launches with sortie's MCP tools available. Regression guard for
-// tmux/resume steps silently dropping the plugin and losing update_step_context.
-func TestBuildTmuxClaudeCmd_IncludesDefaultArgs(t *testing.T) {
-	got := buildTmuxClaudeCmd("/tmp/stub", true, "", []string{"--plugin-dir", "/path with spaces/plugin"})
-	if !strings.Contains(got, `"--plugin-dir" "/path with spaces/plugin"`) {
-		t.Errorf("expected quoted --plugin-dir default args in command, got %q", got)
-	}
-}
-
-// TestBuildTmuxClaudeCmd_SettingsFlagWiresStopHook verifies that the worktree
-// settings.json path is appended as `--settings <path>` so the Stop hook is
-// loaded additively, without redirecting the entire Claude config dir (which
-// would hide OAuth/onboarding state). Regression guard for the
-// CLAUDE_CONFIG_DIR re-auth bug.
-func TestBuildTmuxClaudeCmd_SettingsFlagWiresStopHook(t *testing.T) {
-	got := buildTmuxClaudeCmd("/tmp/stub", false, "/wt/.sortie/claude-settings/settings.json", nil)
-	want := `--settings "/wt/.sortie/claude-settings/settings.json"`
-	if !strings.Contains(got, want) {
-		t.Errorf("expected %q in command, got %q", want, got)
-	}
-}
-
-// Verify the command fragment composes into a syntactically valid bash script
-// when concatenated the same way runClaudeStepTmux does.
-func TestBuildTmuxClaudeCmd_ScriptIsValidBash(t *testing.T) {
 	dir := t.TempDir()
-	scriptFile := filepath.Join(dir, "run.sh")
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("hello"), 0644); err != nil {
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	project, err := database.GetOrCreateProject(dir)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject: %v", err)
+	}
+	tk, err := database.CreateTask(project.ID, "tmux step", "desc", "slug", "default", "", task.StatusRunning, nil)
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	tk.Worktree = false
+	tk.WorktreePath = dir
+
+	cfg := &config.Config{
+		OnComplete:       "none",
+		TmuxSetupCommand: tmuxSetupCommand,
+		Agents: map[string]config.AgentConfig{
+			"claude": {Command: "true"},
+			"pair": {
+				Mode:    "tmux",
+				Command: "echo agent-here",
+				Env: map[string]string{
+					"MY_AGENT_VAR": "xyz",
+					"SORTIE_AGENT": "masked", // must lose to the contract
+				},
+			},
+		},
+		Workflows: []config.WorkflowConfig{{
+			Name: "default",
+			Steps: []config.StepConfig{{
+				Name:   "implement",
+				Prompt: "do the tmux thing",
+				Agent:  "pair",
+			}},
+		}},
+	}
+	cfg.Project.Name = fmt.Sprintf("wf-tmux-%d", time.Now().UnixNano())
+
+	engine := NewEngine(cfg, database, nil, dir)
+
+	t.Cleanup(func() {
+		session := tmux.NewSession(cfg.Project.Name, fmt.Sprintf("%d", tk.ID), dir)
+		session.Kill()
+	})
+
+	return engine, tk, dir
+}
+
+// TestRunTaskTmuxAgentDispatch proves the engine-level mode dispatch: a step
+// whose agent record is tmux-mode routes through runStepTmux (fire-and-forget
+// pause) instead of the headless runner, and the spawn leaves the full generic
+// contract on disk — wrapper script with agent command + env exports
+// (SORTIE_PROMPT_FILE, SORTIE_DONE_DIR, SORTIE_DONE_PREFIX, agent `env:`,
+// contract-wins masking), the prompt file, and a cleared stale sentinel.
+func TestRunTaskTmuxAgentDispatch(t *testing.T) {
+	engine, tk, dir := newTmuxStepEngine(t, "")
+
+	// A stale sentinel from a previous pass of this step must be cleared on
+	// launch, or the daemon monitor would auto-advance the fresh session
+	// before the agent does any work.
+	doneDir := StepDoneDir(dir)
+	if err := os.MkdirAll(doneDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	staleSentinel := filepath.Join(doneDir, SentinelPrefix("implement")+"-123.json")
+	if err := os.WriteFile(staleSentinel, []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	settingsFile := filepath.Join(dir, "settings with spaces.json")
-	if err := os.WriteFile(settingsFile, []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	claudeCmd := buildTmuxClaudeCmd("/path with spaces/claude", true, settingsFile, []string{"--plugin-dir", "/plugins/sortie"})
-	sysPromptFile := filepath.Join(dir, "sys.txt")
-	if err := os.WriteFile(sysPromptFile, []byte("sys"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	claudeCmd += fmt.Sprintf(" --system-prompt \"$(cat %q)\"", sysPromptFile)
-
-	script := fmt.Sprintf(`#!/bin/bash
-PROMPT=$(cat %q)
-%s "$PROMPT"
-exec bash
-`, promptFile, claudeCmd)
-
-	if err := os.WriteFile(scriptFile, []byte(script), 0755); err != nil {
-		t.Fatal(err)
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask failed: %v", err)
 	}
 
-	if err := exec.Command("bash", "-n", scriptFile).Run(); err != nil {
-		t.Errorf("bash -n rejected generated script: %v\nscript:\n%s", err, script)
+	if _, err := os.Stat(staleSentinel); !os.IsNotExist(err) {
+		t.Errorf("stale sentinel %s must be cleared before the session launches", staleSentinel)
+	}
+
+	prompt, err := os.ReadFile(StepPromptFile(dir, "implement"))
+	if err != nil {
+		t.Fatalf("prompt file not written: %v", err)
+	}
+	if string(prompt) != "do the tmux thing" {
+		t.Errorf("prompt file = %q, want the resolved step prompt", string(prompt))
+	}
+
+	scriptFile := filepath.Join(dir, ".sortie", "run-step-implement.sh")
+	scriptBytes, err := os.ReadFile(scriptFile)
+	if err != nil {
+		t.Fatalf("wrapper script not written: %v", err)
+	}
+	script := string(scriptBytes)
+
+	wantFragments := []string{
+		"echo agent-here", // the agent record's command, not any claude default
+		fmt.Sprintf("export SORTIE_PROMPT_FILE='%s'", StepPromptFile(dir, "implement")),
+		fmt.Sprintf("export SORTIE_DONE_DIR='%s'", doneDir),
+		fmt.Sprintf("export SORTIE_DONE_PREFIX='%s'", SentinelPrefix("implement")),
+		"export MY_AGENT_VAR='xyz'",
+		"export SORTIE_AGENT='pair'",
+		"export SORTIE_PURPOSE='step'",
+	}
+	for _, want := range wantFragments {
+		if !strings.Contains(script, want) {
+			t.Errorf("wrapper script missing %q\nscript:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "masked") {
+		t.Errorf("agent env must not mask the SORTIE_AGENT contract value\nscript:\n%s", script)
+	}
+
+	// Fire-and-forget: the step must NOT have produced a completed context —
+	// the task pauses at the tmux gate for the sentinel/manual advance.
+	ctxVal, err := engine.database.GetTaskStepContext(tk.ID, "implement")
+	if err != nil {
+		t.Fatalf("GetTaskStepContext: %v", err)
+	}
+	if ctxVal != "" {
+		t.Errorf("tmux step must not capture a context at launch, got %q", ctxVal)
+	}
+}
+
+// TestRunStepTmuxSetupCommandControlsAgent covers the userland-placement
+// branch: when tmux-setup-command references {{run_agent}}/{{agent_command}},
+// the session is created bare (no auto-started window-0 agent) and the setup
+// command receives the agent record's command and the wrapper script path via
+// SetupVars.
+func TestRunStepTmuxSetupCommandControlsAgent(t *testing.T) {
+	varsOut := "setup-vars.txt"
+	setupCmd := `printf '%s\n%s\n' "{{agent_command}}" "{{run_agent}}" > ` + varsOut
+	engine, tk, dir := newTmuxStepEngine(t, setupCmd)
+
+	wf := engine.cfg.GetWorkflow("default")
+	step := wf.Steps[0]
+	_, agentCfg, err := engine.cfg.StepAgent(wf, &step)
+	if err != nil {
+		t.Fatalf("StepAgent: %v", err)
+	}
+
+	exitCode, outputTail, spawnErr := engine.runStepTmux(context.Background(), tk, step, agentCfg,
+		"prompt body", map[string]string{"SORTIE_AGENT": "pair"}, nil)
+	if spawnErr != nil {
+		t.Fatalf("runStepTmux: %v", spawnErr)
+	}
+	if exitCode != 0 || outputTail != "" {
+		t.Errorf("runStepTmux = (%d, %q), want fire-and-forget (0, \"\")", exitCode, outputTail)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, varsOut))
+	if err != nil {
+		t.Fatalf("setup command did not run (vars file missing): %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("vars file = %q, want 2 lines (agent_command, run_agent)", string(data))
+	}
+	if lines[0] != "echo agent-here" {
+		t.Errorf("{{agent_command}} = %q, want the agent record's command %q", lines[0], "echo agent-here")
+	}
+	if want := filepath.Join(dir, ".sortie", "run-step-implement.sh"); lines[1] != want {
+		t.Errorf("{{run_agent}} = %q, want the wrapper script path %q", lines[1], want)
 	}
 }

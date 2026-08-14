@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deliberate failure: stub-claude.sh runs with `set -euo pipefail` and invokes
+# Deliberate failure: stub-agent.sh runs with `set -euo pipefail` and invokes
 # this hook as a bare command, so a non-zero exit aborts the stub. The step then
 # exits non-zero and the task lands in "failed" — which is what the parent's
 # {{children.<id>.status}} must report on resume.

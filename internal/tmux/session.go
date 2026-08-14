@@ -72,22 +72,26 @@ func (s *Session) Create(command string, args ...string) error {
 
 // SetupVars holds template variables for tmux setup command interpolation.
 type SetupVars struct {
-	// ClaudeCommand is the full claude CLI invocation (e.g. "claude --dangerously-skip-permissions \"$PROMPT\"")
-	ClaudeCommand string
-	// RunAgent is the path to the wrapper script that runs the Claude agent TUI
+	// AgentCommand is the raw agent shell command from the agent record.
+	// NOTE: running it outside the wrapper script loses the exported
+	// SORTIE_* env contract — prefer {{run_agent}} unless you re-export env
+	// yourself.
+	AgentCommand string
+	// RunAgent is the path to the wrapper script that runs the agent (env
+	// exports + agent command + fallback shell).
 	RunAgent string
 }
 
 // SetupCommandControlsAgent returns true if the setup command contains
-// {{run_agent}} or {{claude_command}}, meaning the user controls where
+// {{run_agent}} or {{agent_command}}, meaning the user controls where
 // the agent runs rather than having it auto-start in window 0.
 func SetupCommandControlsAgent(command string) bool {
 	return strings.Contains(command, "{{run_agent}}") ||
-		strings.Contains(command, "{{claude_command}}")
+		strings.Contains(command, "{{agent_command}}")
 }
 
 // RunSetupCommand runs a user-configured command after tmux session creation.
-// Template variables: {{session_name}}, {{worktree_path}}, {{claude_command}}, {{run_agent}}.
+// Template variables: {{session_name}}, {{worktree_path}}, {{agent_command}}, {{run_agent}}.
 func (s *Session) RunSetupCommand(command string, vars *SetupVars) error {
 	if command == "" {
 		return nil
@@ -96,7 +100,7 @@ func (s *Session) RunSetupCommand(command string, vars *SetupVars) error {
 	resolved := strings.ReplaceAll(command, "{{session_name}}", s.Name)
 	resolved = strings.ReplaceAll(resolved, "{{worktree_path}}", s.WorkDir)
 	if vars != nil {
-		resolved = strings.ReplaceAll(resolved, "{{claude_command}}", vars.ClaudeCommand)
+		resolved = strings.ReplaceAll(resolved, "{{agent_command}}", vars.AgentCommand)
 		resolved = strings.ReplaceAll(resolved, "{{run_agent}}", vars.RunAgent)
 	}
 

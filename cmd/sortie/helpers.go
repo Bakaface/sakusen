@@ -23,7 +23,7 @@ func workflowAllowsEmptyInput(cfg *config.Config, workflowName string) bool {
 	if wf == nil {
 		return false
 	}
-	return wf.Input != "" || wf.FirstStepIsTmux()
+	return wf.Input != "" || cfg.FirstStepIsTmux(wf)
 }
 
 // taskTableRow holds the display fields for a single row in the task list table.

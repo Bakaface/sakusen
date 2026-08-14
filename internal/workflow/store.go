@@ -48,10 +48,9 @@ type taskStore interface {
 	UpdatePausedTmuxStepContext(taskID int64, stepName, value string, appendMode bool) (int64, error)
 
 	// Chat session tracking (tmux steps).
-	UpsertChat(taskID int64, stepName, sessionID, tmuxSessionName string) error
 	GetChatByStep(taskID int64, stepName string) (*db.Chat, error)
 	// SetChatSessionID is used by RecordTmuxStepSentinelSession (stepcontext.go)
-	// to correct the recorded session id from the Stop-hook sentinel payload.
+	// to record the session id from the turn-end sentinel payload.
 	SetChatSessionID(taskID int64, stepName, sessionID string) error
 
 	// Track chain reads (tracks table). GetTrackChain returns the track and

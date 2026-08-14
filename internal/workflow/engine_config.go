@@ -16,37 +16,33 @@ import (
 // Direct fields mirror config.Config values Engine reads verbatim (a plain
 // snapshot taken once at construction). The delegate methods mirror
 // config.Config accessors whose behavior depends on state that's impractical
-// to flatten out here (the full resolved Workflows list, the branch
-// template) — duplicating that logic would be worse than keeping a pointer
-// back to the source Config for those few calls. See NewEngine: the daemon
-// already reconstructs the Engine wholesale on every config reload (it does
-// not mutate an existing Engine's config in place), so a value snapshotted at
-// construction time is exactly as fresh as the full *config.Config was
-// before this change.
+// to flatten out here (the full resolved Workflows list, the branch template,
+// the agent registry) — duplicating that logic would be worse than keeping a
+// pointer back to the source Config for those few calls. See NewEngine: the
+// daemon already reconstructs the Engine wholesale on every config reload (it
+// does not mutate an existing Engine's config in place), so a value
+// snapshotted at construction time is exactly as fresh as holding the full
+// *config.Config would be.
 type engineConfig struct {
-	BaseBranch                 string
-	SystemPrompt               string
-	AllowedSummarizationModels []string
-	Claude                     config.ClaudeConfig
-	ProjectName                string
-	TmuxSetupCommand           string
+	BaseBranch       string
+	Summarizer       config.SummarizerConfig
+	ProjectName      string
+	TmuxSetupCommand string
 
 	// full is retained so the delegate methods below can reuse
-	// config.Config's own workflow-lookup / branch-template resolution
-	// instead of duplicating it.
+	// config.Config's own workflow-lookup / branch-template / agent
+	// resolution instead of duplicating it.
 	full *config.Config
 }
 
 // newEngineConfig snapshots the fields/methods Engine needs from cfg.
 func newEngineConfig(cfg *config.Config) *engineConfig {
 	return &engineConfig{
-		BaseBranch:                 cfg.Git.BaseBranch,
-		SystemPrompt:               cfg.SystemPrompt,
-		AllowedSummarizationModels: cfg.AllowedSummarizationModels,
-		Claude:                     cfg.Claude,
-		ProjectName:                cfg.Project.Name,
-		TmuxSetupCommand:           cfg.TmuxSetupCommand,
-		full:                       cfg,
+		BaseBranch:       cfg.Git.BaseBranch,
+		Summarizer:       cfg.Summarizer,
+		ProjectName:      cfg.Project.Name,
+		TmuxSetupCommand: cfg.TmuxSetupCommand,
+		full:             cfg,
 	}
 }
 
@@ -76,4 +72,27 @@ func (e *engineConfig) GetWorktreeSetupCommands(wf *config.WorkflowConfig) []str
 
 func (e *engineConfig) ResolveBranchForTask(taskID int64, taskTitle, taskSlug, branchName string) string {
 	return e.full.ResolveBranchForTask(taskID, taskTitle, taskSlug, branchName)
+}
+
+// StepAgent resolves the agent record for a step (step.agent → workflow.agent
+// → default_agent → "claude"). See config.Config.StepAgent.
+func (e *engineConfig) StepAgent(wf *config.WorkflowConfig, step *config.StepConfig) (string, config.AgentConfig, error) {
+	return e.full.StepAgent(wf, step)
+}
+
+// WorkflowAgent resolves the workflow-level agent record (workflow.agent →
+// default_agent → "claude"). Used by paths that need an agent without a
+// concrete step (merge conflict resolution).
+func (e *engineConfig) WorkflowAgent(wf *config.WorkflowConfig) (string, config.AgentConfig, error) {
+	return e.full.StepAgent(wf, nil)
+}
+
+// StepIsTmux reports whether a step resolves to a tmux-mode agent.
+func (e *engineConfig) StepIsTmux(wf *config.WorkflowConfig, step *config.StepConfig) bool {
+	return e.full.StepIsTmux(wf, step)
+}
+
+// ResolveAgent looks up an agent record by slug.
+func (e *engineConfig) ResolveAgent(slug string) (config.AgentConfig, bool) {
+	return e.full.ResolveAgent(slug)
 }

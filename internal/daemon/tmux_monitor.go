@@ -147,13 +147,12 @@ func (s *Server) maybeAutoAdvance(t *task.Task) {
 		return
 	}
 
-	// Capture the authoritative session id from the Stop-hook sentinel payload
-	// before anything consumes it. The cwd-matched async finder that records the
-	// session at launch can latch onto an unrelated agent when several share a
-	// working directory (notably non-worktree mode); the sentinel is written by
-	// the agent that actually ran THIS step, so its session_id is correct. Done
-	// for human steps too — they summarize their chat on user finalize — and is
-	// idempotent across the multiple turn-end sentinels a single session emits.
+	// Capture the session id from the sentinel payload (optional session_id
+	// field) before anything consumes it — this is the only session-discovery
+	// mechanism, feeding chat_log_command lookup and resume_command restore.
+	// Done for human steps too — they summarize their chat on user finalize —
+	// and is idempotent across the multiple turn-end sentinels a single
+	// session emits.
 	s.captureSentinelSession(pc, t, justFinished.Name)
 
 	// Steps that the user explicitly wants to approve are out of scope for
@@ -204,15 +203,13 @@ func (s *Server) maybeAutoAdvance(t *task.Task) {
 	log.Printf("%sTask #%d: auto-advance result: %s", s.projectLogPrefix(t.ProjectID), t.ID, outcome.message)
 }
 
-// captureSentinelSession records the authoritative Claude session id for the
-// just-finished tmux step from its Stop-hook sentinel payload, if one is
-// present. This corrects the session captured at launch by the cwd-matched
-// async finder, which can record an unrelated session when several agents share
-// a working directory. Delegates to workflow.Engine.RecordTmuxStepSentinelSession
-// (see internal/workflow/stepcontext.go) — the session id gates which chat
-// transcript summarize_chat capture reads later, so this is part of the
-// step-context lifecycle the Engine owns even though it never touches
-// task_steps.context directly.
+// captureSentinelSession records the agent session id for the just-finished
+// tmux step from its turn-end sentinel payload, if one is present. Delegates
+// to workflow.Engine.RecordTmuxStepSentinelSession (see
+// internal/workflow/stepcontext.go) — the session id gates which chat log
+// summarize_chat capture reads later and which session a restore resumes, so
+// this is part of the step-context lifecycle the Engine owns even though it
+// never touches task_steps.context directly.
 func (s *Server) captureSentinelSession(pc *projectContext, t *task.Task, stepName string) {
 	pc.engine.RecordTmuxStepSentinelSession(t, stepName)
 }

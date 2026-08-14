@@ -173,7 +173,7 @@ func (m Model) selectedWorkflowAllowsEmptyInput() bool {
 	if wf == nil {
 		return false
 	}
-	return wf.Input != "" || wf.FirstStepIsTmux()
+	return wf.Input != "" || m.cfg.FirstStepIsTmux(wf)
 }
 
 // animationEnabled returns true if the sortie animation is configured on.

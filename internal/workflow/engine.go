@@ -14,11 +14,12 @@ import (
 	gitpkg "github.com/Bakaface/sortie/internal/git"
 	"github.com/Bakaface/sortie/internal/merge"
 	"github.com/Bakaface/sortie/internal/notify"
+	"github.com/Bakaface/sortie/internal/runner"
 	"github.com/Bakaface/sortie/internal/task"
 )
 
 const (
-	// processExitPollInterval is how often to check whether a Claude subprocess has exited.
+	// processExitPollInterval is how often to check whether a headless agent subprocess has exited.
 	processExitPollInterval = 500 * time.Millisecond
 )
 
@@ -32,12 +33,12 @@ type Engine struct {
 	coord    *merge.Coordinator // owns merge serialization, retry, and cleanup-on-failure
 
 	// runner is the AGENT-RUNNER seam: runStep calls it (instead of calling
-	// runClaudeStep directly) to execute a headless step's Claude agent, so
-	// tests can substitute a fake that returns scripted results without
-	// spawning a real claude subprocess. Defaults to realAgentRunner{} (see
+	// runHeadlessAgent directly) to execute a headless step's agent command,
+	// so tests can substitute a fake that returns scripted results without
+	// spawning a real subprocess. Defaults to realAgentRunner{} (see
 	// step.go); tests in this package override it by setting the field
 	// directly after construction — the same pattern already used for e.repo
-	// in fasttrack_test.go. The tmux path (runClaudeStepTmux) is NOT behind
+	// in fasttrack_test.go. The tmux path (runStepTmux) is NOT behind
 	// this seam; see agentRunner's doc comment in step.go for why.
 	runner agentRunner
 
@@ -372,7 +373,6 @@ type stepResult struct {
 	exitCode   int
 	resultText string
 	outputTail string
-	sessionID  string
 	useTmux    bool
 }
 
@@ -477,7 +477,27 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 
 	resolvedPrompt := ResolveTemplate(step.Prompt, tmplCtx)
 
-	sysPrompt := BuildSystemPrompt(resolvedPrompt, e.cfg.SystemPrompt, ws.imageRelPaths)
+	// Surface attached images by appending a pointer section to the prompt —
+	// there is no agent-agnostic system-prompt channel to inject them through.
+	if len(ws.imageRelPaths) > 0 {
+		var sb strings.Builder
+		sb.WriteString(resolvedPrompt)
+		sb.WriteString("\n\n## Attached Images\n\n")
+		sb.WriteString("The following images were attached to this task. Use your file reading tool to view them:\n\n")
+		for _, imgPath := range ws.imageRelPaths {
+			sb.WriteString("- `" + imgPath + "`\n")
+		}
+		resolvedPrompt = sb.String()
+	}
+
+	// Resolve the agent that runs this step (step.agent → workflow.agent →
+	// default_agent → "claude"). An unresolvable slug fails the step with an
+	// instructive error instead of spawning anything.
+	agentSlug, agentCfg, agentErr := e.cfg.StepAgent(wf, &step)
+	if agentErr != nil {
+		e.database.UpdateTaskExitCode(t.ID, 1, agentErr.Error())
+		return stepResult{}, fmt.Errorf("step %q failed: %w", step.Name, agentErr)
+	}
 
 	// Set environment variables
 	env := map[string]string{
@@ -497,18 +517,20 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		// Lets agents target "their" track via the update_track_context MCP tool.
 		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
+	// The resolved agent slug, so stubs/scripts can tell which agent record a
+	// spawn came from without re-deriving the cascade.
+	env["SORTIE_AGENT"] = agentSlug
 
-	// Spawn Claude process (tmux or direct)
-	useTmux := step.UseTmux(wf.Print)
+	// Spawn the step's agent (tmux or headless, per the agent record's mode)
+	useTmux := agentCfg.IsTmux()
 	var exitCode int
 	var resultText string
 	var outputTail string
-	var sessionID string
 	var spawnErr error
 	if useTmux {
-		exitCode, outputTail, spawnErr = e.runClaudeStepTmux(ctx, t, step, resolvedPrompt, env, outputFn, sysPrompt)
+		exitCode, outputTail, spawnErr = e.runStepTmux(ctx, t, step, agentCfg, resolvedPrompt, env, outputFn)
 	} else {
-		exitCode, resultText, sessionID, outputTail, spawnErr = e.runner.runHeadlessStep(ctx, e, t, step, resolvedPrompt, env, outputFn, sysPrompt)
+		exitCode, resultText, outputTail, spawnErr = e.runner.runHeadlessStep(ctx, e, t, step, agentCfg, resolvedPrompt, env, outputFn)
 	}
 	if spawnErr != nil {
 		e.database.UpdateTaskExitCode(t.ID, 1, spawnErr.Error())
@@ -529,7 +551,6 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		exitCode:   exitCode,
 		resultText: resultText,
 		outputTail: outputTail,
-		sessionID:  sessionID,
 		useTmux:    useTmux,
 	}, nil
 }
@@ -558,8 +579,8 @@ type stepOutcome struct {
 }
 
 // applyStepResult makes the post-step decisions that follow a successfully-
-// executed step (runStep already handled spawn/exit-code failures): record
-// the Claude session, check for waits-on suspension, validate the step
+// executed step (runStep already handled spawn/exit-code failures): check
+// for waits-on suspension, validate the step
 // produced meaningful output, capture the step's context, evaluate any loop
 // condition, and pause for approval/tmux if required. Returns the outcome
 // RunTask's driver switches on, or a non-nil error when the step must fail
@@ -567,12 +588,9 @@ type stepOutcome struct {
 func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, steps []config.StepConfig, i int, result stepResult) (stepOutcome, error) {
 	step := result.step
 
-	// Record Claude session for this step
-	if result.sessionID != "" {
-		if chatErr := e.database.UpsertChat(t.ID, step.Name, result.sessionID, ""); chatErr != nil {
-			log.Printf("Warning: failed to upsert chat for task #%d step %q: %v", t.ID, step.Name, chatErr)
-		}
-	}
+	// (Chat sessions for tmux steps are recorded from sentinel payloads by the
+	// daemon's monitor — see RecordTmuxStepSentinelSession. Headless steps
+	// have no session-discovery mechanism and record nothing.)
 
 	// If this step spawned child tasks via the MCP create_tasks_and_wait /
 	// wait_for_tasks tools, the daemon recorded task_waits_on edges. Suspend
@@ -602,7 +620,7 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 	if !step.Human && !result.useTmux {
 		if strings.TrimSpace(result.resultText) == "" {
 			// No output — require a diff as the alternative signal
-			noiseFiles := []string{".claude-output.log"}
+			noiseFiles := []string{runner.OutputLogFileName}
 			hasChanges, err := e.repo.HasMeaningfulChanges(t.WorktreePath, noiseFiles)
 			if err != nil {
 				log.Printf("Warning: failed to check for changes in step %q: %v", step.Name, err)
@@ -740,7 +758,7 @@ func (e *Engine) summarizePreviousTmuxStep(ctx context.Context, t *task.Task, lo
 	if !ok {
 		return nil
 	}
-	if !prevStep.UseTmux(wf.Print) || prevStep.EffectiveSummarizationStrategy() != config.SummarizationStrategySummarizeChat {
+	if !e.cfg.StepIsTmux(wf, &prevStep) || prevStep.EffectiveSummarizationStrategy() != config.SummarizationStrategySummarizeChat {
 		return nil
 	}
 
@@ -768,7 +786,7 @@ func (e *Engine) summarizePreviousTmuxStep(ctx context.Context, t *task.Task, lo
 		return nil
 	}
 
-	chat, err := e.loadStepChatContent(t, prevStep.Name, true)
+	chat, err := e.loadStepChatContent(ctx, t, wf, prevStep, true)
 	if err != nil {
 		return fail("failed to load chat for tmux step %q of task #%d: %v", prevStep.Name, t.ID, err)
 	}
@@ -782,7 +800,7 @@ func (e *Engine) summarizePreviousTmuxStep(ctx context.Context, t *task.Task, lo
 	// Surface the step summarization phase via the task status so
 	// the TUI can distinguish it from regular step execution.
 	restore := e.markSummarizingStep(t, wf)
-	summary, err := e.summarizeChatLog(ctx, t, prevStep.Name, prevStep.SummarizationPrompt, chat, prevStep.EffectiveAllowedSummarizationModels(e.cfg.AllowedSummarizationModels))
+	summary, err := e.summarizeChatLog(ctx, t, prevStep.Name, prevStep.SummarizationPrompt, chat)
 	restore()
 	if err != nil {
 		return fail("summarize_chat failed for tmux step %q of task #%d: %v", prevStep.Name, t.ID, err)

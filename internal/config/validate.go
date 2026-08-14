@@ -68,6 +68,13 @@ func Diagnose(path string) ([]Diagnostic, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
+	// Surface removed keys (claude:, yolo:, system_prompt:, ...) with their
+	// migration messages before the strict decode turns them into generic
+	// "field not found" errors.
+	if err := checkRemovedProjectKeys(data); err != nil {
+		return nil, err
+	}
+
 	var proj ProjectConfig
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -143,6 +150,14 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	}
 	if !validPriorities[proj.DefaultPriority] {
 		return nil, fmt.Errorf(`default_priority: invalid value %q (must be "low", "medium", "high", or "urgent")`, proj.DefaultPriority)
+	}
+
+	// Agent record shapes are checkable from the file alone. Refs (step/
+	// workflow `agent:`, default_agent) are NOT resolved here — they may point
+	// at agents defined in the global tier, which single-file diagnosis
+	// deliberately doesn't merge; the full Load path validates them.
+	if err := validateAgentRecords(proj.Agents); err != nil {
+		return nil, err
 	}
 
 	// Capture whether any on-disk files exist before resolution mutates the

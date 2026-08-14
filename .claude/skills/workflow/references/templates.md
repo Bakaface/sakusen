@@ -52,7 +52,7 @@ type TrackVars struct {
 | `{{track.name}}` | Attached track's name |
 | `{{track.context}}` | Root-first ancestor-concatenated track context (re-read live at every step launch) |
 | `{{track.own_context}}` | Leaf track's own context only |
-| `{{steps.step_name.context}}` | Step context from DB (captured from Claude's `result` event) |
+| `{{steps.step_name.context}}` | Step context from DB (captured from the agent's result text or a summarize_chat pass) |
 | `{{artifacts.step_name}}` | Backward compat alias for `{{steps.step_name.context}}` |
 
 Pattern: regex `\{\{([a-zA-Z0-9_.]+)\}\}` — unknown keys pass through unchanged.

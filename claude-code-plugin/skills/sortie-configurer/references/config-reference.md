@@ -2,19 +2,18 @@
 
 ## Contents
 
-- [System Prompt](#system-prompt)
+- [Agents Section](#agents-section)
+- [Summarizer Section](#summarizer-section)
 - [Git Section](#git-section)
 - [Finalization (`on_complete`)](#finalization-on_complete)
 - [Verification Section](#verification-section)
-- [Claude Binary Override](#claude-binary-override)
 - [Poll Interval](#poll-interval)
-- [Summarization Model Allowlist](#summarization-model-allowlist)
 - [Options (TUI Display)](#options-tui-display)
 - [Notifications Section](#notifications-section)
 - [Worktree Sync Paths](#worktree-sync-paths)
 - [Worktree Setup Commands](#worktree-setup-commands)
 - [Tmux Setup Command](#tmux-setup-command)
-- [Step Configuration Details](#step-configuration-details) — timeout, step context, summarization, require_context, human approval, tmux vs print, loops
+- [Step Configuration Details](#step-configuration-details) — timeout, step context, summarization, require_context, human approval, execution mode, loops
 - [Cross-Task References (`{{tasks.<id>.<field>}}`)](#cross-task-references-tasksidfield)
 - [Child Task Orchestration (`{{children.*}}`)](#child-task-orchestration-children)
 - [Task States](#task-states)
@@ -23,17 +22,45 @@
 - [Legacy Config Formats (Removed)](#legacy-config-formats-removed)
 - [Complete Example](#complete-example)
 
-## System Prompt
+## Agents Section
 
 ```yaml
-system_prompt: |
-  You are an autonomous coding agent. Work autonomously without asking for user input.
-  Make decisions and implement them directly. If something is ambiguous, pick the best option and proceed.
+default_agent: claude          # slug steps fall back to; defaults to "claude" when unset
+
+agents:
+  claude:
+    mode: headless             # "headless" (default) or "tmux"
+    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-headless.sh"'
+  claude-tmux:
+    mode: tmux
+    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-tmux.sh"'
+    resume_command: 'claude --dangerously-skip-permissions --resume "$SORTIE_SESSION_ID"'
+    chat_log_command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-chat-log.sh"'
+    env:
+      MY_VAR: value            # extra env for every spawn of this agent
 ```
 
-Controls the **preamble** of the system prompt passed to every spawned agent via `--system-prompt`. When omitted, a minimal default is used that instructs Claude to work autonomously. Override this to customize agent behavior across all tasks.
+Every workflow step runs one of these shell commands (via `sh -c`, in the task workdir). See SKILL.md → Agents for the full field table, the selection cascade (step `agent:` → workflow `agent:` → `default_agent:` → `"claude"`), the `SORTIE_*` environment contract, the tmux turn-end sentinel convention, and v1 limitations.
 
-The full system prompt is assembled as: your preamble (or the default) → a fixed **verification footer** (always appended — it instructs agents to find and run the project's own test/lint commands from CLAUDE.md/README instead of inventing them) → `# Task` → the resolved step prompt → an attached-images section when the task has images. You cannot suppress the footer.
+`agents:` and `default_agent:` may also be set in the global `~/.sortie.yml`; project-tier records override global ones **per slug, wholesale** (records are not field-merged).
+
+`sortie init` scaffolds the two records above plus the user-owned scripts under `.sortie/agents/` (they require `claude` and `jq` on PATH; steps reference them via `$SORTIE_PROJECT_PATH` so worktrees share the project-root copies). Swap the commands to use any other tool.
+
+There is no system-prompt injection: the fully-resolved step prompt is delivered via `$SORTIE_PROMPT_FILE`, and attached images are appended to the step prompt itself. To customize system-level behavior, bake flags into the agent's `command` (e.g. `claude --append-system-prompt "..."`).
+
+---
+
+## Summarizer Section
+
+```yaml
+summarizer:
+  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  max_prompt_bytes: 380000     # optional; >0 enables map-reduce chunking of huge chats
+```
+
+The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles, and `sortie backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SORTIE_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `backfill_context`).
+
+When the block is omitted, everything degrades gracefully: titles fall back to a truncated task input, summarize passes are skipped with a warning (or fail the task when a step sets `require_context: true`), and `backfill-context` errors out.
 
 ---
 
@@ -91,20 +118,6 @@ Both fields are accepted by the schema (and validated) but are **not currently r
 
 ---
 
-## Claude Binary Override
-
-```yaml
-claude:
-  command: claude            # Binary name or path (default: "claude")
-  default_args:              # Extra args prepended to every invocation
-    - --model
-    - opus
-```
-
-`--dangerously-skip-permissions` is appended automatically when top-level `yolo: true`.
-
----
-
 ## Poll Interval
 
 ```yaml
@@ -112,18 +125,6 @@ poll_interval: 5s            # Daemon task-polling cadence (Go duration; default
 ```
 
 Invalid duration strings are a hard load error. Rarely set per-project.
-
----
-
-## Summarization Model Allowlist
-
-```yaml
-allowed_summarization_models:   # Subset of: haiku, sonnet, opus
-  - haiku
-  - sonnet
-```
-
-Restricts which models the summarizer auto-selects from. The summarizer picks the **cheapest** allowed model (`haiku` < `sonnet` < `opus`) whose prompt-size ceiling fits the transcript. When omitted, all three are allowed. Override per-step with `allowed_summarization_models` on a `StepConfig` (step-level takes precedence over this project-level list). Invalid entries are a hard load error.
 
 ---
 
@@ -255,12 +256,12 @@ Variables:
 |---|---|
 | `{{session_name}}` | Tmux session created for the task |
 | `{{worktree_path}}` | Absolute path to the task's worktree |
-| `{{run_agent}}` | Pre-built command string that launches the Claude agent (wrapper script) |
-| `{{claude_command}}` | Raw claude CLI invocation string (prefer `{{run_agent}}`) |
+| `{{run_agent}}` | Path to the wrapper script that launches the agent with the `SORTIE_*` env exported (prefer this) |
+| `{{agent_command}}` | Raw agent shell command from the agent record (lacks the env exports; the old `{{claude_command}}` name is a load error) |
 
 The command runs via `sh -c` with the **worktree** as `cwd`; a non-zero exit fails the session launch.
 
-**Agent-launch control:** when the command contains `{{run_agent}}` or `{{claude_command}}`, Sortie assumes *you* place the agent (as in the example above) and does not auto-start it. When neither appears, Sortie starts the agent itself in window 0 after your command runs. If you do not set `tmux-setup-command` at all, Sortie uses a minimal default that just starts the agent.
+**Agent-launch control:** when the command contains `{{run_agent}}` or `{{agent_command}}`, Sortie assumes *you* place the agent (as in the example above) and does not auto-start it. When neither appears, Sortie starts the agent itself in window 0 after your command runs. If you do not set `tmux-setup-command` at all, Sortie uses a minimal default that just starts the agent.
 
 ---
 
@@ -272,15 +273,15 @@ Go duration strings: `"30m"`, `"1h"`, `"1h30m"`, `"45m"`, `"2h"`. Default: `"30m
 
 ### Step Context Flow
 
-After each step completes, the result from Claude's output is captured as step context and stored in the `task_steps` database table. This context is available to subsequent steps via `{{steps.<step_name>.context}}` (or the backward-compat alias `{{artifacts.<step_name>}}`).
+After each step completes, the agent's result text (headless: read from `$SORTIE_RESULT_FILE`, with a stdout-tail fallback) is captured as step context and stored in the `task_steps` database table. This context is available to subsequent steps via `{{steps.<step_name>.context}}` (or the backward-compat alias `{{artifacts.<step_name>}}`).
 
 ### Step Summarization
 
-By default (`summarization_strategy` unset), the step's context is produced by **`summarize_chat`** — a second Claude call summarizes the full transcript. `last_message` and `none` are the alternatives:
+By default (`summarization_strategy` unset), the step's context is produced by **`summarize_chat`** — the configured `summarizer:` command summarizes the step's chat content. `last_message` and `none` are the alternatives:
 
 ```yaml
 - name: grilling
-  # print omitted → tmux (the default)
+  agent: claude-tmux           # interactive step → tmux-mode agent
   summarization_strategy: summarize_chat
   summarization_prompt: |
     Extract the durable design decisions reached in this Q&A.
@@ -299,13 +300,13 @@ By default (`summarization_strategy` unset), the step's context is produced by *
 | Strategy | What gets captured |
 |---|---|
 | (unset) | **Defaults to `summarize_chat`** |
-| `summarize_chat` | A second Claude call summarizes the full transcript using `summarization_prompt` (the default) |
-| `last_message` | The agent's final output message only (no extra Claude call; unusable for tmux steps) |
+| `summarize_chat` | The `summarizer:` command summarizes the step's chat content using `summarization_prompt` (the default) |
+| `last_message` | The agent's final result text only (no summarizer call; unusable for tmux steps) |
 | `none` | Nothing — no step context is captured; later `{{steps.<name>.context}}` references resolve to empty |
 
-`summarize_chat` is essential for tmux steps (`print: false`) where the meaningful output is the dialogue, not a final message. The summarizer step also unlocks the `step_context_empty` loop exit pattern: instruct the summarizer to emit empty output when "no issues found", and the loop will terminate.
+The chat content comes from the unified task log for headless steps, and from the agent record's `chat_log_command` for tmux steps — a tmux agent without `chat_log_command` captures no chat context. `summarize_chat` is essential for tmux steps where the meaningful output is the dialogue, not a final message. The summarizer step also unlocks the `step_context_empty` loop exit pattern: instruct the summarizer to emit empty output when "no issues found", and the loop will terminate. Requires a configured `summarizer:` — without one, the pass is skipped with a warning (or fails the task under `require_context: true`).
 
-Inside `summarization_prompt`, the variable `{{chat}}` expands to the full transcript. All standard task variables (`{{task.id}}`, `{{steps.<name>.context}}`, etc.) are also available.
+Inside `summarization_prompt`, the variable `{{chat}}` expands to the full chat content. All standard task variables (`{{task.id}}`, `{{steps.<name>.context}}`, etc.) are also available.
 
 ### Require Context
 
@@ -347,20 +348,17 @@ steps:
 
 When `human: true`, the task pauses at `awaiting-approval` status. The user reviews in the TUI and approves to continue. Use for review gates.
 
-### Tmux Steps (the default) vs. headless `print`
+### Execution Mode: Headless vs. Tmux Agents
 
-Tmux is the **default** execution mode — a step runs in tmux unless `print: true` is set. When a step runs in tmux:
-- Claude runs inside an interactive tmux session
+A step's execution mode comes from the agent record it resolves to (cascade: step `agent:` → workflow `agent:` → `default_agent:` → `"claude"`). When a step resolves to a **tmux-mode** agent:
+- The agent command runs inside a detached interactive tmux session
 - User can attach to watch/interact
 - Task shows `tmux` status in TUI
-- The daemon auto-advances on turn-end (or press `c` to finalize manually)
+- The daemon auto-advances on the agent's turn-end sentinel (hookless agents are manual-advance; press `c` to advance/finalize)
 
-Execution-mode resolution order:
-1. Step-level `print` field (if set: `true` = headless, `false` = tmux)
-2. Workflow-level `print` field (default for all steps)
-3. Falls back to `false` (tmux)
+A **headless** agent is spawned as a subprocess, its stdout is streamed to the task log, and the step auto-advances on exit with the result text from `$SORTIE_RESULT_FILE`.
 
-> The removed `tmux:` field is a **hard load error** — use `print:` (inverted). See the [`print` section in SKILL.md](../SKILL.md) for the full `print` × `human` behavior table.
+> The removed `tmux:` and `print:` fields are **hard load errors** — select an agent whose `mode` matches instead. See the mode section in SKILL.md for the full mode × `human` behavior table.
 
 ### Loop Configuration
 
@@ -382,7 +380,7 @@ steps:
       </step-context>
     human: true
   - name: fixing
-    print: true            # required: loop steps cannot run in tmux
+    # inherits the (headless) default agent — loop steps must resolve to a headless agent
     prompt: |
       Fix the issues found during review:
       <step-context name="reviewing">
@@ -400,7 +398,7 @@ steps:
 - No self-reference
 - `max_iterations` must be >= 1
 - Loop steps cannot have `human: true`
-- Loop steps cannot run in tmux — set `print: true` on the loop step (or its workflow)
+- Loop steps cannot resolve to a tmux-mode agent — use a headless agent on the loop step (or its workflow)
 - Loop ranges cannot overlap with other loops
 
 ---
@@ -449,7 +447,7 @@ Since the meaningful state usually lives in the conversation, orchestrator steps
 |---|---|
 | `pending` | Waiting to be picked up by a worker |
 | `init` | Initializing worktree and environment |
-| `running` | Claude agent is executing |
+| `running` | Agent is executing |
 | `awaiting-approval` | Paused at a `human: true` step |
 | `awaiting-children` | Step suspended on child tasks (`create_tasks_and_wait` / `wait_for_tasks`) |
 | `tmux` | Running in interactive tmux session |
@@ -482,17 +480,28 @@ Pressing `c` on a completed/failed task triggers continuation:
 3. Task resets to `pending` with the selected workflow
 4. Daemon picks up and re-executes
 
-For tmux workflows, continuation creates/reuses a worktree with a `CLAUDE.md` containing previous context.
+For terminal tasks, continuation creates/reuses a worktree and starts an interactive (tmux-mode) agent whose initial prompt includes the task input and any previously captured context.
 
 ### Fast-Track Finalization
 
-When finalizing a tmux task with no meaningful changes (ignoring `.claude-output.log` and `CLAUDE.md`), the task skips summarizer/on_complete and goes directly to `completed`.
+When finalizing a tmux task with no meaningful changes (ignoring `.sortie-output.log` and `CLAUDE.md`), the task skips summarizer/on_complete and goes directly to `completed`.
 
 ---
 
 ## Legacy Config Formats (Removed)
 
-The ancient singular `workflow:` key and the three-category `workflows: {tasks:, one-off:, init:}` map have been removed. Use the current flat-list format:
+All of the following are **hard load errors** with migration messages:
+
+| Removed | Replacement |
+|---|---|
+| `claude:` (binary override block) | `agents:` records — the whole invocation lives in the agent's `command` |
+| `yolo:` | Permission flags directly in the agent's `command` |
+| `system_prompt:` | System-prompt flags in the agent's `command`, or fold the text into step prompts |
+| `allowed_summarization_models:` (top-level and step-level) | `summarizer:` command — pick the model inside it |
+| `print:` / `tmux:` (workflow and step level) | The resolved agent record's `mode` |
+| `{{claude_command}}` in `tmux-setup-command` | `{{agent_command}}` or `{{run_agent}}` |
+| `git.on_complete` | Top-level `on_complete:` |
+| Singular `workflow:` key; `workflows: {tasks:, one-off:, init:}` map | The current flat `workflows:` list |
 
 ```yaml
 workflows:
@@ -509,11 +518,22 @@ workflows:
 ```yaml
 max_workers: 3
 default_priority: medium
-yolo: true
 tmux_nested_attach_behavior: switch
-system_prompt: |
-  You are an autonomous coding agent. Work autonomously without asking for user input.
-  Make decisions and implement them directly. If something is ambiguous, pick the best option and proceed.
+
+default_agent: claude
+agents:
+  claude:
+    mode: headless
+    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-headless.sh"'
+  claude-tmux:
+    mode: tmux
+    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-tmux.sh"'
+    resume_command: 'claude --dangerously-skip-permissions --resume "$SORTIE_SESSION_ID"'
+    chat_log_command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-chat-log.sh"'
+
+summarizer:
+  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  max_prompt_bytes: 380000
 
 verification:
   verify_summarizer: true
@@ -544,6 +564,7 @@ workflows:
           </task-input>
         timeout: 45m
       - name: reviewing
+        agent: claude-tmux   # interactive review in a tmux session
         prompt: |
           Review the implementation for task #{{task.id}}.
 
@@ -554,7 +575,7 @@ workflows:
         human: true
         timeout: 20m
       - name: fixing
-        print: true        # required: loop steps cannot run in tmux
+        # inherits the headless default agent — loop steps must resolve headless
         prompt: |
           Fix the issues found during review:
           <step-context name="reviewing">
@@ -568,7 +589,7 @@ workflows:
             step_context_empty: reviewing
 
   - name: quick
-    # tmux is the default — no `print` needed for an interactive session
+    agent: claude-tmux   # every step of this workflow runs interactively
     steps:
       - name: implementing
         prompt: |
@@ -585,7 +606,6 @@ workflows:
     worktree: true
     branch: sortie/housekeeping-{{task.id}}
     target: main
-    print: true
     steps:
       - name: auditing
         prompt: "Audit the codebase for code smells, unused dependencies, and dead code"

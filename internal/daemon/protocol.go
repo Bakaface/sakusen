@@ -267,7 +267,8 @@ type WorkflowStepSummary struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"` // human-readable step summary (metadata)
 	Mode        string `json:"mode,omitempty"`
-	Tmux        bool   `json:"tmux,omitempty"`
+	Agent       string `json:"agent,omitempty"` // resolved agent slug (step → workflow → default cascade)
+	Tmux        bool   `json:"tmux,omitempty"`  // resolved agent runs in tmux mode
 	Human       bool   `json:"human,omitempty"`
 	Loop        bool   `json:"loop,omitempty"`
 }
@@ -286,7 +287,7 @@ type WorkflowSummary struct {
 	Checkout        string                `json:"checkout,omitempty"`           // pinned existing branch to check out
 	Target          string                `json:"target,omitempty"`             // pinned target/base branch
 	FullySpec       bool                  `json:"fully_spec"`                   // every New Task field pinned → screen can be skipped
-	Print           bool                  `json:"print,omitempty"`              // workflow-level default (true = headless claude -p)
+	Agent           string                `json:"agent,omitempty"`              // workflow-level explicit agent slug (steps may override)
 	FirstStepIsTmux bool                  `json:"first_step_is_tmux,omitempty"` // derived; useful for picking interactive workflows
 	Hidden          bool                  `json:"hidden,omitempty"`             // file-based workflow not referenced from .sortie.yml
 	Source          string                `json:"source,omitempty"`             // "inline" or path to defining file

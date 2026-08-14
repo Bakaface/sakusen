@@ -122,9 +122,6 @@ func (f *fakeTaskStore) UpdatePausedTmuxStepContext(taskID int64, stepName, valu
 	f.stepContexts[taskID][stepName] = value
 	return 1, nil
 }
-func (f *fakeTaskStore) UpsertChat(taskID int64, stepName, sessionID, tmuxSessionName string) error {
-	return nil
-}
 func (f *fakeTaskStore) GetChatByStep(taskID int64, stepName string) (*db.Chat, error) {
 	return f.chats[taskID][stepName], nil
 }

@@ -101,9 +101,18 @@ func TestLatestStepSentinel_NoneOrUnparseable(t *testing.T) {
 	if _, ok := LatestStepSentinel(worktree, "implementing"); ok {
 		t.Errorf("expected ok=false when no sentinel exists")
 	}
+	// An unparseable sentinel still signals turn-end (existence = signal); the
+	// optional JSON payload simply stays zero.
 	writeSentinel(t, worktree, "implementing-1.json", `not json`)
-	if _, ok := LatestStepSentinel(worktree, "implementing"); ok {
-		t.Errorf("expected ok=false when sentinel is unparseable")
+	got, path, ok := LatestStepSentinelWithPath(worktree, "implementing")
+	if !ok {
+		t.Fatalf("expected ok=true for an unparseable sentinel (existence is the signal)")
+	}
+	if got.SessionID != "" || got.TranscriptPath != "" || got.Cwd != "" {
+		t.Errorf("expected zero payload for unparseable sentinel, got %+v", got)
+	}
+	if path != filepath.Join(StepDoneDir(worktree), "implementing-1.json") {
+		t.Errorf("unexpected sentinel path %q", path)
 	}
 }
 
@@ -127,4 +136,41 @@ func TestClearStepSentinels_ScopedToStep(t *testing.T) {
 
 func TestClearStepSentinels_NoDirIsHarmless(t *testing.T) {
 	ClearStepSentinels(t.TempDir(), "implementing") // must not panic
+}
+
+// TestSentinelPrefixSanitizationRoundTrip verifies SentinelPrefix's
+// shell-safe sanitization AND that the sanitized prefix round-trips: a
+// sentinel written under the prefix sortie exports as SORTIE_DONE_PREFIX
+// (i.e. `<SentinelPrefix(name)>-<ts>.json`) is found again when production
+// code matches by the ORIGINAL step name. An empty step name falls back to
+// the "step" prefix.
+func TestSentinelPrefixSanitizationRoundTrip(t *testing.T) {
+	tests := []struct {
+		name       string
+		stepName   string
+		wantPrefix string
+	}{
+		{"plain name unchanged", "implement", "implement"},
+		{"space becomes underscore", "run tests", "run_tests"},
+		{"slash becomes underscore", "a/b", "a_b"},
+		{"dollar becomes underscore", "we$rd", "we_rd"},
+		{"empty name falls back to step", "", "step"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SentinelPrefix(tt.stepName)
+			if got != tt.wantPrefix {
+				t.Errorf("SentinelPrefix(%q) = %q, want %q", tt.stepName, got, tt.wantPrefix)
+			}
+
+			// Round-trip: a sentinel named the way the exported contract
+			// prescribes must be detected under the original step name.
+			worktree := t.TempDir()
+			writeSentinel(t, worktree, got+"-1234567890.json", `{}`)
+			if !StepSentinelExists(worktree, tt.stepName) {
+				t.Errorf("StepSentinelExists(%q) = false after writing %q sentinel", tt.stepName, got)
+			}
+		})
+	}
 }

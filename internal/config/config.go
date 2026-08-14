@@ -13,9 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// validWorkflowFilename matches kebab-case workflow filenames.
-// File extension is checked separately (.yml or .yaml).
-var validWorkflowFilename = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+// validKebabCaseName matches kebab-case identifiers: workflow filenames
+// (extension checked separately), track directory names, and agent slugs.
+var validKebabCaseName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func defaultConfig() *Config {
 	animEnabled := true
@@ -36,10 +36,6 @@ func defaultConfig() *Config {
 			OnComplete:     false,
 			OnFailed:       false,
 			OnWaitingInput: false,
-		},
-		Claude: ClaudeConfig{
-			Command: "claude",
-			Yolo:    false,
 		},
 		Options: OptionsConfig{
 			Animation: &AnimationConfig{
@@ -127,6 +123,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	// Agent refs are validated once every tier (global + project + tracks) has
+	// merged, since a workflow may reference an agent defined in another tier.
+	if err := validateAgents(cfg); err != nil {
+		return nil, err
+	}
+
 	cfg.Project.AutoDetect = true
 
 	if cfg.ProjectDir != "" {
@@ -161,6 +163,11 @@ func LoadForProject(projectDir string) (*Config, error) {
 		return nil, err
 	}
 
+	// See the matching call in Load().
+	if err := validateAgents(cfg); err != nil {
+		return nil, err
+	}
+
 	cfg.Project.AutoDetect = true
 	cfg.ApplyDetectedProject(cfg.ProjectDir)
 
@@ -173,13 +180,16 @@ func loadGlobalConfig(path string, cfg *Config) error {
 		return err
 	}
 
+	if err := checkRemovedProjectKeys(data); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+
 	var global GlobalConfig
 	if err := yaml.Unmarshal(data, &global); err != nil {
 		return err
 	}
 
 	overridePositive(&cfg.MaxWorkers, global.MaxWorkers)
-	overrideFromPtr(&cfg.Claude.Yolo, global.Yolo)
 	if global.PollInterval != "" {
 		if d, err := time.ParseDuration(global.PollInterval); err == nil && d > 0 {
 			cfg.PollInterval = d
@@ -190,10 +200,9 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	overrideFromPtr(&cfg.Verification, global.Verification)
 	cfg.Notifications = global.Notifications
 	override(&cfg.TmuxNestedAttachBehavior, global.TmuxNestedAttachBehavior)
-	if global.Claude != nil {
-		override(&cfg.Claude.Command, global.Claude.Command)
-		overrideNonEmptySlice(&cfg.Claude.DefaultArgs, global.Claude.DefaultArgs)
-	}
+	cfg.Agents = mergeAgents(cfg.Agents, global.Agents)
+	override(&cfg.DefaultAgent, global.DefaultAgent)
+	overrideFromPtr(&cfg.Summarizer, global.Summarizer)
 	if global.Options != nil {
 		override(&cfg.Options.Number, global.Options.Number)
 		override(&cfg.Options.Branch, global.Options.Branch)
@@ -229,6 +238,10 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 		return err
 	}
 
+	if err := checkRemovedProjectKeys(data); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+
 	var proj ProjectConfig
 	if err := yaml.Unmarshal(data, &proj); err != nil {
 		return err
@@ -258,28 +271,16 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 		cfg.OnCompleteFromProject = true
 	}
 	override(&cfg.DefaultPriority, proj.DefaultPriority)
-	overrideFromPtr(&cfg.Claude.Yolo, proj.Yolo)
-	if proj.Claude != nil {
-		override(&cfg.Claude.Command, proj.Claude.Command)
-		overrideNonEmptySlice(&cfg.Claude.DefaultArgs, proj.Claude.DefaultArgs)
-	}
 	overrideFromPtr(&cfg.Verification, proj.Verification)
 	overrideFromPtr(&cfg.Notifications, proj.Notifications)
 	override(&cfg.TmuxNestedAttachBehavior, proj.TmuxNestedAttachBehavior)
-	override(&cfg.SystemPrompt, proj.SystemPrompt)
 	overrideIfNotEmpty(&cfg.WorktreeSyncPaths, proj.WorktreeSyncPaths)
 	override(&cfg.WorktreeSetupCommand, proj.WorktreeSetupCommand)
 	overrideNonEmptySlice(&cfg.WorktreeSetupCommands, proj.WorktreeSetupCommands)
 	override(&cfg.TmuxSetupCommand, proj.TmuxSetupCommand)
-	if len(proj.AllowedSummarizationModels) > 0 {
-		for _, m := range proj.AllowedSummarizationModels {
-			if !ValidSummarizationModels[m] {
-				return fmt.Errorf("invalid allowed_summarization_models entry %q (must be one of %q, %q, %q)",
-					m, SummarizationModelHaiku, SummarizationModelSonnet, SummarizationModelOpus)
-			}
-		}
-		cfg.AllowedSummarizationModels = append([]string(nil), proj.AllowedSummarizationModels...)
-	}
+	cfg.Agents = mergeAgents(cfg.Agents, proj.Agents)
+	override(&cfg.DefaultAgent, proj.DefaultAgent)
+	overrideFromPtr(&cfg.Summarizer, proj.Summarizer)
 	if proj.Options != nil {
 		override(&cfg.Options.Number, proj.Options.Number)
 		override(&cfg.Options.Branch, proj.Options.Branch)
@@ -445,7 +446,7 @@ func loadWorkflowDir(root string) (*workflowFilePool, error) {
 			return nil, fmt.Errorf("workflows: invalid file extension %q (must be .yml or .yaml)", fname)
 		}
 		base := strings.TrimSuffix(fname, ext)
-		if !validWorkflowFilename.MatchString(base) {
+		if !validKebabCaseName.MatchString(base) {
 			return nil, fmt.Errorf("workflows: invalid filename %q (must be kebab-case: [a-z0-9-]+)", fname)
 		}
 
@@ -509,7 +510,7 @@ func loadTrackWorkflows(tracksDir string) ([]WorkflowConfig, error) {
 			continue
 		}
 		slug := entry.Name()
-		if !validWorkflowFilename.MatchString(slug) {
+		if !validKebabCaseName.MatchString(slug) {
 			return nil, fmt.Errorf("tracks: invalid track directory name %q (must be kebab-case)", slug)
 		}
 		pool, err := loadWorkflowDir(filepath.Join(tracksDir, slug, "workflows"))
