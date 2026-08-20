@@ -60,6 +60,55 @@ func TestValidateFile_UnknownTopLevelField(t *testing.T) {
 	}
 }
 
+// TestValidateFile_AgentVariantsAndAliases verifies single-file diagnosis
+// flags bad variant shape (names, nesting) and bad alias name format without
+// requiring the cross-tier merge, while a well-formed file passes even though
+// alias targets are not resolved here.
+func TestValidateFile_AgentVariantsAndAliases(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string // empty → must validate
+	}{
+		{
+			name:    "well-formed variants and aliases pass",
+			yaml:    "agents:\n  claude:\n    command: x\n    variants:\n      opus:\n        env:\n          M: o\nagent_aliases:\n  worker: some-global-agent\n",
+			wantErr: "",
+		},
+		{
+			name:    "non-kebab-case variant name flagged",
+			yaml:    "agents:\n  claude:\n    command: x\n    variants:\n      Opus:\n        command: y\n",
+			wantErr: "invalid variant name",
+		},
+		{
+			name:    "nested variants flagged",
+			yaml:    "agents:\n  claude:\n    command: x\n    variants:\n      opus:\n        variants:\n          deep:\n            command: y\n",
+			wantErr: "nested variants are not supported",
+		},
+		{
+			name:    "bad alias name flagged",
+			yaml:    "agents:\n  claude:\n    command: x\nagent_aliases:\n  Bad_Name: claude\n",
+			wantErr: "invalid alias name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, tt.yaml)
+			err := ValidateFile(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected file to validate, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestValidateFile_InvalidOnComplete(t *testing.T) {
 	path := writeTempConfig(t, "on_complete: yeet\n")
 	err := ValidateFile(path)

@@ -159,6 +159,11 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	if err := validateAgentRecords(proj.Agents); err != nil {
 		return nil, err
 	}
+	// Alias names are checkable from the file alone; targets are not resolved
+	// here for the same cross-tier reason as agent refs.
+	if err := validateAgentAliasNames(proj.AgentAliases); err != nil {
+		return nil, err
+	}
 
 	// Capture whether any on-disk files exist before resolution mutates the
 	// pool, so we can warn when files exist but .sortie.yml has no listing.

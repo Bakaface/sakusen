@@ -127,8 +127,50 @@ Agent record fields:
 | `resume_command` | tmux only | When set, restored sessions after a daemon restart run this with `SORTIE_SESSION_ID` set to the recorded session id instead of starting fresh. |
 | `chat_log_command` | tmux only | When set, run to obtain the step's conversation log (printed on stdout) for the `summarize_chat` strategy. Env: `SORTIE_SESSION_ID`, plus `SORTIE_SENTINEL_FILE` / `SORTIE_TRANSCRIPT_PATH` from the latest turn-end sentinel. |
 | `env` | both | Extra environment variables for every spawn (command, resume, chat-log alike). Cannot override `SORTIE_*` contract vars. |
+| `variants` | both | Named child configs (variant name → partial record) inheriting every parent field. See Variants below. |
 
 **Selection cascade:** step `agent:` → workflow `agent:` → top-level `default_agent:` → the `"claude"` slug. Explicit references to unknown slugs are load errors; the implicit `"claude"` fallback may be missing at load time (steps then fail at run time with a pointer to `sortie init`).
+
+### Variants
+
+A variant inherits every field from its parent agent and overrides only what it redefines (`env` merges per-key — variant wins, parent-only keys survive; all other fields override wholesale). Each variant becomes an ordinary agent named `<parent>:<variant>`, usable anywhere a slug is accepted (`agent:`, `default_agent:`, alias targets). The parent stays usable as-is.
+
+The canonical pattern is **env-override**: the parent command reads a shell variable, variants set it via `env:` (commands run via `sh -c` with the agent's env exported, so `"$VAR"` expands):
+
+```yaml
+agents:
+  claude:
+    command: >-
+      claude -p "$(cat "$SORTIE_PROMPT_FILE")" --model "$SORTIE_MODEL"
+      $([ "$SORTIE_PLUGINS" = true ] && echo --plugin-dir=./plugins)
+      --output-format text > "$SORTIE_RESULT_FILE"
+    env:
+      SORTIE_MODEL: default
+      SORTIE_PLUGINS: "false"
+    variants:
+      opus:         { env: { SORTIE_MODEL: claude-opus-4-1 } }
+      opus-plugins: { env: { SORTIE_MODEL: claude-opus-4-1, SORTIE_PLUGINS: "true" } }
+      default-plugins: { env: { SORTIE_PLUGINS: "true" } }
+```
+
+Rules and limitations:
+
+- Variant names are kebab-case; the `<parent>:<variant>` slug is created by expansion only — authoring a literal colon key under `agents:` is a load error.
+- **One level deep** — a variant declaring its own `variants:` is a load error. For cross-product dimensions (model × plugins), declare one flat variant per combination, as above.
+- A variant **cannot unset** a parent field (empty = inherit). E.g. a `mode: headless` variant of a tmux parent with `resume_command` fails validation (tmux-only field on the resolved record) — use a separate agent record instead.
+- Cross-tier: a slug redefined in a more-local tier replaces the record wholesale, variants included — a project cannot add a variant to a global agent without redefining the whole record.
+
+### Agent aliases
+
+The top-level `agent_aliases:` map (alias → target) gives roles stable semantic names so workflows reference the role while the underlying agent is swapped in one place:
+
+```yaml
+agent_aliases:
+  headless-implementer: claude:opus   # target may be an agent or a variant
+  reviewer: claude
+```
+
+An alias resolves into an ordinary registry entry, usable anywhere a slug is. Alias names are plain kebab-case (no colons); collisions with existing agent/variant slugs, unknown targets, and alias→alias chains are load errors. Aliases merge per-key across tiers (more-local wins), so a project can re-point a globally-defined alias.
 
 ### Environment contract
 

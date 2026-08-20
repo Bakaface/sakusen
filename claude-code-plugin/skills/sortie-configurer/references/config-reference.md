@@ -42,7 +42,26 @@ agents:
 
 Every workflow step runs one of these shell commands (via `sh -c`, in the task workdir). See SKILL.md → Agents for the full field table, the selection cascade (step `agent:` → workflow `agent:` → `default_agent:` → `"claude"`), the `SORTIE_*` environment contract, the tmux turn-end sentinel convention, and v1 limitations.
 
-`agents:` and `default_agent:` may also be set in the global `~/.sortie.yml`; project-tier records override global ones **per slug, wholesale** (records are not field-merged).
+`agents:` and `default_agent:` may also be set in the global `~/.sortie.yml`; project-tier records override global ones **per slug, wholesale** (records are not field-merged, and a redefinition replaces the record's `variants:` too).
+
+An agent may declare `variants:` (variant name → partial record): each variant inherits every parent field, overrides what it redefines (`env` merges per-key, variant wins), and becomes an ordinary agent named `<parent>:<variant>` usable anywhere a slug is accepted. Variants are one level deep (no nesting) and cannot unset a parent field. The top-level `agent_aliases:` map (alias → agent or variant slug) adds stable semantic names, merged per-key across tiers (more-local wins, so a project can re-point a global alias):
+
+```yaml
+agents:
+  claude:
+    command: 'claude -p "$(cat "$SORTIE_PROMPT_FILE")" --model "$SORTIE_MODEL" --output-format text > "$SORTIE_RESULT_FILE"'
+    env:
+      SORTIE_MODEL: default
+    variants:
+      opus:
+        env:
+          SORTIE_MODEL: claude-opus-4-1   # env-override pattern: parent command reads "$SORTIE_MODEL"
+
+agent_aliases:
+  headless-implementer: claude:opus       # swap the role's implementation in one place
+```
+
+See SKILL.md → Variants / Agent aliases for the full rules (inheritance semantics, validation errors, cross-tier behavior).
 
 `sortie init` scaffolds the two records above plus the user-owned scripts under `.sortie/agents/` (they require `claude` and `jq` on PATH; steps reference them via `$SORTIE_PROJECT_PATH` so worktrees share the project-root copies). Swap the commands to use any other tool.
 

@@ -123,9 +123,10 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	// Agent refs are validated once every tier (global + project + tracks) has
+	// The agent registry is finalized (variants expanded, aliases resolved)
+	// and refs validated once every tier (global + project + tracks) has
 	// merged, since a workflow may reference an agent defined in another tier.
-	if err := validateAgents(cfg); err != nil {
+	if err := resolveAndValidateAgents(cfg); err != nil {
 		return nil, err
 	}
 
@@ -164,7 +165,7 @@ func LoadForProject(projectDir string) (*Config, error) {
 	}
 
 	// See the matching call in Load().
-	if err := validateAgents(cfg); err != nil {
+	if err := resolveAndValidateAgents(cfg); err != nil {
 		return nil, err
 	}
 
@@ -201,6 +202,7 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	cfg.Notifications = global.Notifications
 	override(&cfg.TmuxNestedAttachBehavior, global.TmuxNestedAttachBehavior)
 	cfg.Agents = mergeAgents(cfg.Agents, global.Agents)
+	cfg.AgentAliases = mergeAgentAliases(cfg.AgentAliases, global.AgentAliases)
 	override(&cfg.DefaultAgent, global.DefaultAgent)
 	overrideFromPtr(&cfg.Summarizer, global.Summarizer)
 	if global.Options != nil {
@@ -279,6 +281,7 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 	overrideNonEmptySlice(&cfg.WorktreeSetupCommands, proj.WorktreeSetupCommands)
 	override(&cfg.TmuxSetupCommand, proj.TmuxSetupCommand)
 	cfg.Agents = mergeAgents(cfg.Agents, proj.Agents)
+	cfg.AgentAliases = mergeAgentAliases(cfg.AgentAliases, proj.AgentAliases)
 	override(&cfg.DefaultAgent, proj.DefaultAgent)
 	overrideFromPtr(&cfg.Summarizer, proj.Summarizer)
 	if proj.Options != nil {

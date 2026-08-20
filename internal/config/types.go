@@ -78,6 +78,10 @@ type ProjectConfig struct {
 	// Agents is the project-tier agent registry (slug → record). Merged over
 	// the global tier per slug: a slug redefined here wins wholesale.
 	Agents map[string]AgentConfig `yaml:"agents,omitempty"`
+	// AgentAliases maps stable semantic agent names to target agent or variant
+	// slugs (e.g. headless-implementer: claude:opus). Merged over the global
+	// tier per key: an alias redefined here re-points the target.
+	AgentAliases map[string]string `yaml:"agent_aliases,omitempty"`
 	// DefaultAgent names the agent slug steps fall back to when neither the
 	// step nor the workflow sets `agent:`. Empty → "claude".
 	DefaultAgent string `yaml:"default_agent,omitempty"`
@@ -496,8 +500,8 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 		}
 
 		// A step with loop cannot have human (the tmux-mode constraint is
-		// enforced against the resolved agent in validateAgents, which runs
-		// once all config tiers are merged).
+		// enforced against the resolved agent in resolveAndValidateAgents,
+		// which runs once all config tiers are merged).
 		if step.Human {
 			return fmt.Errorf("step %q: loop steps cannot have human: true", step.Name)
 		}
@@ -607,6 +611,7 @@ type GlobalConfig struct {
 	TmuxNestedAttachBehavior string                 `yaml:"tmux_nested_attach_behavior"`
 	Options                  *OptionsConfig         `yaml:"options,omitempty"`
 	Agents                   map[string]AgentConfig `yaml:"agents,omitempty"`
+	AgentAliases             map[string]string      `yaml:"agent_aliases,omitempty"`
 	DefaultAgent             string                 `yaml:"default_agent,omitempty"`
 	Summarizer               *SummarizerConfig      `yaml:"summarizer,omitempty"`
 }
@@ -648,8 +653,15 @@ type Config struct {
 	Workflows             []WorkflowConfig // flat resolved workflow list
 
 	// Agents is the merged agent registry (global tier overlaid by the
-	// project tier, per slug). See AgentConfig and Config.StepAgent.
+	// project tier, per slug). See AgentConfig and Config.StepAgent. After
+	// load it also holds expanded `parent:variant` entries and resolved alias
+	// entries — all ordinary records.
 	Agents map[string]AgentConfig
+
+	// AgentAliases is the merged `agent_aliases:` routing map (alias name →
+	// target slug), overlaid per key across tiers. Resolved into ordinary
+	// Agents entries at load time.
+	AgentAliases map[string]string
 
 	// DefaultAgent is the resolved top-level `default_agent:` slug (project
 	// beats global). Empty means the implicit "claude" fallback.

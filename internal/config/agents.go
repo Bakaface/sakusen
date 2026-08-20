@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -84,6 +85,17 @@ type AgentConfig struct {
 	// Env holds extra environment variables exported to every spawn of this
 	// agent (Command, ResumeCommand, and ChatLogCommand alike).
 	Env map[string]string `yaml:"env,omitempty"`
+
+	// Variants declares named child configs (variant name → partial record)
+	// that inherit every field from this agent and override only what they
+	// redefine; `env` merges per-key (variant wins, parent-only keys survive).
+	// Each variant is expanded at load time into an ordinary registry entry
+	// under the slug "<parent>:<variant>", referenceable anywhere an agent
+	// slug is accepted. Variants are one level deep (no nesting), and a
+	// variant cannot unset a parent field — a field left empty inherits; use a
+	// separate agent record when a field must go away. Records in the resolved
+	// registry never carry Variants (cleared during expansion).
+	Variants map[string]AgentConfig `yaml:"variants,omitempty"`
 }
 
 // EffectiveMode returns the agent's mode, defaulting to headless when unset.
@@ -194,43 +206,192 @@ func (c *Config) FirstStepIsTmux(wf *WorkflowConfig) bool {
 	return c.StepIsTmux(wf, &wf.Steps[0])
 }
 
-// validateAgents validates the merged agent registry and every agent
-// reference reachable from the resolved config: record shape (mode, command,
-// slug format, tmux-only fields), explicit refs (default_agent, workflow
-// agent:, step agent:), loop-step mode constraints, and the removed
-// {{claude_command}} tmux-setup-command variable. Called by Load /
-// LoadForProject after workflows and tiers are fully merged.
-func validateAgents(cfg *Config) error {
+// resolveAndValidateAgents finalizes the merged agent registry: validates
+// user-authored records (slug format, record shape, variant declarations),
+// expands `variants:` into flat `parent:variant` entries, resolves
+// `agent_aliases:` into ordinary registry entries, then validates every agent
+// reference reachable from the resolved config (explicit refs, loop-step mode
+// constraints, and the removed {{claude_command}} tmux-setup-command
+// variable). Called by Load / LoadForProject after workflows and tiers are
+// fully merged. Record validation runs BEFORE expansion so the strict
+// kebab-case slug rule applies to user-authored keys only — a colon-shaped
+// registry key can then only be expansion-made.
+func resolveAndValidateAgents(cfg *Config) error {
 	if err := validateAgentRecords(cfg.Agents); err != nil {
+		return err
+	}
+	if err := expandAgentVariants(cfg); err != nil {
+		return err
+	}
+	if err := resolveAgentAliases(cfg); err != nil {
 		return err
 	}
 	return validateAgentRefs(cfg)
 }
 
-// validateAgentRecords checks every agent record's shape: slug format, mode,
-// required command, and tmux-only fields. Shared by the full load-time
-// validation (validateAgents) and single-file diagnosis (validateProject).
+// validateAgentRecords checks every user-authored agent record: slug format,
+// record shape, and variant declarations (kebab-case names, no nesting).
+// Shared by the full load-time validation (resolveAndValidateAgents, which
+// runs it pre-expansion) and single-file diagnosis (validateProject).
 func validateAgentRecords(agents map[string]AgentConfig) error {
 	for slug, a := range agents {
 		if !validKebabCaseName.MatchString(slug) {
 			return fmt.Errorf("agents: invalid agent slug %q (must be kebab-case: [a-z0-9-]+)", slug)
 		}
-		switch a.EffectiveMode() {
-		case AgentModeHeadless, AgentModeTmux:
-		default:
-			return fmt.Errorf("agent %q: invalid mode %q (must be %q or %q)", slug, a.Mode, AgentModeHeadless, AgentModeTmux)
-		}
-		if strings.TrimSpace(a.Command) == "" {
-			return fmt.Errorf("agent %q: command is required", slug)
-		}
-		if !a.IsTmux() {
-			if a.ResumeCommand != "" {
-				return fmt.Errorf("agent %q: resume_command is only valid for tmux-mode agents", slug)
+		for name, v := range a.Variants {
+			if !validKebabCaseName.MatchString(name) {
+				return fmt.Errorf("agent %q: invalid variant name %q (must be kebab-case: [a-z0-9-]+)", slug, name)
 			}
-			if a.ChatLogCommand != "" {
-				return fmt.Errorf("agent %q: chat_log_command is only valid for tmux-mode agents", slug)
+			if len(v.Variants) > 0 {
+				return fmt.Errorf("agent %q variant %q: nested variants are not supported — declare each combination as its own variant of %q", slug, name, slug)
 			}
 		}
+		if err := validateAgentRecordShape(slug, &a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAgentRecordShape checks a single record's shape: mode, required
+// command, and tmux-only fields. Applied to user-authored records and to
+// resolved variant records after inheritance.
+func validateAgentRecordShape(slug string, a *AgentConfig) error {
+	switch a.EffectiveMode() {
+	case AgentModeHeadless, AgentModeTmux:
+	default:
+		return fmt.Errorf("agent %q: invalid mode %q (must be %q or %q)", slug, a.Mode, AgentModeHeadless, AgentModeTmux)
+	}
+	if strings.TrimSpace(a.Command) == "" {
+		return fmt.Errorf("agent %q: command is required", slug)
+	}
+	if !a.IsTmux() {
+		if a.ResumeCommand != "" {
+			return fmt.Errorf("agent %q: resume_command is only valid for tmux-mode agents", slug)
+		}
+		if a.ChatLogCommand != "" {
+			return fmt.Errorf("agent %q: chat_log_command is only valid for tmux-mode agents", slug)
+		}
+	}
+	return nil
+}
+
+// expandAgentVariants inserts each declared variant into the registry as an
+// ordinary entry under "<parent>:<variant>" and clears the Variants field on
+// stored records so nothing downstream sees it. Resolved variant records are
+// shape-checked against their effective (post-inheritance) field set, so e.g.
+// a variant that switches a tmux parent to headless while inheriting
+// resume_command fails here. Assumes validateAgentRecords already vetted the
+// declarations.
+func expandAgentVariants(cfg *Config) error {
+	var parents []string
+	for slug, a := range cfg.Agents {
+		if len(a.Variants) > 0 {
+			parents = append(parents, slug)
+		}
+	}
+	sort.Strings(parents)
+	for _, slug := range parents {
+		parent := cfg.Agents[slug]
+		names := make([]string, 0, len(parent.Variants))
+		for name := range parent.Variants {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			key := slug + ":" + name
+			resolved := resolveVariant(parent, parent.Variants[name])
+			if err := validateAgentRecordShape(key, &resolved); err != nil {
+				return err
+			}
+			cfg.Agents[key] = resolved
+		}
+		parent.Variants = nil
+		cfg.Agents[slug] = parent
+	}
+	return nil
+}
+
+// resolveVariant builds a variant's effective record: a field left unset
+// inherits the parent's value, a set field overrides it wholesale, and env
+// merges per-key (variant wins, parent-only keys survive).
+func resolveVariant(parent, v AgentConfig) AgentConfig {
+	out := parent
+	out.Variants = nil
+	if v.Mode != "" {
+		out.Mode = v.Mode
+	}
+	if v.Command != "" {
+		out.Command = v.Command
+	}
+	if v.ResumeCommand != "" {
+		out.ResumeCommand = v.ResumeCommand
+	}
+	if v.ChatLogCommand != "" {
+		out.ChatLogCommand = v.ChatLogCommand
+	}
+	if len(v.Env) > 0 {
+		env := make(map[string]string, len(parent.Env)+len(v.Env))
+		for k, val := range parent.Env {
+			env[k] = val
+		}
+		for k, val := range v.Env {
+			env[k] = val
+		}
+		out.Env = env
+	}
+	return out
+}
+
+// validateAgentAliasNames checks that every alias name is a plain kebab-case
+// slug (colons rejected — an alias is a stable semantic name, never a
+// variant-shaped key). Shared by resolveAgentAliases and single-file
+// diagnosis (validateProject), which cannot resolve targets because they may
+// live in another tier.
+func validateAgentAliasNames(aliases map[string]string) error {
+	for name := range aliases {
+		if !validKebabCaseName.MatchString(name) {
+			return fmt.Errorf("agent_aliases: invalid alias name %q (must be kebab-case: [a-z0-9-]+)", name)
+		}
+	}
+	return nil
+}
+
+// resolveAgentAliases inserts each `agent_aliases:` entry into the registry
+// as a copy of its target's record, making the alias an ordinary agent name.
+// Runs after variant expansion so targets may be plain agents or
+// `parent:variant` slugs. Every alias is validated against the pre-alias
+// registry before any is inserted, so alias→alias chains can never resolve
+// through insertion order.
+func resolveAgentAliases(cfg *Config) error {
+	if len(cfg.AgentAliases) == 0 {
+		return nil
+	}
+	if err := validateAgentAliasNames(cfg.AgentAliases); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(cfg.AgentAliases))
+	for name := range cfg.AgentAliases {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	resolved := make(map[string]AgentConfig, len(names))
+	for _, name := range names {
+		target := cfg.AgentAliases[name]
+		if _, exists := cfg.Agents[name]; exists {
+			return fmt.Errorf("agent_aliases: alias %q collides with an existing agent or variant slug", name)
+		}
+		if _, chained := cfg.AgentAliases[target]; chained {
+			return fmt.Errorf("agent_aliases: alias %q targets alias %q — alias chains are not supported; point it directly at an agent or variant", name, target)
+		}
+		rec, ok := cfg.Agents[target]
+		if !ok {
+			return fmt.Errorf("agent_aliases: alias %q targets unknown agent %q (no such slug under `agents:`)", name, target)
+		}
+		resolved[name] = rec
+	}
+	for name, rec := range resolved {
+		cfg.Agents[name] = rec
 	}
 	return nil
 }
@@ -296,6 +457,21 @@ func mergeAgents(dst map[string]AgentConfig, src map[string]AgentConfig) map[str
 	}
 	for slug, a := range src {
 		dst[slug] = a
+	}
+	return dst
+}
+
+// mergeAgentAliases overlays the src alias map onto dst per key: an alias
+// redefined in a more-local tier re-points the target.
+func mergeAgentAliases(dst map[string]string, src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]string, len(src))
+	}
+	for name, target := range src {
+		dst[name] = target
 	}
 	return dst
 }

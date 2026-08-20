@@ -378,6 +378,337 @@ summarizer:
 	}
 }
 
+// TestAgentVariantsExpansion verifies the core variant contract: an env-only
+// variant inherits mode/command from the parent, env merges per-key (variant
+// wins, parent-only keys survive), the expanded `parent:variant` slug is
+// accepted by every agent ref position (step, workflow, default_agent) and
+// resolves via ResolveAgent/StepAgent, and the parent record stays usable
+// with its own env and no Variants.
+func TestAgentVariantsExpansion(t *testing.T) {
+	isolateHome(t)
+	yaml := `
+agents:
+  claude:
+    command: run --model "$SORTIE_MODEL"
+    env:
+      SORTIE_MODEL: default
+      KEEP: base
+    variants:
+      opus:
+        env:
+          SORTIE_MODEL: opus-model
+default_agent: claude:opus
+workflows:
+  - name: w
+    agent: claude:opus
+    steps:
+      - name: s1
+        prompt: p
+        agent: claude:opus
+      - name: s2
+        prompt: p
+`
+	dir, _ := setupProject(t, yaml, nil)
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+
+	variant, ok := cfg.ResolveAgent("claude:opus")
+	if !ok {
+		t.Fatal("expected expanded claude:opus in the registry")
+	}
+	if variant.Command != `run --model "$SORTIE_MODEL"` {
+		t.Errorf("variant.Command = %q, want the parent's command inherited", variant.Command)
+	}
+	if variant.EffectiveMode() != AgentModeHeadless {
+		t.Errorf("variant mode = %q, want inherited headless", variant.EffectiveMode())
+	}
+	if variant.Env["SORTIE_MODEL"] != "opus-model" {
+		t.Errorf("Env[SORTIE_MODEL] = %q, want the variant's override", variant.Env["SORTIE_MODEL"])
+	}
+	if variant.Env["KEEP"] != "base" {
+		t.Errorf("Env[KEEP] = %q, want the parent-only key to survive the merge", variant.Env["KEEP"])
+	}
+
+	parent, ok := cfg.ResolveAgent("claude")
+	if !ok {
+		t.Fatal("parent claude must remain a usable agent")
+	}
+	if parent.Env["SORTIE_MODEL"] != "default" {
+		t.Errorf("parent Env[SORTIE_MODEL] = %q, want untouched %q", parent.Env["SORTIE_MODEL"], "default")
+	}
+	if parent.Variants != nil {
+		t.Errorf("parent.Variants = %v, want nil after expansion", parent.Variants)
+	}
+
+	wf := cfg.GetTaskWorkflow("w")
+	slug, agent, err := cfg.StepAgent(wf, &wf.Steps[0])
+	if err != nil {
+		t.Fatalf("StepAgent: %v", err)
+	}
+	if slug != "claude:opus" || agent.Env["SORTIE_MODEL"] != "opus-model" {
+		t.Errorf("StepAgent = (%q, env %v), want claude:opus with the variant env", slug, agent.Env)
+	}
+	// s2 has no step-level agent: the workflow-level claude:opus ref applies.
+	if slug := cfg.StepAgentSlug(wf, &wf.Steps[1]); slug != "claude:opus" {
+		t.Errorf("StepAgentSlug(s2) = %q, want the workflow-level claude:opus", slug)
+	}
+}
+
+// TestAgentVariantFieldOverride verifies whole-field override semantics: a
+// variant that redefines command keeps everything else inherited, a variant
+// may change mode (headless parent → tmux variant with tmux-only fields), and
+// a variant that switches a tmux parent to headless fails validation against
+// its *resolved* record because the inherited resume_command survives.
+func TestAgentVariantFieldOverride(t *testing.T) {
+	t.Run("command override keeps inherited fields", func(t *testing.T) {
+		isolateHome(t)
+		yaml := "agents:\n  base:\n    mode: tmux\n    command: base-cmd\n    resume_command: base-resume\n" +
+			"    variants:\n      alt:\n        command: alt-cmd\n"
+		dir, _ := setupProject(t, yaml, nil)
+		cfg, err := LoadForProject(dir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		alt, ok := cfg.ResolveAgent("base:alt")
+		if !ok {
+			t.Fatal("expected base:alt in the registry")
+		}
+		if alt.Command != "alt-cmd" {
+			t.Errorf("Command = %q, want the variant's alt-cmd", alt.Command)
+		}
+		if !alt.IsTmux() || alt.ResumeCommand != "base-resume" {
+			t.Errorf("mode/resume_command not inherited: %+v", alt)
+		}
+	})
+
+	t.Run("mode change to tmux with tmux-only fields", func(t *testing.T) {
+		isolateHome(t)
+		yaml := "agents:\n  base:\n    command: base-cmd\n" +
+			"    variants:\n      interactive:\n        mode: tmux\n        resume_command: r\n"
+		dir, _ := setupProject(t, yaml, nil)
+		cfg, err := LoadForProject(dir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		v, ok := cfg.ResolveAgent("base:interactive")
+		if !ok || !v.IsTmux() || v.ResumeCommand != "r" {
+			t.Errorf("base:interactive = (%+v, %v), want a tmux record with resume_command", v, ok)
+		}
+	})
+
+	t.Run("mode change to headless rejects inherited tmux-only field", func(t *testing.T) {
+		isolateHome(t)
+		yaml := "agents:\n  base:\n    mode: tmux\n    command: base-cmd\n    resume_command: base-resume\n" +
+			"    variants:\n      hl:\n        mode: headless\n"
+		dir, _ := setupProject(t, yaml, nil)
+		_, err := LoadForProject(dir)
+		if err == nil || !strings.Contains(err.Error(), "resume_command is only valid for tmux-mode agents") {
+			t.Fatalf("expected tmux-only field error on the resolved base:hl record, got: %v", err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "base:hl") {
+			t.Errorf("error should name the variant slug base:hl, got: %v", err)
+		}
+	})
+}
+
+// TestAgentVariantErrors covers variant misdeclarations rejected at load
+// time: nested variants, non-kebab-case variant names, a user-authored
+// literal `parent:variant` key under agents:, and a ref to an undeclared
+// variant.
+func TestAgentVariantErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "nested variants rejected",
+			yaml:    "agents:\n  a:\n    command: x\n    variants:\n      b:\n        variants:\n          c:\n            command: y\n",
+			wantErr: "nested variants are not supported",
+		},
+		{
+			name:    "non-kebab-case variant name rejected",
+			yaml:    "agents:\n  a:\n    command: x\n    variants:\n      Opus:\n        command: y\n",
+			wantErr: "invalid variant name",
+		},
+		{
+			name:    "user-authored colon key rejected",
+			yaml:    "agents:\n  claude:opus:\n    command: x\n",
+			wantErr: "invalid agent slug",
+		},
+		{
+			name:    "ref to undeclared variant rejected",
+			yaml:    "agents:\n  claude:\n    command: x\nworkflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: p\n        agent: claude:nope\n",
+			wantErr: "unknown agent",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			dir, _ := setupProject(t, tt.yaml, nil)
+			_, err := LoadForProject(dir)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestAgentVariantsCrossTierWholesale verifies variants ride the wholesale
+// per-slug tier merge: a project redefinition of the parent slug replaces the
+// global record including its variants, so global-only variant slugs
+// disappear from the expanded registry.
+func TestAgentVariantsCrossTierWholesale(t *testing.T) {
+	globalYml := "agents:\n  claude:\n    command: global-cmd\n" +
+		"    variants:\n      opus:\n        env:\n          M: o\n"
+	projectYml := "agents:\n  claude:\n    command: project-cmd\n"
+	projectDir := setupGlobalAndProject(t, globalYml, nil, projectYml, nil)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	claude, ok := cfg.ResolveAgent("claude")
+	if !ok || claude.Command != "project-cmd" {
+		t.Errorf("claude = (%+v, %v), want the project-tier record", claude, ok)
+	}
+	if _, ok := cfg.ResolveAgent("claude:opus"); ok {
+		t.Error("claude:opus must not survive a project-tier redefinition of claude (records replace wholesale, variants included)")
+	}
+}
+
+// TestAgentAliases verifies agent_aliases resolve into ordinary registry
+// entries: an alias may target a plain agent or an expanded variant, and the
+// alias name is accepted by default_agent and step-level agent refs.
+func TestAgentAliases(t *testing.T) {
+	isolateHome(t)
+	yaml := `
+agents:
+  claude:
+    command: base-cmd
+    variants:
+      opus:
+        env:
+          M: opus
+  other:
+    command: other-cmd
+agent_aliases:
+  headless-implementer: claude:opus
+  fallback-worker: other
+default_agent: headless-implementer
+workflows:
+  - name: w
+    steps:
+      - name: s
+        prompt: p
+        agent: fallback-worker
+`
+	dir, _ := setupProject(t, yaml, nil)
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+
+	impl, ok := cfg.ResolveAgent("headless-implementer")
+	if !ok {
+		t.Fatal("expected alias headless-implementer in the registry")
+	}
+	if impl.Command != "base-cmd" || impl.Env["M"] != "opus" {
+		t.Errorf("headless-implementer = %+v, want a copy of the claude:opus record", impl)
+	}
+	worker, ok := cfg.ResolveAgent("fallback-worker")
+	if !ok || worker.Command != "other-cmd" {
+		t.Errorf("fallback-worker = (%+v, %v), want a copy of other", worker, ok)
+	}
+
+	wf := cfg.GetTaskWorkflow("w")
+	slug, agent, err := cfg.StepAgent(wf, &wf.Steps[0])
+	if err != nil {
+		t.Fatalf("StepAgent: %v", err)
+	}
+	if slug != "fallback-worker" || agent.Command != "other-cmd" {
+		t.Errorf("StepAgent = (%q, %q), want the alias slug with the target's record", slug, agent.Command)
+	}
+}
+
+// TestAgentAliasErrors covers alias misdeclarations rejected at load time:
+// collisions with agent and variant slugs, unknown targets, alias→alias
+// chains, and malformed alias names (non-kebab-case, colon-containing).
+func TestAgentAliasErrors(t *testing.T) {
+	base := "agents:\n  claude:\n    command: x\n    variants:\n      opus:\n        env:\n          M: o\n"
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "alias colliding with an agent slug",
+			yaml:    base + "agent_aliases:\n  claude: claude:opus\n",
+			wantErr: "collides with an existing agent or variant slug",
+		},
+		// An alias can never collide with a variant slug directly: variant
+		// slugs contain a colon, which the alias name check rejects first
+		// (covered by the colon-containing case below).
+		{
+			name:    "unknown alias target",
+			yaml:    base + "agent_aliases:\n  worker: missing\n",
+			wantErr: "targets unknown agent",
+		},
+		{
+			name:    "alias chain",
+			yaml:    base + "agent_aliases:\n  one: claude\n  two: one\n",
+			wantErr: "alias chains are not supported",
+		},
+		{
+			name:    "non-kebab-case alias name",
+			yaml:    base + "agent_aliases:\n  Worker: claude\n",
+			wantErr: "invalid alias name",
+		},
+		{
+			name:    "colon-containing alias name",
+			yaml:    base + "agent_aliases:\n  role:impl: claude\n",
+			wantErr: "invalid alias name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			dir, _ := setupProject(t, tt.yaml, nil)
+			_, err := LoadForProject(dir)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestAgentAliasesCrossTierOverlay verifies aliases merge per-key across
+// tiers: the project re-points a globally-defined alias while global-only
+// aliases survive.
+func TestAgentAliasesCrossTierOverlay(t *testing.T) {
+	globalYml := "agents:\n  ga:\n    command: ga-cmd\n  gb:\n    command: gb-cmd\n" +
+		"agent_aliases:\n  worker: ga\n  reviewer: gb\n"
+	projectYml := "agent_aliases:\n  worker: gb\n"
+	projectDir := setupGlobalAndProject(t, globalYml, nil, projectYml, nil)
+
+	cfg, err := LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	worker, ok := cfg.ResolveAgent("worker")
+	if !ok || worker.Command != "gb-cmd" {
+		t.Errorf("worker = (%+v, %v), want the project-tier re-point to gb", worker, ok)
+	}
+	reviewer, ok := cfg.ResolveAgent("reviewer")
+	if !ok || reviewer.Command != "gb-cmd" {
+		t.Errorf("reviewer = (%+v, %v), want the global-only alias to survive", reviewer, ok)
+	}
+}
+
 // TestAgentsEnvReplacedWholesaleAcrossTiers verifies that redefining an agent
 // slug in a more-local tier replaces the record's `env:` map entirely — keys
 // from the global record must not be merged into the project record (a
