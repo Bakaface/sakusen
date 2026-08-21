@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 type Notifier struct {
@@ -49,7 +49,7 @@ type notifySendBackend struct{}
 
 func (notifySendBackend) Notify(title, body string, urgency Urgency) error {
 	args := []string{
-		"--app-name=Sortie",
+		"--app-name=Sakusen",
 		"--urgency=" + string(urgency),
 		title,
 		body,

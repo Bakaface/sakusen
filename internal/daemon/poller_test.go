@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // TestRecoverOrphanedTasks_FinalizingRestartsAgent verifies the two coupled
@@ -219,7 +219,7 @@ func initRecoveryTestRepo(t *testing.T) string {
 // with stepIndex, plus one child in projB per status, wired with wait-on edges.
 func suspendedParentWithChildren(t *testing.T, s *Server, projA int64, stepIndex int, childStatuses ...task.Status) (*task.Task, []*task.Task) {
 	t.Helper()
-	projB, err := s.database.GetOrCreateProject("/tmp/sortie-test-poller-other")
+	projB, err := s.database.GetOrCreateProject("/tmp/sakusen-test-poller-other")
 	if err != nil {
 		t.Fatalf("create other project: %v", err)
 	}

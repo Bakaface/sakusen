@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	// Aliased: this file uses "task" as the local parameter/variable name for
 	// daemon.TaskInfo throughout (statusText, effectiveStatusFor, renderTask,
 	// hasFailedBlocker, ...); the alias avoids that shadowing the package.
-	taskpkg "github.com/Bakaface/sortie/internal/task"
+	taskpkg "github.com/Bakaface/sakusen/internal/task"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
@@ -534,7 +534,7 @@ func (l *listView) View() string {
 		b.WriteString("  " + l.spinner.View() + dimStyle.Render(" Loading tasks…"))
 		b.WriteString("\n")
 	} else if len(l.tasks) == 0 {
-		b.WriteString(dimStyle.Render("  No tasks found. Use 'sortie plan <PRD.md>' to create tasks."))
+		b.WriteString(dimStyle.Render("  No tasks found. Use 'sakusen plan <PRD.md>' to create tasks."))
 		b.WriteString("\n")
 	} else {
 		b.WriteString(l.renderHeader())

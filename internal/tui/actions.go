@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/action"
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/action"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -305,7 +305,7 @@ func (m Model) handleFieldEditorResult(msg editorFieldFinishedMsg) tea.Cmd {
 }
 
 func (m Model) openEditorForPrompt() tea.Cmd {
-	f, err := os.CreateTemp("", "sortie-prompt-*.md")
+	f, err := os.CreateTemp("", "sakusen-prompt-*.md")
 	if err != nil {
 		return func() tea.Msg { return errorMsg(fmt.Errorf("failed to create temp file: %w", err)) }
 	}
@@ -341,7 +341,7 @@ func (m Model) openEditorForPrompt() tea.Cmd {
 // back to the daemon via UpdateStepContext.
 func (m Model) openEditorForStepContext(taskID int64, stepName, currentValue string) tea.Cmd {
 	safeStep := strings.NewReplacer("/", "-", " ", "_").Replace(stepName)
-	f, err := os.CreateTemp("", fmt.Sprintf("sortie-step-%s-*.md", safeStep))
+	f, err := os.CreateTemp("", fmt.Sprintf("sakusen-step-%s-*.md", safeStep))
 	if err != nil {
 		return func() tea.Msg { return errorMsg(fmt.Errorf("failed to create temp file: %w", err)) }
 	}
@@ -394,7 +394,7 @@ func (m Model) handleStepContextEditorResult(msg editorStepContextFinishedMsg) t
 }
 
 func (m Model) openEditorForField(taskID int64, field, currentValue string) tea.Cmd {
-	f, err := os.CreateTemp("", fmt.Sprintf("sortie-%s-*.md", field))
+	f, err := os.CreateTemp("", fmt.Sprintf("sakusen-%s-*.md", field))
 	if err != nil {
 		return func() tea.Msg { return errorMsg(fmt.Errorf("failed to create temp file: %w", err)) }
 	}
@@ -425,7 +425,7 @@ func (m Model) openEditorForField(taskID int64, field, currentValue string) tea.
 }
 
 func (m Model) openLogInEditor(task *daemon.TaskInfo) tea.Cmd {
-	dataDir := filepath.Join(task.ProjectPath, ".sortie")
+	dataDir := filepath.Join(task.ProjectPath, ".sakusen")
 	logFile := workflow.ProjectLogPath(dataDir, task.ID)
 
 	if _, err := os.Stat(logFile); err != nil {

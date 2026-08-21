@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Bakaface/sortie/internal/daemon"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // EditArgs uses pointer fields so callers can distinguish "field not set" from

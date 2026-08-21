@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -37,7 +37,7 @@ type taskOutput struct {
 func registerGetTask(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"get_task",
-		mcp.WithDescription("Get detailed information about a sortie task: its TaskInfo (status, branch, current step, etc.), and optionally per-step state, captured step contexts, and recent agent output. Use include_* flags to opt into extra sections."),
+		mcp.WithDescription("Get detailed information about a sakusen task: its TaskInfo (status, branch, current step, etc.), and optionally per-step state, captured step contexts, and recent agent output. Use include_* flags to opt into extra sections."),
 		mcp.WithInputSchema[GetTaskArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args GetTaskArgs) (*mcp.CallToolResult, error) {

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/runner"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/runner"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // setupServerWithProject creates an in-memory DB, a project, and returns the
@@ -24,7 +24,7 @@ func setupServerWithProject(t *testing.T) (*Server, int64) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close() })
-	proj, err := database.GetOrCreateProject("/tmp/sortie-test")
+	proj, err := database.GetOrCreateProject("/tmp/sakusen-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestValidateTaskRefs_MissingTaskID(t *testing.T) {
 func TestValidateTaskRefs_DifferentProject(t *testing.T) {
 	s, projID := setupServerWithProject(t)
 	// Create a task in a different project.
-	other, err := s.database.GetOrCreateProject("/tmp/sortie-other")
+	other, err := s.database.GetOrCreateProject("/tmp/sakusen-other")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func setupServerWithPinnedWorkflow(t *testing.T, projectPath string, wf config.W
 	s := NewServer(&config.Config{}, database)
 
 	// Directly inject the projectContext so getProjectContext returns our config
-	// without loading any file on disk or the global ~/.sortie.yml.
+	// without loading any file on disk or the global ~/.sakusen.yml.
 	s.projectsMu.Lock()
 	s.projects[proj.ID] = &projectContext{
 		cfg:      pinnedCfg,
@@ -503,10 +503,10 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeTrue,
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
-		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test", wf)
+		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test", wf)
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sortie-pin-test",
+			ProjectPath: "/tmp/sakusen-pin-test",
 			Workflow:    "pinned",
 			// No Input, BranchName, TargetBranch, or Worktree.
 		})
@@ -537,10 +537,10 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeTrue,
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
-		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-2", wf)
+		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test-2", wf)
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath:  "/tmp/sortie-pin-test-2",
+			ProjectPath:  "/tmp/sakusen-pin-test-2",
 			Workflow:     "pinned",
 			TargetBranch: "develop", // explicit override of the "main" pin
 		})
@@ -561,10 +561,10 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeTrue,
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
-		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-3", wf)
+		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test-3", wf)
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sortie-pin-test-3",
+			ProjectPath: "/tmp/sakusen-pin-test-3",
 			Workflow:    "pinned",
 			Input:       "Override description",
 		})
@@ -585,11 +585,11 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeTrue,
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
-		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-4", wf)
+		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test-4", wf)
 
 		worktreeFalse := false
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sortie-pin-test-4",
+			ProjectPath: "/tmp/sakusen-pin-test-4",
 			Workflow:    "pinned",
 			Worktree:    &worktreeFalse, // explicit false overrides pin true
 		})
@@ -612,13 +612,13 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeFalse,
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
-		s, projID := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-5", wf)
+		s, projID := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test-5", wf)
 		if err := s.database.UpdateProjectDefaultWorktree(projID, true); err != nil {
 			t.Fatalf("seed project default worktree: %v", err)
 		}
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sortie-pin-test-5",
+			ProjectPath: "/tmp/sakusen-pin-test-5",
 			Workflow:    "no-worktree",
 			// No Worktree on the request — the pin must win over the project default.
 		})
@@ -640,10 +640,10 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeTrue,
 			Steps:    []config.StepConfig{{Name: "review"}},
 		}
-		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-6", wf)
+		s, _ := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test-6", wf)
 
 		tk, title, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sortie-pin-test-6",
+			ProjectPath: "/tmp/sakusen-pin-test-6",
 			Workflow:    "review",
 			// No Input, BranchName, or CheckoutBranch — checkout pin satisfies
 			// the empty-description gate and supplies the checkout branch.
@@ -677,14 +677,14 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 			Worktree: &worktreeTrue, // pin worktree=true
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		}
-		s, projID := setupServerWithPinnedWorkflow(t, "/tmp/sortie-pin-test-7", wf)
+		s, projID := setupServerWithPinnedWorkflow(t, "/tmp/sakusen-pin-test-7", wf)
 		// Seed the saved project default to the OPPOSITE of the pin.
 		if err := s.database.UpdateProjectDefaultWorktree(projID, false); err != nil {
 			t.Fatalf("seed project default worktree: %v", err)
 		}
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sortie-pin-test-7",
+			ProjectPath: "/tmp/sakusen-pin-test-7",
 			Workflow:    "pinned",
 			// No Worktree on the request — only the pin sets it.
 		})
@@ -705,14 +705,14 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 }
 
 // TestNoiseFiles pins both halves of the noise-file list: the runner's raw
-// capture file .sortie-output.log is noise when deciding whether a task
-// produced meaningful output, and CLAUDE.md is NOT — sortie never writes one
+// capture file .sakusen-output.log is noise when deciding whether a task
+// produced meaningful output, and CLAUDE.md is NOT — sakusen never writes one
 // into worktrees, so a CLAUDE.md edit is real agent work that must not be
 // fast-tracked away.
 func TestNoiseFiles(t *testing.T) {
 	want := []string{runner.OutputLogFileName}
-	if len(noiseFiles) != len(want) || noiseFiles[0] != ".sortie-output.log" {
-		t.Errorf("noiseFiles = %v, want %v (.sortie-output.log only)", noiseFiles, want)
+	if len(noiseFiles) != len(want) || noiseFiles[0] != ".sakusen-output.log" {
+		t.Errorf("noiseFiles = %v, want %v (.sakusen-output.log only)", noiseFiles, want)
 	}
 	for _, f := range noiseFiles {
 		if f == "CLAUDE.md" {

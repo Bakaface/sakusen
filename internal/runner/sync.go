@@ -15,7 +15,7 @@ import (
 // backfill-context) and agent helper commands (chat_log_command).
 //
 // env entries are added on top of the current process environment; CLAUDECODE
-// is stripped so claude-based commands work when sortie itself runs inside a
+// is stripped so claude-based commands work when sakusen itself runs inside a
 // Claude Code session.
 func RunSync(ctx context.Context, command, workDir string, env map[string]string, stdin string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)

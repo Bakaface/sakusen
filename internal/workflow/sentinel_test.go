@@ -140,7 +140,7 @@ func TestClearStepSentinels_NoDirIsHarmless(t *testing.T) {
 
 // TestSentinelPrefixSanitizationRoundTrip verifies SentinelPrefix's
 // shell-safe sanitization AND that the sanitized prefix round-trips: a
-// sentinel written under the prefix sortie exports as SORTIE_DONE_PREFIX
+// sentinel written under the prefix sakusen exports as SAKUSEN_DONE_PREFIX
 // (i.e. `<SentinelPrefix(name)>-<ts>.json`) is found again when production
 // code matches by the ORIGINAL step name. An empty step name falls back to
 // the "step" prefix.

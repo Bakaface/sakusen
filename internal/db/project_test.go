@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 func TestGetOrCreateProject(t *testing.T) {

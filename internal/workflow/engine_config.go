@@ -3,7 +3,7 @@ package workflow
 import (
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 // engineConfig is the narrow slice of *config.Config that Engine actually

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // runGit runs a git command in dir and fails the test on error.
@@ -52,12 +52,12 @@ func TestRunFinalization_MergeFailureIsNotCompleted(t *testing.T) {
 	}
 
 	// Isolate config loading from the developer's real global config: the
-	// failing conflict-resolver agent must come from the project .sortie.yml.
+	// failing conflict-resolver agent must come from the project .sakusen.yml.
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	repoDir := initRecoveryTestRepo(t)
-	sortieYML := fmt.Sprintf(`on_complete: merge
+	sakusenYML := fmt.Sprintf(`on_complete: merge
 git:
   base_branch: main
 agents:
@@ -69,24 +69,24 @@ workflows:
       - name: implement
         prompt: implement
 `, writeFailingAgentStub(t))
-	if err := os.WriteFile(filepath.Join(repoDir, ".sortie.yml"), []byte(sortieYML), 0644); err != nil {
-		t.Fatalf("failed to write .sortie.yml: %v", err)
+	if err := os.WriteFile(filepath.Join(repoDir, ".sakusen.yml"), []byte(sakusenYML), 0644); err != nil {
+		t.Fatalf("failed to write .sakusen.yml: %v", err)
 	}
-	// With HOME isolated there are no global excludes, so ignore sortie's own
-	// runtime artifacts (.sortie/ logs etc.) in-repo — an untracked file on the
+	// With HOME isolated there are no global excludes, so ignore sakusen's own
+	// runtime artifacts (.sakusen/ logs etc.) in-repo — an untracked file on the
 	// target branch would park the merge coordinator in merge-blocked instead
 	// of reaching the conflict this test needs.
-	if err := os.WriteFile(filepath.Join(repoDir, ".gitignore"), []byte(".sortie/\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".gitignore"), []byte(".sakusen/\n"), 0644); err != nil {
 		t.Fatalf("failed to write .gitignore: %v", err)
 	}
-	// -f: redundant (neither file matches the .sortie/ ignore pattern) but harmless.
-	runGit(t, repoDir, "add", "-f", "--", ".sortie.yml", ".gitignore")
-	runGit(t, repoDir, "commit", "-q", "-m", "add sortie config")
+	// -f: redundant (neither file matches the .sakusen/ ignore pattern) but harmless.
+	runGit(t, repoDir, "add", "-f", "--", ".sakusen.yml", ".gitignore")
+	runGit(t, repoDir, "commit", "-q", "-m", "add sakusen config")
 
 	// Task branch forks here, then base diverges with a change to the same
 	// file — so the fast-forward merge fails and the rebase-onto-base retry
 	// hits a real conflict.
-	const branch = "sortie-merge-failure"
+	const branch = "sakusen-merge-failure"
 	worktreePath := filepath.Join(t.TempDir(), "wt")
 	runGit(t, repoDir, "worktree", "add", "-q", "-b", branch, worktreePath, "main")
 	t.Cleanup(func() {

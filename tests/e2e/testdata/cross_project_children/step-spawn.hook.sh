@@ -6,9 +6,9 @@
 #      test dropped in $HOME (see Env.WriteHookFile — HOME is the per-test
 #      XDG dir and the daemon passes os.Environ() to the agent process, so
 #      this is the only channel that reaches an already-started daemon).
-#   2. cd into the CHILD project (sortie resolves the project from cwd) and
+#   2. cd into the CHILD project (sakusen resolves the project from cwd) and
 #      create one child task per spec line.
-#   3. Register waits-on edges via `sortie wait-for-tasks --use-env`.
+#   3. Register waits-on edges via `sakusen wait-for-tasks --use-env`.
 #   4. Touch a marker so subsequent invocations skip the spawn.
 #
 # Second invocation (parent's resume run after all children are terminal):
@@ -20,16 +20,16 @@
 
 set -euo pipefail
 
-MARKER="${SORTIE_WORKTREE:-/tmp}/.sortie-test-spawned-${SORTIE_TASK_ID}.marker"
+MARKER="${SAKUSEN_WORKTREE:-/tmp}/.sakusen-test-spawned-${SAKUSEN_TASK_ID}.marker"
 
 if [[ -f "$MARKER" ]]; then
-    echo "resumed" >> "${SORTIE_WORKTREE}/resumed.txt"
+    echo "resumed" >> "${SAKUSEN_WORKTREE}/resumed.txt"
     exit 0
 fi
 
-# The e2e harness exports the binary path via SORTIE_E2E_BIN; the binary lives
+# The e2e harness exports the binary path via SAKUSEN_E2E_BIN; the binary lives
 # in a one-off tmp build dir and is not on PATH.
-SORTIE_BIN="${SORTIE_E2E_BIN:?SORTIE_E2E_BIN not set}"
+SAKUSEN_BIN="${SAKUSEN_E2E_BIN:?SAKUSEN_E2E_BIN not set}"
 
 CHILD_PROJECT="$(cat "${HOME}/e2e-child-project")"
 cd "$CHILD_PROJECT"
@@ -39,7 +39,7 @@ n=0
 while IFS= read -r wf; do
     [[ -z "$wf" ]] && continue
     n=$((n + 1))
-    OUT=$("$SORTIE_BIN" create --title "cross child $n" -w "$wf" "cross child $n work" 2>&1)
+    OUT=$("$SAKUSEN_BIN" create --title "cross child $n" -w "$wf" "cross child $n work" 2>&1)
     ID=$(echo "$OUT" | grep -oE 'Task #[0-9]+' | head -1 | grep -oE '[0-9]+')
     if [[ -z "$ID" ]]; then
         echo "step-spawn.hook.sh: cannot parse child id from: $OUT" >&2
@@ -53,8 +53,8 @@ if [[ ${#IDS[@]} -eq 0 ]]; then
     exit 1
 fi
 
-# SORTIE_TASK_ID is set by the engine for the spawn step's subprocess.
-"$SORTIE_BIN" wait-for-tasks --use-env "${IDS[@]}" >/dev/null
+# SAKUSEN_TASK_ID is set by the engine for the spawn step's subprocess.
+"$SAKUSEN_BIN" wait-for-tasks --use-env "${IDS[@]}" >/dev/null
 
 touch "$MARKER"
-echo "spawned" >> "${SORTIE_WORKTREE}/spawned.txt"
+echo "spawned" >> "${SAKUSEN_WORKTREE}/spawned.txt"

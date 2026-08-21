@@ -1,8 +1,8 @@
 package action_test
 
 import (
-	"github.com/Bakaface/sortie/internal/action"
-	"github.com/Bakaface/sortie/internal/client"
+	"github.com/Bakaface/sakusen/internal/action"
+	"github.com/Bakaface/sakusen/internal/client"
 )
 
 // Compile-time check: *client.Client satisfies action.ClientAPI. Adding a

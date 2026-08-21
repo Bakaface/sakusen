@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/runner"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/runner"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 
 // noiseFiles are files that don't count as meaningful changes when checking
 // whether a task produced real output (e.g. when fast-tracking to completed).
-// Only sortie-written artifacts belong here: sortie never writes files an
+// Only sakusen-written artifacts belong here: sakusen never writes files an
 // agent might also legitimately edit (continue-path context flows as the
 // session's initial prompt, not as a CLAUDE.md dropped into the worktree), so
 // anything else — including a CLAUDE.md edit — is real work and must not be
@@ -800,7 +800,7 @@ func (s *Server) generateTitle(ctx context.Context, input string, summarizer *co
 		input,
 	)
 
-	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SORTIE_PURPOSE": "title"}, prompt)
+	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SAKUSEN_PURPOSE": "title"}, prompt)
 	if err != nil {
 		return "", fmt.Errorf("title generation failed: %w", err)
 	}

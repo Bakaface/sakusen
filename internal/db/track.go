@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // maxTrackDepth caps the length of a track's ancestor chain (leaf included).

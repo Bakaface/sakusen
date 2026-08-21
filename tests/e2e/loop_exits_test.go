@@ -57,8 +57,8 @@ workflows:
             step_context_empty: checking
 `, counterScript)
 
-	e.WriteSortieYAML(yaml)
-	e.MustSortie("create", "--title", "loop task", "loop task")
+	e.WriteSakusenYAML(yaml)
+	e.MustSakusen("create", "--title", "loop task", "loop task")
 
 	e.WaitStatus(1, "completed", 15*time.Second)
 

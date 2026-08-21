@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
-	taskpkg "github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
+	taskpkg "github.com/Bakaface/sakusen/internal/task"
 	"github.com/charmbracelet/lipgloss"
 )
 

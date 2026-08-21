@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/Bakaface/sortie/internal/action"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/action"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // TaskService is the complete daemon-facing surface the TUI depends on. It

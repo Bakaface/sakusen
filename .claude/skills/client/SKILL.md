@@ -1,7 +1,7 @@
 ---
 name: client
 description: >
-  Sortie's IPC client: Unix socket connection to daemon, request-response RPC,
+  Sakusen's IPC client: Unix socket connection to daemon, request-response RPC,
   subscription-based event streaming, and agent output consumption. Use when editing
   files in internal/client/, working on daemon communication, task/agent RPC methods,
   or event subscription handling.

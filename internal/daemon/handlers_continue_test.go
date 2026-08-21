@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 // interactiveAgent picks the agent record for ad-hoc tmux sessions (continue,

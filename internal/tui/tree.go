@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // treeEntry holds the tree-rendering metadata for a single task in branch view.

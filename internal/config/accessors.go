@@ -47,12 +47,12 @@ func (c *Config) GetWorkflow(name string) *WorkflowConfig {
 // named workflow. Precedence is locality-based — the more locally-defined
 // setting wins:
 //
-//  1. a project-scoped workflow's on_complete (inline in .sortie.yml or a
-//     .sortie/workflows/ file)
-//  2. the project .sortie.yml top-level on_complete (explicitly set)
-//  3. a global workflow's on_complete (~/.sortie.yml inline or
-//     ~/.sortie/workflows/)
-//  4. the inherited top-level on_complete (~/.sortie.yml or built-in default)
+//  1. a project-scoped workflow's on_complete (inline in .sakusen.yml or a
+//     .sakusen/workflows/ file)
+//  2. the project .sakusen.yml top-level on_complete (explicitly set)
+//  3. a global workflow's on_complete (~/.sakusen.yml inline or
+//     ~/.sakusen/workflows/)
+//  4. the inherited top-level on_complete (~/.sakusen.yml or built-in default)
 //
 // A workflow adopted from the global pool is a cross-project default; adopting
 // it must not silently defeat a project's explicit on_complete choice (a task
@@ -188,7 +188,7 @@ func ResolveBranchTemplate(tmpl string, taskID int64, taskTitle, taskSlug string
 	return tmpl
 }
 
-// WriteProjectConfig writes a .sortie.yml file.
+// WriteProjectConfig writes a .sakusen.yml file.
 func WriteProjectConfig(path string, proj *ProjectConfig) error {
 	data, err := yaml.Marshal(proj)
 	if err != nil {

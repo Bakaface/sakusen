@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -920,15 +920,15 @@ func TestApplyPins_BranchPinned(t *testing.T) {
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:   "branch-wf",
-		Branch: "sortie/{{task_id}}-auto",
+		Branch: "sakusen/{{task_id}}-auto",
 	}
 	p.applyPins(wf)
 
 	if !p.pins.branch {
 		t.Error("expected branch pin to be set")
 	}
-	if p.BranchName() != "sortie/{{task_id}}-auto" {
-		t.Errorf("expected branch name 'sortie/{{task_id}}-auto', got %q", p.BranchName())
+	if p.BranchName() != "sakusen/{{task_id}}-auto" {
+		t.Errorf("expected branch name 'sakusen/{{task_id}}-auto', got %q", p.BranchName())
 	}
 
 	// ToggleBranchMode should be a no-op when branch is pinned

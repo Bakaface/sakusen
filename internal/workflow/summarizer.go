@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/runner"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/runner"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // CheckFastTrackCompletion is the single owner of the "no meaningful changes"
@@ -30,7 +30,7 @@ import (
 // behavior on top of.
 //
 // noiseFiles enumerates paths that don't count toward "meaningful" (e.g.
-// .sortie-output.log). Ownership of that list stays with the
+// .sakusen-output.log). Ownership of that list stays with the
 // daemon (it's daemon/tmux bookkeeping, not a workflow config concept) —
 // it's passed in rather than hardcoded here.
 //
@@ -322,19 +322,19 @@ func (e *Engine) loadStepChatContent(ctx context.Context, t *task.Task, wf *conf
 
 		// Look up the session id recorded from the step's sentinel payload.
 		env := map[string]string{
-			"SORTIE_TASK_ID":  fmt.Sprintf("%d", t.ID),
-			"SORTIE_STEP":     step.Name,
-			"SORTIE_WORKTREE": t.WorktreePath,
+			"SAKUSEN_TASK_ID":  fmt.Sprintf("%d", t.ID),
+			"SAKUSEN_STEP":     step.Name,
+			"SAKUSEN_WORKTREE": t.WorktreePath,
 		}
 		if chat, err := e.database.GetChatByStep(t.ID, step.Name); err != nil {
 			return "", fmt.Errorf("failed to look up chat session for tmux step %q: %w", step.Name, err)
 		} else if chat != nil {
-			env["SORTIE_SESSION_ID"] = chat.SessionID
+			env["SAKUSEN_SESSION_ID"] = chat.SessionID
 		}
 		if sentinel, sentinelPath, ok := LatestStepSentinelWithPath(t.WorktreePath, step.Name); ok {
-			env["SORTIE_SENTINEL_FILE"] = sentinelPath
+			env["SAKUSEN_SENTINEL_FILE"] = sentinelPath
 			if sentinel.TranscriptPath != "" {
-				env["SORTIE_TRANSCRIPT_PATH"] = sentinel.TranscriptPath
+				env["SAKUSEN_TRANSCRIPT_PATH"] = sentinel.TranscriptPath
 			}
 		}
 
@@ -613,12 +613,12 @@ func RunWorktreeSetupCommands(ctx context.Context, projectRoot, worktreePath str
 // `summarizer:` command is configured. Callers treat it as a degradation:
 // summaries are skipped with a warning (or the task fails when a step demands
 // context via require_context).
-var ErrNoSummarizer = errors.New("no summarizer configured: set a top-level `summarizer:` command in .sortie.yml (run `sortie init` in a fresh project for a scaffolded default)")
+var ErrNoSummarizer = errors.New("no summarizer configured: set a top-level `summarizer:` command in .sakusen.yml (run `sakusen init` in a fresh project for a scaffolded default)")
 
 // runSummarizerSync runs the configured summarizer command synchronously with
 // the prompt piped on stdin and captures its stdout. workDir sets the working
 // directory so the command can access the task's worktree files. purpose tags
-// the invocation via SORTIE_PURPOSE so stubs/scripts can route the call
+// the invocation via SAKUSEN_PURPOSE so stubs/scripts can route the call
 // without parsing prompt text.
 //
 // The prompt is piped on stdin rather than passed as an argv positional — this
@@ -629,7 +629,7 @@ func (e *Engine) runSummarizerSync(ctx context.Context, prompt string, workDir s
 	}
 	env := map[string]string{}
 	if purpose != "" {
-		env["SORTIE_PURPOSE"] = purpose
+		env["SAKUSEN_PURPOSE"] = purpose
 	}
 	return runner.RunSync(ctx, e.cfg.Summarizer.Command, workDir, env, prompt)
 }

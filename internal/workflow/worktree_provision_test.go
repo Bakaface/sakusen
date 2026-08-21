@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // newProvisionTestEngine wires up a real (in-memory) DB-backed Engine plus a

@@ -11,24 +11,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/runner"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/runner"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
 )
 
 // StepPromptFile returns the path the fully-resolved step prompt is written to
-// before an agent spawn. Exported to the agent via SORTIE_PROMPT_FILE, and used
+// before an agent spawn. Exported to the agent via SAKUSEN_PROMPT_FILE, and used
 // by the daemon to re-feed the prompt when restoring a step session.
 func StepPromptFile(worktreePath, stepName string) string {
-	return filepath.Join(worktreePath, ".sortie", fmt.Sprintf("step-prompt-%s.txt", stepName))
+	return filepath.Join(worktreePath, ".sakusen", fmt.Sprintf("step-prompt-%s.txt", stepName))
 }
 
 // stepResultFile returns the path a headless agent's pipeline is expected to
-// write its final result text to. Exported via SORTIE_RESULT_FILE and read
+// write its final result text to. Exported via SAKUSEN_RESULT_FILE and read
 // back after exit (with a crude stdout-tail fallback when absent).
 func stepResultFile(worktreePath, stepName string) string {
-	return filepath.Join(worktreePath, ".sortie", fmt.Sprintf("step-result-%s.txt", stepName))
+	return filepath.Join(worktreePath, ".sakusen", fmt.Sprintf("step-result-%s.txt", stepName))
 }
 
 // agentRunner is the AGENT-RUNNER seam between the engine's step-execution
@@ -68,14 +68,14 @@ func (realAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.T
 
 // runHeadlessAgent executes a step's headless agent command synchronously:
 // writes the resolved prompt to the step prompt file, spawns the agent's
-// shell command via runner.Process with the sortie env contract exported,
+// shell command via runner.Process with the sakusen env contract exported,
 // streams its stdout into the unified task log, and returns the exit code,
-// result text (from SORTIE_RESULT_FILE, stdout-tail fallback), and — on
+// result text (from SAKUSEN_RESULT_FILE, stdout-tail fallback), and — on
 // failure — a tail of the step log for diagnostics.
 func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
-	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
-	if err := os.MkdirAll(sortieDir, 0755); err != nil {
-		return 1, "", "", fmt.Errorf("failed to create sortie dir: %w", err)
+	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")
+	if err := os.MkdirAll(sakusenDir, 0755); err != nil {
+		return 1, "", "", fmt.Errorf("failed to create sakusen dir: %w", err)
 	}
 	promptFile := StepPromptFile(t.WorktreePath, step.Name)
 	resultFile := stepResultFile(t.WorktreePath, step.Name)
@@ -87,8 +87,8 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	_ = os.Remove(resultFile)
 
 	env := runner.MergeEnv(envVars, agent.Env)
-	env["SORTIE_PROMPT_FILE"] = promptFile
-	env["SORTIE_RESULT_FILE"] = resultFile
+	env["SAKUSEN_PROMPT_FILE"] = promptFile
+	env["SAKUSEN_RESULT_FILE"] = resultFile
 
 	proc := runner.NewProcess(fmt.Sprintf("%d", t.ID), t.WorktreePath, agent.Command, resultFile)
 
@@ -243,9 +243,9 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 		session.Kill()
 	}
 
-	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
+	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")
 	promptFile := StepPromptFile(t.WorktreePath, step.Name)
-	scriptFile := filepath.Join(sortieDir, fmt.Sprintf("run-step-%s.sh", step.Name))
+	scriptFile := filepath.Join(sakusenDir, fmt.Sprintf("run-step-%s.sh", step.Name))
 	logPath := ProjectLogPath(e.dataDir, t.ID)
 	if err := os.MkdirAll(ProjectLogsDir(e.dataDir, t.ID), 0755); err != nil {
 		return 1, "", fmt.Errorf("failed to create log dir: %w", err)
@@ -274,9 +274,9 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 	// engine's per-step contract, the agent record's extra env, and the
 	// tmux-specific additions (prompt file + sentinel contract).
 	env := runner.MergeEnv(envVars, agent.Env)
-	env["SORTIE_PROMPT_FILE"] = promptFile
-	env["SORTIE_DONE_DIR"] = StepDoneDir(t.WorktreePath)
-	env["SORTIE_DONE_PREFIX"] = SentinelPrefix(step.Name)
+	env["SAKUSEN_PROMPT_FILE"] = promptFile
+	env["SAKUSEN_DONE_DIR"] = StepDoneDir(t.WorktreePath)
+	env["SAKUSEN_DONE_PREFIX"] = SentinelPrefix(step.Name)
 
 	script := runner.BuildWrapperScript(agent.Command, env)
 	if err := os.WriteFile(scriptFile, []byte(script), 0755); err != nil {
@@ -316,7 +316,7 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 		outputFn(logLines)
 	}
 
-	log.Printf("Tmux session %q started for task #%d step %q (attach with: sortie attach %s)",
+	log.Printf("Tmux session %q started for task #%d step %q (attach with: sakusen attach %s)",
 		session.Name, t.ID, step.Name, taskID)
 
 	// Session-id discovery is sentinel-driven: when the agent's turn-end
@@ -336,7 +336,7 @@ func writeTmuxLogMessage(logPath string, taskID int64, stepName, sessionName, ta
 	lines := []string{
 		fmt.Sprintf("[%s] === Step: %s (task #%d) ===", ts, stepName, taskID),
 		fmt.Sprintf("[%s] Tmux session %q initiated", ts, sessionName),
-		fmt.Sprintf("[%s] Attach with: sortie attach %s", ts, taskIDStr),
+		fmt.Sprintf("[%s] Attach with: sakusen attach %s", ts, taskIDStr),
 	}
 
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

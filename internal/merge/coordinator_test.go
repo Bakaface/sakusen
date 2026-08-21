@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/task"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // initRepoWithBranch creates a real git repo with a base branch and a feature
@@ -350,7 +350,7 @@ func TestCleanupOnConflictResolverFailure(t *testing.T) {
 // TestResolvingConflictsStatusReportedDuringResolver verifies that the
 // coordinator surfaces the "resolving-conflicts" phase via the StatusSetter
 // while the conflict resolver is running, and restores the previous status
-// once the resolver returns. Regression for sortie#95, where tasks stuck in
+// once the resolver returns. Regression for sakusen#95, where tasks stuck in
 // conflict resolution displayed as "implementing [wip]" instead of telling
 // the user that conflict resolution was actually in flight.
 func TestResolvingConflictsStatusReportedDuringResolver(t *testing.T) {

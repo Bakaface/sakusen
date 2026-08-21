@@ -1,4 +1,4 @@
-// Package action centralizes the 13 user-facing task verbs that Sortie's
+// Package action centralizes the 13 user-facing task verbs that Sakusen's
 // three surfaces (Cobra CLI, TUI palette, TUI keybindings) share. Each verb
 // has a typed Args struct, a Validate() method, and a Run<Verb> entry point
 // that returns a uniform Result. The CLI and TUI become thin adapters that
@@ -9,8 +9,8 @@ package action
 import (
 	"io"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // Ctx is the carrier struct every action receives. CLI builds one from

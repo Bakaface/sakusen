@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // executeOnComplete runs the configured on_complete action after all steps
@@ -71,16 +71,16 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 	}
 
 	env := map[string]string{
-		"SORTIE_TASK_ID":      fmt.Sprintf("%d", t.ID),
-		"SORTIE_STEP":         step.Name,
-		"SORTIE_WORKTREE":     t.WorktreePath,
-		"SORTIE_PROJECT_PATH": e.repoRoot,
-		"SORTIE_PURPOSE":      "merge_conflict",
-		"SORTIE_AGENT":        slug,
+		"SAKUSEN_TASK_ID":      fmt.Sprintf("%d", t.ID),
+		"SAKUSEN_STEP":         step.Name,
+		"SAKUSEN_WORKTREE":     t.WorktreePath,
+		"SAKUSEN_PROJECT_PATH": e.repoRoot,
+		"SAKUSEN_PURPOSE":      "merge_conflict",
+		"SAKUSEN_AGENT":        slug,
 	}
 	if t.TrackID != nil {
 		// Parity with step agents — merge-conflict agents belong to the same task.
-		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
+		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 
 	exitCode, _, outputTail, err := e.runHeadlessAgent(ctx, t, step, agent, prompt, env, outputFn)
@@ -109,7 +109,7 @@ func (e *Engine) cleanupMergedWorktree(t *task.Task, logf func(string, ...any)) 
 	if err := e.repo.CleanupWorktrees(); err != nil {
 		log.Printf("Warning: failed to prune worktrees: %v", err)
 	}
-	// Only delete branches that sortie created; preserve user-provided branches
+	// Only delete branches that sakusen created; preserve user-provided branches
 	if t.CheckoutBranch == "" {
 		if err := e.repo.ForceDeleteBranch(t.Branch); err != nil {
 			log.Printf("Warning: failed to delete branch: %v", err)

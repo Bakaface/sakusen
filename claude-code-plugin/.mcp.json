@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "sortie": {
-      "command": "sortie",
+    "sakusen": {
+      "command": "sakusen",
       "args": ["mcp"]
     }
   }

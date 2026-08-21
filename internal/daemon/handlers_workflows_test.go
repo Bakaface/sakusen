@@ -3,7 +3,7 @@ package daemon
 import (
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 func TestSummarizeWorkflows_PropagatesHiddenAndSource(t *testing.T) {
@@ -16,7 +16,7 @@ func TestSummarizeWorkflows_PropagatesHiddenAndSource(t *testing.T) {
 		{
 			Name:   "hidden-one",
 			Hidden: true,
-			Source: "/some/path/.sortie/workflows/tasks/hidden-one.yml",
+			Source: "/some/path/.sakusen/workflows/tasks/hidden-one.yml",
 		},
 	}
 
@@ -51,7 +51,7 @@ func TestSummarizeWorkflows_PinFieldsAndFullySpec(t *testing.T) {
 			Name:     "pinned",
 			Input:    "Pinned body",
 			Worktree: &worktreeTrue,
-			Branch:   "sortie/{{task_id}}",
+			Branch:   "sakusen/{{task_id}}",
 			Target:   "main",
 			Steps:    []config.StepConfig{{Name: "implement"}},
 		},
@@ -72,7 +72,7 @@ func TestSummarizeWorkflows_PinFieldsAndFullySpec(t *testing.T) {
 	if p.Worktree == nil || !*p.Worktree {
 		t.Errorf("pinned.Worktree: got %v, want non-nil true", p.Worktree)
 	}
-	if p.Branch != "sortie/{{task_id}}" {
+	if p.Branch != "sakusen/{{task_id}}" {
 		t.Errorf("pinned.Branch: got %q, want the pinned template", p.Branch)
 	}
 	if p.Target != "main" {

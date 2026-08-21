@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,7 +22,7 @@ const (
 	viewTaskInfo
 	viewPrompt
 	viewArtifact
-	viewSortie
+	viewSakusen
 )
 
 type Model struct {
@@ -82,9 +82,9 @@ type Model struct {
 	// Artifact viewer state
 	artifactView artifactViewState
 
-	// Sortie animation state
-	sortie    sortieAnimation
-	sortieCmd tea.Cmd // deferred command to run when animation completes
+	// Sakusen animation state
+	sakusen    sakusenAnimation
+	sakusenCmd tea.Cmd // deferred command to run when animation completes
 
 	// Status message (flash message, auto-clears after a few ticks)
 	statusMessage    string
@@ -201,19 +201,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.taskInfo.SetSize(msg.Width, msg.Height)
 		m.prompt.SetSize(msg.Width, msg.Height)
 		m.artifactView.SetSize(msg.Width, msg.Height)
-		m.sortie.width = msg.Width
-		m.sortie.height = msg.Height
+		m.sakusen.width = msg.Width
+		m.sakusen.height = msg.Height
 		return m, nil
 
-	case sortieTickMsg:
-		m.sortie = m.sortie.Update()
-		if m.sortie.done {
+	case sakusenTickMsg:
+		m.sakusen = m.sakusen.Update()
+		if m.sakusen.done {
 			m.view = viewList
-			deferred := m.sortieCmd
-			m.sortieCmd = nil
+			deferred := m.sakusenCmd
+			m.sakusenCmd = nil
 			return m, deferred
 		}
-		return m, sortieTickCmd()
+		return m, sakusenTickCmd()
 
 	case clientConnectedMsg:
 		m.client = msg.client
@@ -494,11 +494,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePromptKey(msg)
 	case viewArtifact:
 		return m.handleArtifactViewKey(msg)
-	case viewSortie:
+	case viewSakusen:
 		// Any keypress skips the animation
 		m.view = viewList
-		deferred := m.sortieCmd
-		m.sortieCmd = nil
+		deferred := m.sakusenCmd
+		m.sakusenCmd = nil
 		return m, deferred
 	}
 	return m, nil
@@ -624,8 +624,8 @@ func (m Model) View() string {
 		content = m.prompt.View()
 	case viewArtifact:
 		content = m.artifactView.View()
-	case viewSortie:
-		return m.sortie.View()
+	case viewSakusen:
+		return m.sakusen.View()
 	default:
 		content = m.list.View()
 	}

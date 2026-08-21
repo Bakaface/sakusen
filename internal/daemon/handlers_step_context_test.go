@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // readOneMessage reads a single line-framed Message off the given conn and
@@ -80,7 +80,7 @@ func createPausedTmuxStep(t *testing.T, s *Server, projID int64, stepName string
 			{Name: stepName, Human: true},
 		},
 	}}}
-	repoRoot := "/tmp/sortie-test"
+	repoRoot := "/tmp/sakusen-test"
 	s.projectsMu.Lock()
 	s.projects[projID] = &projectContext{
 		cfg:      cfg,
@@ -88,7 +88,7 @@ func createPausedTmuxStep(t *testing.T, s *Server, projID int64, stepName string
 		repoRoot: repoRoot,
 		// Match the live fingerprint so getProjectContext's tracks-workflows
 		// freshness check doesn't evict this hand-primed entry (a developer
-		// machine may have a real ~/.sortie/tracks tree).
+		// machine may have a real ~/.sakusen/tracks tree).
 		tracksFingerprint: tracksFingerprint(repoRoot),
 	}
 	s.projectsMu.Unlock()

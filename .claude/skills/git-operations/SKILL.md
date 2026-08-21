@@ -1,7 +1,7 @@
 ---
 name: git-operations
 description: >
-  Sortie's git operations: worktree management, merge/rebase strategies, conflict
+  Sakusen's git operations: worktree management, merge/rebase strategies, conflict
   resolution, branch operations, and commit message generation. Use when editing
   files in internal/git/, working on worktree creation/removal, merge logic,
   conflict handling, or conventional commit utilities.
@@ -14,7 +14,7 @@ Two files: `operations.go` (core git commands) and `worktree.go` (worktree lifec
 ## Worktree Management
 
 ```go
-const WorktreePrefix = "sortie-task-"
+const WorktreePrefix = "sakusen-task-"
 
 type Worktree struct {
     Path     string
@@ -25,7 +25,7 @@ type Worktree struct {
 CreateWorktree(repoRoot string, taskID int64, baseBranch, branchName string) (*Worktree, error)
 CheckoutWorktree(repoRoot string, taskID int64, branchName string) (*Worktree, error)
 RemoveWorktree(repoRoot, worktreePath string) error
-ListWorktrees(repoRoot string) ([]string, error)   // Filters WorktreePrefix ("sortie-task-") and "sortie-" paths
+ListWorktrees(repoRoot string) ([]string, error)   // Filters WorktreePrefix ("sakusen-task-") and "sakusen-" paths
 CleanupWorktrees(repoRoot string) error             // git worktree prune
 IsGitRepo(path string) bool
 GetRepoRoot(path string) (string, error)
@@ -38,7 +38,7 @@ CheckoutBranch(repoPath, branch string) error
 IsWorktreeDetached(worktreePath string) bool
 ```
 
-Worktree path convention: `<repoRoot>/.sortie/worktrees/<branchName-with-slashes-as-dashes>`
+Worktree path convention: `<repoRoot>/.sakusen/worktrees/<branchName-with-slashes-as-dashes>`
 
 `CreateWorktree` handles "already exists" by falling back to plain checkout.
 

@@ -3,7 +3,7 @@ package action_test
 import (
 	"errors"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // fakeClient is the minimal stub used by verb tests. Every method returns the

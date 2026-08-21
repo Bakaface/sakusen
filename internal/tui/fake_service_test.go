@@ -3,7 +3,7 @@ package tui
 import (
 	"errors"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // fakeTaskService is the TUI-side counterpart to internal/action's

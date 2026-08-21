@@ -14,7 +14,7 @@ steps:
 `
 
 // isolateHome points HOME and XDG_CONFIG_HOME at fresh temp dirs so the
-// developer's real ~/.sortie tree can't leak into project-tier tests.
+// developer's real ~/.sakusen tree can't leak into project-tier tests.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
@@ -33,7 +33,7 @@ func findWorkflow(cfg *Config, name string) *WorkflowConfig {
 }
 
 // TestTrackWorkflows_ProjectTierDiscovery verifies that
-// .sortie/tracks/<slug>/workflows/*.yml register as hidden, namespaced
+// .sakusen/tracks/<slug>/workflows/*.yml register as hidden, namespaced
 // "<slug>:<name>" workflows resolvable via GetTaskWorkflow but excluded from
 // the new-task menu names.
 func TestTrackWorkflows_ProjectTierDiscovery(t *testing.T) {
@@ -42,7 +42,7 @@ func TestTrackWorkflows_ProjectTierDiscovery(t *testing.T) {
 git:
   base_branch: main
 `, map[string]string{
-		".sortie/tracks/pay/workflows/impl.yml": trackWfYaml,
+		".sakusen/tracks/pay/workflows/impl.yml": trackWfYaml,
 	})
 
 	cfg, err := LoadForProject(dir)
@@ -80,11 +80,11 @@ git:
 	}
 }
 
-// TestTrackWorkflows_GlobalTier verifies ~/.sortie/tracks/<slug>/workflows/
-// resolves from any project — including when ~/.sortie.yml does not exist.
+// TestTrackWorkflows_GlobalTier verifies ~/.sakusen/tracks/<slug>/workflows/
+// resolves from any project — including when ~/.sakusen.yml does not exist.
 func TestTrackWorkflows_GlobalTier(t *testing.T) {
 	homeDir := isolateHome(t)
-	globalWf := filepath.Join(homeDir, ".sortie", "tracks", "sprint", "workflows", "impl.yml")
+	globalWf := filepath.Join(homeDir, ".sakusen", "tracks", "sprint", "workflows", "impl.yml")
 	if err := os.MkdirAll(filepath.Dir(globalWf), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestTrackWorkflows_GlobalTier(t *testing.T) {
 // in both tiers resolves to the project tier without error.
 func TestTrackWorkflows_ProjectShadowsGlobal(t *testing.T) {
 	homeDir := isolateHome(t)
-	globalWf := filepath.Join(homeDir, ".sortie", "tracks", "pay", "workflows", "impl.yml")
+	globalWf := filepath.Join(homeDir, ".sakusen", "tracks", "pay", "workflows", "impl.yml")
 	if err := os.MkdirAll(filepath.Dir(globalWf), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestTrackWorkflows_ProjectShadowsGlobal(t *testing.T) {
 
 	projectYaml := "steps:\n  - name: project-step\n    prompt: \"project\"\n"
 	dir, _ := setupProject(t, "git:\n  base_branch: main\n", map[string]string{
-		".sortie/tracks/pay/workflows/impl.yml": projectYaml,
+		".sakusen/tracks/pay/workflows/impl.yml": projectYaml,
 	})
 
 	cfg, err := LoadForProject(dir)
@@ -155,7 +155,7 @@ func TestTrackWorkflows_ProjectShadowsGlobal(t *testing.T) {
 func TestTrackWorkflows_HiddenNeverImplicitDefault(t *testing.T) {
 	isolateHome(t)
 	dir, _ := setupProject(t, "git:\n  base_branch: main\n", map[string]string{
-		".sortie/tracks/pay/workflows/impl.yml": trackWfYaml,
+		".sakusen/tracks/pay/workflows/impl.yml": trackWfYaml,
 	})
 
 	cfg, err := LoadForProject(dir)
@@ -181,7 +181,7 @@ func TestTrackWorkflows_Errors(t *testing.T) {
 	t.Run("invalid slug dir name", func(t *testing.T) {
 		isolateHome(t)
 		dir, _ := setupProject(t, "", map[string]string{
-			".sortie/tracks/Bad_Slug/workflows/impl.yml": trackWfYaml,
+			".sakusen/tracks/Bad_Slug/workflows/impl.yml": trackWfYaml,
 		})
 		if _, err := LoadForProject(dir); err == nil || !strings.Contains(err.Error(), "kebab-case") {
 			t.Errorf("expected kebab-case error, got %v", err)
@@ -191,7 +191,7 @@ func TestTrackWorkflows_Errors(t *testing.T) {
 	t.Run("subdir inside track workflows dir", func(t *testing.T) {
 		isolateHome(t)
 		dir, _ := setupProject(t, "", map[string]string{
-			".sortie/tracks/pay/workflows/nested/impl.yml": trackWfYaml,
+			".sakusen/tracks/pay/workflows/nested/impl.yml": trackWfYaml,
 		})
 		if _, err := LoadForProject(dir); err == nil || !strings.Contains(err.Error(), "subdirectories not supported") {
 			t.Errorf("expected subdir error, got %v", err)
@@ -201,7 +201,7 @@ func TestTrackWorkflows_Errors(t *testing.T) {
 	t.Run("bad extension", func(t *testing.T) {
 		isolateHome(t)
 		dir, _ := setupProject(t, "", map[string]string{
-			".sortie/tracks/pay/workflows/impl.json": trackWfYaml,
+			".sakusen/tracks/pay/workflows/impl.json": trackWfYaml,
 		})
 		if _, err := LoadForProject(dir); err == nil || !strings.Contains(err.Error(), "invalid file extension") {
 			t.Errorf("expected extension error, got %v", err)
@@ -211,7 +211,7 @@ func TestTrackWorkflows_Errors(t *testing.T) {
 	t.Run("non-dir entry in tracks/ skipped", func(t *testing.T) {
 		isolateHome(t)
 		dir, _ := setupProject(t, "", map[string]string{
-			".sortie/tracks/README.md": "not a track",
+			".sakusen/tracks/README.md": "not a track",
 		})
 		if _, err := LoadForProject(dir); err != nil {
 			t.Errorf("non-dir entries must be skipped silently, got %v", err)

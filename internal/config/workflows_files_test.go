@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-// setupProject writes a .sortie.yml and any .sortie/workflows/* files into a
-// temp dir and returns the dir + .sortie.yml path.
-func setupProject(t *testing.T, sortieYml string, files map[string]string) (string, string) {
+// setupProject writes a .sakusen.yml and any .sakusen/workflows/* files into a
+// temp dir and returns the dir + .sakusen.yml path.
+func setupProject(t *testing.T, sakusenYml string, files map[string]string) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	ymlPath := filepath.Join(dir, ".sortie.yml")
-	if err := os.WriteFile(ymlPath, []byte(sortieYml), 0644); err != nil {
-		t.Fatalf("write .sortie.yml: %v", err)
+	ymlPath := filepath.Join(dir, ".sakusen.yml")
+	if err := os.WriteFile(ymlPath, []byte(sakusenYml), 0644); err != nil {
+		t.Fatalf("write .sakusen.yml: %v", err)
 	}
 	for rel, content := range files {
 		full := filepath.Join(dir, rel)
@@ -29,13 +29,13 @@ func setupProject(t *testing.T, sortieYml string, files map[string]string) (stri
 }
 
 // TestFileWorkflows_StringRefResolves verifies that a string ref in the flat
-// workflows list resolves against the flat .sortie/workflows/<name>.yml pool.
+// workflows list resolves against the flat .sakusen/workflows/<name>.yml pool.
 func TestFileWorkflows_StringRefResolves(t *testing.T) {
 	dir, _ := setupProject(t, `
 workflows:
   - implement
 `, map[string]string{
-		".sortie/workflows/implement.yml": `
+		".sakusen/workflows/implement.yml": `
 description: Implement task
 steps:
   - name: do
@@ -85,7 +85,7 @@ workflows:
       - name: a
         prompt: "a"
 `, map[string]string{
-		".sortie/workflows/foo.yml": `
+		".sakusen/workflows/foo.yml": `
 steps:
   - name: b
     prompt: "b"
@@ -99,18 +99,18 @@ steps:
 }
 
 // TestFileWorkflows_UnreferencedFileLoadedAsHidden verifies that files not
-// referenced from .sortie.yml are loaded as Hidden=true.
+// referenced from .sakusen.yml are loaded as Hidden=true.
 func TestFileWorkflows_UnreferencedFileLoadedAsHidden(t *testing.T) {
 	dir, _ := setupProject(t, `
 workflows:
   - active
 `, map[string]string{
-		".sortie/workflows/active.yml": `
+		".sakusen/workflows/active.yml": `
 steps:
   - name: a
     prompt: "a"
 `,
-		".sortie/workflows/hidden.yml": `
+		".sakusen/workflows/hidden.yml": `
 steps:
   - name: b
     prompt: "b"
@@ -139,8 +139,8 @@ workflows:
   - second
   - first
 `, map[string]string{
-		".sortie/workflows/first.yml":  "steps:\n  - name: a\n    prompt: a\n",
-		".sortie/workflows/second.yml": "steps:\n  - name: b\n    prompt: b\n",
+		".sakusen/workflows/first.yml":  "steps:\n  - name: a\n    prompt: a\n",
+		".sakusen/workflows/second.yml": "steps:\n  - name: b\n    prompt: b\n",
 	})
 
 	cfg, err := LoadForProject(dir)
@@ -161,7 +161,7 @@ workflows:
 func TestFileWorkflows_InvalidFilenameRejected(t *testing.T) {
 	dir, _ := setupProject(t, `workflows: []
 `, map[string]string{
-		".sortie/workflows/Bad_Name.yml": "steps: []\n",
+		".sakusen/workflows/Bad_Name.yml": "steps: []\n",
 	})
 
 	_, err := LoadForProject(dir)
@@ -174,7 +174,7 @@ func TestFileWorkflows_NameFieldRejected(t *testing.T) {
 	dir, _ := setupProject(t, `workflows:
   - foo
 `, map[string]string{
-		".sortie/workflows/foo.yml": `
+		".sakusen/workflows/foo.yml": `
 name: explicit-name
 steps:
   - name: a
@@ -194,7 +194,7 @@ steps:
 func TestFileWorkflows_HiddenWorkflowReachableViaListAll(t *testing.T) {
 	dir, _ := setupProject(t, `workflows: []
 `, map[string]string{
-		".sortie/workflows/hidden-job.yml": `
+		".sakusen/workflows/hidden-job.yml": `
 steps:
   - name: a
     prompt: "a"
@@ -221,7 +221,7 @@ func TestFileWorkflows_YamlExtension(t *testing.T) {
 	dir, _ := setupProject(t, `workflows:
   - alpha
 `, map[string]string{
-		".sortie/workflows/alpha.yaml": `
+		".sakusen/workflows/alpha.yaml": `
 steps:
   - name: a
     prompt: a
@@ -238,11 +238,11 @@ steps:
 }
 
 // TestFileWorkflows_SubdirectoryRejected verifies that subdirectories under
-// .sortie/workflows/ produce an error (flat-only layout required).
+// .sakusen/workflows/ produce an error (flat-only layout required).
 func TestFileWorkflows_SubdirectoryRejected(t *testing.T) {
 	dir, _ := setupProject(t, `workflows: []
 `, map[string]string{
-		".sortie/workflows/sub/nested.yml": "steps: []\n",
+		".sakusen/workflows/sub/nested.yml": "steps: []\n",
 	})
 
 	_, err := LoadForProject(dir)
@@ -259,7 +259,7 @@ func TestFileWorkflows_MixedInlineAndRef(t *testing.T) {
       - name: a
         prompt: "a"
 `, map[string]string{
-		".sortie/workflows/file-based.yml": `
+		".sakusen/workflows/file-based.yml": `
 steps:
   - name: b
     prompt: "b"
@@ -291,8 +291,8 @@ func TestDiagnose_WarnsForUnreferencedFile(t *testing.T) {
 	_, ymlPath := setupProject(t, `workflows:
   - active
 `, map[string]string{
-		".sortie/workflows/active.yml": "steps:\n  - name: a\n    prompt: a\n",
-		".sortie/workflows/hidden.yml": "steps:\n  - name: b\n    prompt: b\n",
+		".sakusen/workflows/active.yml": "steps:\n  - name: a\n    prompt: a\n",
+		".sakusen/workflows/hidden.yml": "steps:\n  - name: b\n    prompt: b\n",
 	})
 
 	diags, err := Diagnose(ymlPath)
@@ -311,13 +311,13 @@ func TestDiagnose_WarnsForUnreferencedFile(t *testing.T) {
 }
 
 // TestDiagnose_WarnsForFilesWithNoListing verifies that when files exist
-// under .sortie/workflows/ but there is no workflows: listing in .sortie.yml,
+// under .sakusen/workflows/ but there is no workflows: listing in .sakusen.yml,
 // a warning is surfaced.
 func TestDiagnose_WarnsForFilesWithNoListing(t *testing.T) {
-	// Files exist but no workflows: key in .sortie.yml — all workflows hidden.
+	// Files exist but no workflows: key in .sakusen.yml — all workflows hidden.
 	_, ymlPath := setupProject(t, `max_workers: 2
 `, map[string]string{
-		".sortie/workflows/bootstrap.yml": "steps:\n  - name: a\n    prompt: a\n",
+		".sakusen/workflows/bootstrap.yml": "steps:\n  - name: a\n    prompt: a\n",
 	})
 
 	diags, err := Diagnose(ymlPath)
@@ -335,7 +335,7 @@ func TestDiagnose_WarnsForFilesWithNoListing(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("want diagnostic about hidden workflows under .sortie/workflows/, got %v", got)
+		t.Errorf("want diagnostic about hidden workflows under .sakusen/workflows/, got %v", got)
 	}
 }
 
@@ -345,7 +345,7 @@ func TestFileWorkflows_GetTaskWorkflowByName(t *testing.T) {
 	dir, _ := setupProject(t, `workflows:
   - myflow
 `, map[string]string{
-		".sortie/workflows/myflow.yml": `
+		".sakusen/workflows/myflow.yml": `
 description: My workflow
 steps:
   - name: do
@@ -376,7 +376,7 @@ steps:
 func TestFileWorkflows_UnreferencedFileAccessibleViaGetTaskWorkflow(t *testing.T) {
 	dir, _ := setupProject(t, `workflows: []
 `, map[string]string{
-		".sortie/workflows/hidden-flow.yml": `
+		".sakusen/workflows/hidden-flow.yml": `
 steps:
   - name: a
     prompt: "hidden"

@@ -1,0 +1,47 @@
+# Sakusen project configuration. Scaffolded by `sakusen init` — edit freely.
+max_workers: 3
+
+git:
+  branch_template: "sakusen/{{task_id}}-{{task_slug}}"
+
+on_complete: commit
+
+# Agents: every workflow step runs one of these shell commands. Steps pick an
+# agent via `agent: <slug>` (step level beats workflow level beats
+# default_agent). The agent's mode decides how the step executes:
+#   headless — sakusen spawns the command, streams its stdout, and reads the
+#              final result text from $SAKUSEN_RESULT_FILE
+#   tmux     — sakusen runs the command inside a detached tmux session; a
+#              turn-end sentinel written to $SAKUSEN_DONE_DIR auto-advances the
+#              workflow (see .sakusen/agents/claude-settings.json)
+# The scaffolded records shell out to user-owned scripts under
+# .sakusen/agents/ — swap the commands to use any other tool (opencode, aider,
+# a raw model CLI, ...).
+default_agent: claude
+
+agents:
+  claude:
+    mode: headless
+    command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-headless.sh"'
+  claude-tmux:
+    mode: tmux
+    command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-tmux.sh"'
+    resume_command: 'claude --dangerously-skip-permissions --resume "$SAKUSEN_SESSION_ID"'
+    chat_log_command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-chat-log.sh"'
+
+# Summarizer: the utility LLM command used for chat/step summaries, the final
+# task summary, and AI task titles. Prompt arrives on stdin; response goes to
+# stdout. Remove this block to disable (titles fall back to truncated input,
+# summaries are skipped).
+summarizer:
+  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  max_prompt_bytes: 380000
+
+# workflows:
+#   - name: default
+#     steps:
+#       - name: implementing
+#         prompt: "Implement: {{task.input}}"
+#       - name: reviewing
+#         agent: claude-tmux   # interactive review step
+#         prompt: "Review the changes for task {{task.id}}"

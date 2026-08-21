@@ -1,12 +1,12 @@
 {
-  "name": "sortie-local",
-  "description": "Local marketplace for the Sortie Claude Code plugin",
+  "name": "sakusen-local",
+  "description": "Local marketplace for the Sakusen Claude Code plugin",
   "owner": {
     "name": "Bakaface"
   },
   "plugins": [
     {
-      "name": "sortie",
+      "name": "sakusen",
       "source": "./claude-code-plugin"
     }
   ]

@@ -12,7 +12,7 @@ import (
 // is parsed correctly.
 func TestStepConfigParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yaml := `
 workflows:
@@ -42,7 +42,7 @@ workflows:
 
 func TestOnCompleteParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 on_complete: merge
@@ -79,7 +79,7 @@ workflows:
 
 func TestGitOnCompleteRejected(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 	if err := os.WriteFile(configPath, []byte("git:\n  on_complete: merge\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestGitOnCompleteRejected(t *testing.T) {
 	}
 }
 
-// TestRemovedProjectKeysRejected verifies the removed .sortie.yml top-level
+// TestRemovedProjectKeysRejected verifies the removed .sakusen.yml top-level
 // keys (claude:, yolo:, system_prompt:, allowed_summarization_models:) are hard
 // load-time errors with migration messages pointing at the agents:/summarizer:
 // replacements, instead of being silently dropped.
@@ -109,7 +109,7 @@ func TestRemovedProjectKeysRejected(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			configPath := filepath.Join(dir, ".sortie.yml")
+			configPath := filepath.Join(dir, ".sakusen.yml")
 			if err := os.WriteFile(configPath, []byte(tt.yaml), 0644); err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestRemovedProjectKeysRejected(t *testing.T) {
 }
 
 // TestRemovedKeysRejectedInGlobalConfig verifies the same removed keys are
-// rejected in the global ~/.config/sortie/config.yaml too.
+// rejected in the global ~/.config/sakusen/config.yaml too.
 func TestRemovedKeysRejectedInGlobalConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -150,14 +150,14 @@ func TestRemovedKeysRejectedInGlobalConfig(t *testing.T) {
 	}
 }
 
-func TestGetGlobalSortieYmlPath_HonorsXDG(t *testing.T) {
+func TestGetGlobalSakusenYmlPath_HonorsXDG(t *testing.T) {
 	xdgDir := t.TempDir()
 	if err := os.Setenv("XDG_CONFIG_HOME", xdgDir); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Unsetenv("XDG_CONFIG_HOME") })
 
-	xdgYml := filepath.Join(xdgDir, "sortie", "config.yml")
+	xdgYml := filepath.Join(xdgDir, "sakusen", "config.yml")
 	if err := os.MkdirAll(filepath.Dir(xdgYml), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -165,13 +165,13 @@ func TestGetGlobalSortieYmlPath_HonorsXDG(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := getGlobalSortieYmlPath()
+	got := getGlobalSakusenYmlPath()
 	if got != xdgYml {
 		t.Errorf("expected %q, got %q", xdgYml, got)
 	}
 }
 
-func TestGetGlobalSortieYmlPath_FallsBackToHome(t *testing.T) {
+func TestGetGlobalSakusenYmlPath_FallsBackToHome(t *testing.T) {
 	xdgDir := t.TempDir() // empty XDG dir, no config.yml inside
 	if err := os.Setenv("XDG_CONFIG_HOME", xdgDir); err != nil {
 		t.Fatal(err)
@@ -183,12 +183,12 @@ func TestGetGlobalSortieYmlPath_FallsBackToHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	homeYml := filepath.Join(homeDir, ".sortie.yml")
+	homeYml := filepath.Join(homeDir, ".sakusen.yml")
 	if err := os.WriteFile(homeYml, []byte("max_workers: 9\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	got := getGlobalSortieYmlPath()
+	got := getGlobalSakusenYmlPath()
 	if got != homeYml {
 		t.Errorf("expected %q, got %q", homeYml, got)
 	}
@@ -196,7 +196,7 @@ func TestGetGlobalSortieYmlPath_FallsBackToHome(t *testing.T) {
 
 func TestPollIntervalProjectConfig(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 poll_interval: 250ms
@@ -247,7 +247,7 @@ func TestPollIntervalDefault(t *testing.T) {
 
 func TestPollIntervalInvalid(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 poll_interval: "not a duration"
@@ -264,7 +264,7 @@ poll_interval: "not a duration"
 
 func TestLoopConfigParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 workflows:
@@ -689,11 +689,11 @@ func TestResolveBranchTemplate(t *testing.T) {
 	}{
 		{
 			name:     "config-style placeholders",
-			tmpl:     "sortie/{{task_id}}-{{task_slug}}",
+			tmpl:     "sakusen/{{task_id}}-{{task_slug}}",
 			taskID:   42,
 			title:    "Add Login Page",
 			slug:     "add-login-page",
-			expected: "sortie/42-add-login-page",
+			expected: "sakusen/42-add-login-page",
 		},
 		{
 			name:     "workflow-style placeholders",
@@ -740,11 +740,11 @@ func TestResolveBranchTemplate(t *testing.T) {
 }
 
 // TestHierarchicalConfigMerging tests the 3-layer config loading:
-// defaults -> global .sortie.yml -> project .sortie.yml
+// defaults -> global .sakusen.yml -> project .sakusen.yml
 func TestHierarchicalConfigMerging(t *testing.T) {
 	globalDir := t.TempDir()
-	globalSortieYml := filepath.Join(globalDir, ".sortie.yml")
-	os.WriteFile(globalSortieYml, []byte(`
+	globalSakusenYml := filepath.Join(globalDir, ".sakusen.yml")
+	os.WriteFile(globalSakusenYml, []byte(`
 max_workers: 5
 notifications:
   enabled: true
@@ -761,8 +761,8 @@ workflows:
 `), 0644)
 
 	projectDir := t.TempDir()
-	projectSortieYml := filepath.Join(projectDir, ".sortie.yml")
-	os.WriteFile(projectSortieYml, []byte(`
+	projectSakusenYml := filepath.Join(projectDir, ".sakusen.yml")
+	os.WriteFile(projectSakusenYml, []byte(`
 max_workers: 2
 workflows:
   - name: default
@@ -771,40 +771,40 @@ workflows:
         prompt: "Implement {{task.input}}"
 `), 0644)
 
-	// Simulate the 3-layer loading: defaults -> global .sortie.yml -> project .sortie.yml
+	// Simulate the 3-layer loading: defaults -> global .sakusen.yml -> project .sakusen.yml
 	cfg := defaultConfig()
 
-	// Layer 2: global .sortie.yml
-	if err := loadProjectConfig(globalSortieYml, cfg); err != nil {
-		t.Fatalf("failed to load global .sortie.yml: %v", err)
+	// Layer 2: global .sakusen.yml
+	if err := loadProjectConfig(globalSakusenYml, cfg); err != nil {
+		t.Fatalf("failed to load global .sakusen.yml: %v", err)
 	}
 
-	// After global .sortie.yml: max_workers=5, notifications set, git set, workflow set
+	// After global .sakusen.yml: max_workers=5, notifications set, git set, workflow set
 	if cfg.MaxWorkers != 5 {
-		t.Errorf("after global .sortie.yml: expected max_workers=5, got %d", cfg.MaxWorkers)
+		t.Errorf("after global .sakusen.yml: expected max_workers=5, got %d", cfg.MaxWorkers)
 	}
 	if !cfg.Notifications.Enabled {
-		t.Error("after global .sortie.yml: expected notifications.enabled=true")
+		t.Error("after global .sakusen.yml: expected notifications.enabled=true")
 	}
 	if !cfg.Notifications.OnComplete {
-		t.Error("after global .sortie.yml: expected notifications.on_complete=true")
+		t.Error("after global .sakusen.yml: expected notifications.on_complete=true")
 	}
 	if cfg.Notifications.OnFailed {
-		t.Error("after global .sortie.yml: expected notifications.on_failed=false")
+		t.Error("after global .sakusen.yml: expected notifications.on_failed=false")
 	}
 	if cfg.Git.BaseBranch != "develop" {
-		t.Errorf("after global .sortie.yml: expected git.base_branch=develop, got %q", cfg.Git.BaseBranch)
+		t.Errorf("after global .sakusen.yml: expected git.base_branch=develop, got %q", cfg.Git.BaseBranch)
 	}
 	if cfg.OnComplete != "merge" {
-		t.Errorf("after global .sortie.yml: expected on_complete=merge, got %q", cfg.OnComplete)
+		t.Errorf("after global .sakusen.yml: expected on_complete=merge, got %q", cfg.OnComplete)
 	}
 	if len(cfg.Workflows) != 1 || cfg.Workflows[0].Steps[0].Name != "global-step" {
-		t.Error("after global .sortie.yml: expected global-step workflow")
+		t.Error("after global .sakusen.yml: expected global-step workflow")
 	}
 
-	// Layer 3: project .sortie.yml overrides
-	if err := loadProjectConfig(projectSortieYml, cfg); err != nil {
-		t.Fatalf("failed to load project .sortie.yml: %v", err)
+	// Layer 3: project .sakusen.yml overrides
+	if err := loadProjectConfig(projectSakusenYml, cfg); err != nil {
+		t.Fatalf("failed to load project .sakusen.yml: %v", err)
 	}
 
 	// max_workers overridden by project
@@ -830,30 +830,30 @@ workflows:
 
 func TestHierarchicalConfigProjectOverridesNotifications(t *testing.T) {
 	globalDir := t.TempDir()
-	globalSortieYml := filepath.Join(globalDir, ".sortie.yml")
-	os.WriteFile(globalSortieYml, []byte(`
+	globalSakusenYml := filepath.Join(globalDir, ".sakusen.yml")
+	os.WriteFile(globalSakusenYml, []byte(`
 notifications:
   enabled: true
   on_complete: true
 `), 0644)
 
 	projectDir := t.TempDir()
-	projectSortieYml := filepath.Join(projectDir, ".sortie.yml")
-	os.WriteFile(projectSortieYml, []byte(`
+	projectSakusenYml := filepath.Join(projectDir, ".sakusen.yml")
+	os.WriteFile(projectSakusenYml, []byte(`
 notifications:
   enabled: false
 `), 0644)
 
 	cfg := defaultConfig()
 
-	if err := loadProjectConfig(globalSortieYml, cfg); err != nil {
+	if err := loadProjectConfig(globalSakusenYml, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if !cfg.Notifications.Enabled {
 		t.Error("expected notifications.enabled=true from global")
 	}
 
-	if err := loadProjectConfig(projectSortieYml, cfg); err != nil {
+	if err := loadProjectConfig(projectSakusenYml, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Notifications.Enabled {
@@ -863,8 +863,8 @@ notifications:
 
 func TestHierarchicalConfigGlobalOnlyNoProject(t *testing.T) {
 	globalDir := t.TempDir()
-	globalSortieYml := filepath.Join(globalDir, ".sortie.yml")
-	os.WriteFile(globalSortieYml, []byte(`
+	globalSakusenYml := filepath.Join(globalDir, ".sakusen.yml")
+	os.WriteFile(globalSakusenYml, []byte(`
 max_workers: 7
 git:
   base_branch: develop
@@ -878,11 +878,11 @@ workflows:
 
 	cfg := defaultConfig()
 
-	if err := loadProjectConfig(globalSortieYml, cfg); err != nil {
+	if err := loadProjectConfig(globalSakusenYml, cfg); err != nil {
 		t.Fatal(err)
 	}
 
-	// All values from global .sortie.yml
+	// All values from global .sakusen.yml
 	if cfg.MaxWorkers != 7 {
 		t.Errorf("expected max_workers=7, got %d", cfg.MaxWorkers)
 	}
@@ -899,14 +899,14 @@ workflows:
 
 func TestHierarchicalConfigTmuxNestedAttachBehavior(t *testing.T) {
 	globalDir := t.TempDir()
-	globalSortieYml := filepath.Join(globalDir, ".sortie.yml")
-	os.WriteFile(globalSortieYml, []byte(`
+	globalSakusenYml := filepath.Join(globalDir, ".sakusen.yml")
+	os.WriteFile(globalSakusenYml, []byte(`
 tmux_nested_attach_behavior: nest
 `), 0644)
 
 	cfg := defaultConfig()
 
-	if err := loadProjectConfig(globalSortieYml, cfg); err != nil {
+	if err := loadProjectConfig(globalSakusenYml, cfg); err != nil {
 		t.Fatal(err)
 	}
 
@@ -929,10 +929,10 @@ notifications:
 tmux_nested_attach_behavior: switch
 `), 0644)
 
-	// Layer 2: global .sortie.yml (sets workflow defaults, overrides max_workers)
-	globalSortieDir := t.TempDir()
-	globalSortieYml := filepath.Join(globalSortieDir, ".sortie.yml")
-	os.WriteFile(globalSortieYml, []byte(`
+	// Layer 2: global .sakusen.yml (sets workflow defaults, overrides max_workers)
+	globalSakusenDir := t.TempDir()
+	globalSakusenYml := filepath.Join(globalSakusenDir, ".sakusen.yml")
+	os.WriteFile(globalSakusenYml, []byte(`
 max_workers: 5
 git:
   base_branch: develop
@@ -946,10 +946,10 @@ workflows:
         prompt: "Default implementation"
 `), 0644)
 
-	// Layer 3: project .sortie.yml (overrides max_workers, adds project workflow)
+	// Layer 3: project .sakusen.yml (overrides max_workers, adds project workflow)
 	projectDir := t.TempDir()
-	projectSortieYml := filepath.Join(projectDir, ".sortie.yml")
-	os.WriteFile(projectSortieYml, []byte(`
+	projectSakusenYml := filepath.Join(projectDir, ".sakusen.yml")
+	os.WriteFile(projectSakusenYml, []byte(`
 max_workers: 2
 workflows:
   - name: default
@@ -964,33 +964,33 @@ workflows:
 	if err := loadGlobalConfig(globalConfigPath, cfg); err != nil {
 		t.Fatalf("layer 1: %v", err)
 	}
-	if err := loadProjectConfig(globalSortieYml, cfg); err != nil {
+	if err := loadProjectConfig(globalSakusenYml, cfg); err != nil {
 		t.Fatalf("layer 2: %v", err)
 	}
-	if err := loadProjectConfig(projectSortieYml, cfg); err != nil {
+	if err := loadProjectConfig(projectSakusenYml, cfg); err != nil {
 		t.Fatalf("layer 3: %v", err)
 	}
 
-	// max_workers: project (2) overrides global .sortie.yml (5) overrides config.yaml (10)
+	// max_workers: project (2) overrides global .sakusen.yml (5) overrides config.yaml (10)
 	if cfg.MaxWorkers != 2 {
 		t.Errorf("expected max_workers=2, got %d", cfg.MaxWorkers)
 	}
-	// notifications: global .sortie.yml overrides config.yaml
+	// notifications: global .sakusen.yml overrides config.yaml
 	if !cfg.Notifications.Enabled {
 		t.Error("expected notifications.enabled=true")
 	}
 	if cfg.Notifications.OnComplete {
-		t.Error("expected notifications.on_complete=false (from global .sortie.yml)")
+		t.Error("expected notifications.on_complete=false (from global .sakusen.yml)")
 	}
 	// tmux_nested_attach_behavior: from config.yaml (not overridden)
 	if cfg.TmuxNestedAttachBehavior != "switch" {
 		t.Errorf("expected tmux_nested_attach_behavior=switch, got %q", cfg.TmuxNestedAttachBehavior)
 	}
-	// git.base_branch: from global .sortie.yml (not overridden by project)
+	// git.base_branch: from global .sakusen.yml (not overridden by project)
 	if cfg.Git.BaseBranch != "develop" {
 		t.Errorf("expected git.base_branch=develop, got %q", cfg.Git.BaseBranch)
 	}
-	// workflow: from project (overrides global .sortie.yml)
+	// workflow: from project (overrides global .sakusen.yml)
 	if len(cfg.Workflows) != 1 || cfg.Workflows[0].Steps[0].Name != "implement" {
 		t.Error("expected implement workflow from project")
 	}
@@ -998,7 +998,7 @@ workflows:
 
 func TestVerificationConfigParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 verification:
@@ -1037,7 +1037,7 @@ verification:
 `), 0644)
 
 	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	os.WriteFile(projectPath, []byte(`
 verification:
   max_retries: 5
@@ -1072,7 +1072,7 @@ func TestVerificationConfigDefaultFalse(t *testing.T) {
 // TestFlatWorkflowsParsing verifies the canonical flat workflows: list format.
 func TestFlatWorkflowsParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 workflows:
@@ -1220,7 +1220,7 @@ func TestGetTaskWorkflowAllHiddenReturnsNil(t *testing.T) {
 
 func TestWorktreeSyncPathsParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 worktree-sync-paths:
@@ -1256,7 +1256,7 @@ worktree-sync-paths:
 
 func TestWorktreeSyncPathsLegacyListFormat(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	// Legacy format: plain list → treated as copy paths
 	yamlContent := `
@@ -1287,7 +1287,7 @@ worktree-sync-paths:
 
 func TestWorktreeSyncPathsProjectOverridesGlobal(t *testing.T) {
 	globalDir := t.TempDir()
-	globalPath := filepath.Join(globalDir, ".sortie.yml")
+	globalPath := filepath.Join(globalDir, ".sakusen.yml")
 	os.WriteFile(globalPath, []byte(`
 worktree-sync-paths:
   copy:
@@ -1296,7 +1296,7 @@ worktree-sync-paths:
 `), 0644)
 
 	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	os.WriteFile(projectPath, []byte(`
 worktree-sync-paths:
   link:
@@ -1328,7 +1328,7 @@ worktree-sync-paths:
 
 func TestWorktreeSyncPathsPerWorkflow(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 worktree-sync-paths:
@@ -1405,7 +1405,7 @@ func TestWorktreeSyncPathsDefaultEmpty(t *testing.T) {
 
 func TestWorktreeSetupCommandParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 worktree-setup-command: "./scripts/bootstrap.sh {{worktree_path}}"
@@ -1427,13 +1427,13 @@ worktree-setup-command: "./scripts/bootstrap.sh {{worktree_path}}"
 
 func TestWorktreeSetupCommandProjectOverridesGlobal(t *testing.T) {
 	globalDir := t.TempDir()
-	globalPath := filepath.Join(globalDir, ".sortie.yml")
+	globalPath := filepath.Join(globalDir, ".sakusen.yml")
 	os.WriteFile(globalPath, []byte(`
 worktree-setup-command: "./global-setup.sh"
 `), 0644)
 
 	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	os.WriteFile(projectPath, []byte(`
 worktree-setup-command: "./project-setup.sh"
 `), 0644)
@@ -1456,7 +1456,7 @@ worktree-setup-command: "./project-setup.sh"
 
 func TestWorktreeSetupCommandPerWorkflow(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 worktree-setup-command: "./global-setup.sh"
@@ -1519,7 +1519,7 @@ func TestWorktreeSetupCommandDefaultEmpty(t *testing.T) {
 
 func TestWorktreeSetupCommandsParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 worktree-setup-commands:
@@ -1549,7 +1549,7 @@ worktree-setup-commands:
 
 func TestWorktreeSetupCommandsProjectOverridesGlobal(t *testing.T) {
 	globalDir := t.TempDir()
-	globalPath := filepath.Join(globalDir, ".sortie.yml")
+	globalPath := filepath.Join(globalDir, ".sakusen.yml")
 	os.WriteFile(globalPath, []byte(`
 worktree-setup-commands:
   - "global-cmd-1"
@@ -1557,7 +1557,7 @@ worktree-setup-commands:
 `), 0644)
 
 	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	os.WriteFile(projectPath, []byte(`
 worktree-setup-commands:
   - "project-cmd-1"
@@ -1581,7 +1581,7 @@ worktree-setup-commands:
 
 func TestWorktreeSetupCommandsPerWorkflow(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 worktree-setup-commands:
@@ -1647,7 +1647,7 @@ func TestWorktreeSetupCommandsDefaultEmpty(t *testing.T) {
 
 func TestTmuxSetupCommandParsing(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 tmux-setup-command: "tmux new-window -t {{session_name}}:1"
@@ -1669,7 +1669,7 @@ tmux-setup-command: "tmux new-window -t {{session_name}}:1"
 
 func TestTmuxSetupCommandPerWorkflow(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	yamlContent := `
 tmux-setup-command: "tmux new-window -t {{session_name}}:1"
@@ -1830,7 +1830,7 @@ func TestConfigFirstStepIsTmux(t *testing.T) {
 // can migrate without consulting docs.
 func TestLoadProjectConfig_LegacyTmuxFieldRejected(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".sortie.yml")
+	path := filepath.Join(dir, ".sakusen.yml")
 	yaml := "workflows:\n  - name: w\n    tmux: true\n    steps:\n      - name: s\n        prompt: do\n"
 	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
@@ -1866,7 +1866,7 @@ func TestLoadProjectConfig_LegacyPrintFieldRejected(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(dir, ".sortie.yml")
+			path := filepath.Join(dir, ".sakusen.yml")
 			if err := os.WriteFile(path, []byte(tt.yaml), 0644); err != nil {
 				t.Fatal(err)
 			}
@@ -1887,7 +1887,7 @@ func TestLoadProjectConfig_LegacyPrintFieldRejected(t *testing.T) {
 // error pointing at the summarizer command.
 func TestLoadProjectConfig_StepAllowedSummarizationModelsRejected(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".sortie.yml")
+	path := filepath.Join(dir, ".sakusen.yml")
 	yaml := "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: do\n        allowed_summarization_models: [haiku]\n"
 	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
@@ -1903,7 +1903,7 @@ func TestLoadProjectConfig_StepAllowedSummarizationModelsRejected(t *testing.T) 
 // pin fields on a workflow.
 func TestWorkflowPinFields(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	trueVal := true
 	yamlContent := `
@@ -2119,7 +2119,7 @@ func TestValidatePins(t *testing.T) {
 // surfaced during config loading.
 func TestValidatePinsRejectedAtLoad(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".sortie.yml")
+	configPath := filepath.Join(dir, ".sakusen.yml")
 
 	// branch and checkout together is invalid
 	yamlContent := `
@@ -2168,11 +2168,11 @@ func contains(s, substr string) bool {
 func TestEffectiveOnCompleteLocality(t *testing.T) {
 	writeGlobal := func(t *testing.T) string {
 		globalDir := t.TempDir()
-		globalPath := filepath.Join(globalDir, ".sortie.yml")
+		globalPath := filepath.Join(globalDir, ".sakusen.yml")
 		if err := os.WriteFile(globalPath, []byte("workflows:\n  - gwf\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		wfDir := filepath.Join(globalDir, ".sortie", "workflows")
+		wfDir := filepath.Join(globalDir, ".sakusen", "workflows")
 		if err := os.MkdirAll(wfDir, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -2192,11 +2192,11 @@ func TestEffectiveOnCompleteLocality(t *testing.T) {
 		cfg.globalPool = snapshotGlobalPool(cfg)
 
 		projectDir := t.TempDir()
-		projectPath := filepath.Join(projectDir, ".sortie.yml")
+		projectPath := filepath.Join(projectDir, ".sakusen.yml")
 		if err := os.WriteFile(projectPath, []byte(projectYml), 0644); err != nil {
 			t.Fatal(err)
 		}
-		localDir := filepath.Join(projectDir, ".sortie", "workflows")
+		localDir := filepath.Join(projectDir, ".sakusen", "workflows")
 		if err := os.MkdirAll(localDir, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -2326,7 +2326,7 @@ workflows:
 }
 
 // TestAgentsMergeAcrossTiers verifies the agents map merges per slug across
-// the global (~/.sortie.yml) and project tiers: a slug redefined by the project
+// the global (~/.sakusen.yml) and project tiers: a slug redefined by the project
 // wins wholesale (no field merging), other global slugs survive, and the
 // project default_agent overrides the global one.
 func TestAgentsMergeAcrossTiers(t *testing.T) {
@@ -2400,7 +2400,7 @@ agents:
 		t.Fatalf("LoadForProject: %v", err)
 	}
 	if cfg.DefaultAgent != "global-default" {
-		t.Errorf("DefaultAgent = %q, want global-default inherited from ~/.sortie.yml", cfg.DefaultAgent)
+		t.Errorf("DefaultAgent = %q, want global-default inherited from ~/.sakusen.yml", cfg.DefaultAgent)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 )
 
 // Diagnostic carries a non-fatal validation warning surfaced by ValidateFile
-// (e.g. file-based workflow loaded but not referenced from .sortie.yml, which
+// (e.g. file-based workflow loaded but not referenced from .sakusen.yml, which
 // is legal but hides the workflow from menus).
 type Diagnostic struct {
 	Severity string // "warning"
@@ -41,7 +41,7 @@ var validPriorities = map[string]bool{
 	"urgent": true,
 }
 
-// ValidateFile validates a Sortie project config file (.sortie.yml) without
+// ValidateFile validates a Sakusen project config file (.sakusen.yml) without
 // touching the global merge hierarchy. It catches:
 //   - YAML syntax errors
 //   - Unknown top-level / nested fields (typos like `worktree_sync_paths`)
@@ -59,7 +59,7 @@ func ValidateFile(path string) error {
 	return err
 }
 
-// Diagnose validates a Sortie project config file and returns any non-fatal
+// Diagnose validates a Sakusen project config file and returns any non-fatal
 // warnings collected during validation. Fatal errors are returned via the
 // error result.
 func Diagnose(path string) ([]Diagnostic, error) {
@@ -88,8 +88,8 @@ func Diagnose(path string) ([]Diagnostic, error) {
 		return nil, err
 	}
 
-	// Build the global workflow pool (resolved workflows from ~/.sortie.yml
-	// and ~/.sortie/workflows/) so project configs that reference global
+	// Build the global workflow pool (resolved workflows from ~/.sakusen.yml
+	// and ~/.sakusen/workflows/) so project configs that reference global
 	// workflows by string ref validate cleanly. Skipped when the file under
 	// validation IS the global config itself.
 	globalPool, err := loadGlobalPoolForValidation(path)
@@ -100,12 +100,12 @@ func Diagnose(path string) ([]Diagnostic, error) {
 	return validateProject(&proj, filePool, globalPool)
 }
 
-// loadGlobalPoolForValidation resolves the global ~/.sortie.yml into a
+// loadGlobalPoolForValidation resolves the global ~/.sakusen.yml into a
 // globalWorkflowPool. Returns nil (no global pool) when no global config
 // exists or when skipPath matches the global path (avoiding self-recursion
 // when the validation target IS the global config).
 func loadGlobalPoolForValidation(skipPath string) (*globalWorkflowPool, error) {
-	globalYml := getGlobalSortieYmlPath()
+	globalYml := getGlobalSakusenYmlPath()
 	if globalYml == "" {
 		return nil, nil
 	}
@@ -138,7 +138,7 @@ func loadGlobalPoolForValidation(skipPath string) (*globalWorkflowPool, error) {
 // Returns any non-fatal warnings (e.g. unreferenced file-based workflows).
 //
 // globalPool, when non-nil, supplies workflows defined in the global
-// ~/.sortie.yml so that project-level string refs to global workflows
+// ~/.sakusen.yml so that project-level string refs to global workflows
 // validate without surfacing "missing file" errors.
 func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool *globalWorkflowPool) ([]Diagnostic, error) {
 	// Enum sanity
@@ -166,7 +166,7 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	}
 
 	// Capture whether any on-disk files exist before resolution mutates the
-	// pool, so we can warn when files exist but .sortie.yml has no listing.
+	// pool, so we can warn when files exist but .sakusen.yml has no listing.
 	hadFiles := filePool != nil && len(filePool.byName) > 0
 
 	// Reuse the production assembly path to apply identical validation rules
@@ -184,13 +184,13 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 
 	var diagnostics []Diagnostic
 
-	// When on-disk files exist but .sortie.yml has no workflows listing, every
+	// When on-disk files exist but .sakusen.yml has no workflows listing, every
 	// file becomes hidden — surface a single aggregate warning rather than one
 	// per file (which would all describe the same oversight).
 	if hadFiles && len(proj.Workflows) == 0 {
 		diagnostics = append(diagnostics, Diagnostic{
 			Severity: "warning",
-			Message:  "workflows: file(s) under .sortie/workflows/ are hidden because there is no workflows listing in .sortie.yml",
+			Message:  "workflows: file(s) under .sakusen/workflows/ are hidden because there is no workflows listing in .sakusen.yml",
 		})
 	} else {
 		// Otherwise surface a warning for each unreferenced file-based workflow.
@@ -199,7 +199,7 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 				diagnostics = append(diagnostics, Diagnostic{
 					Severity: "warning",
 					Message: fmt.Sprintf(
-						"workflow %q from %s is hidden — add it to the .sortie.yml workflows listing to make it active",
+						"workflow %q from %s is hidden — add it to the .sakusen.yml workflows listing to make it active",
 						wf.Name, wf.Source),
 				})
 			}

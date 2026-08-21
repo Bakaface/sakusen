@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // TestRunTask_NoWorktreePersistsWorktreePath ensures that for non-worktree
@@ -18,7 +18,7 @@ import (
 func TestRunTask_NoWorktreePersistsWorktreePath(t *testing.T) {
 	dir := t.TempDir()
 
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestRunTask_NoWorktreePersistsWorktreePath(t *testing.T) {
 	// Intentionally leave tk.WorktreePath empty — simulates a fresh task.
 
 	cfg := &config.Config{
-		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SORTIE_RESULT_FILE"`}},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SAKUSEN_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{Name: "default", Steps: []config.StepConfig{{Name: "step1", Prompt: "do it"}}},

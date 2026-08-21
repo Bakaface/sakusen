@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // DependsOnArgs declares (or removes) a "TaskID is blocked by BlockedByID"

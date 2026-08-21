@@ -1,8 +1,8 @@
 package workflow
 
 import (
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // Step cursor invariant.

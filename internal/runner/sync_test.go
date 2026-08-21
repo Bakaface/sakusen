@@ -60,7 +60,7 @@ func TestRunSync_EnvOverlay(t *testing.T) {
 
 // TestRunSync_StripsClaudeCode verifies that the CLAUDECODE variable is
 // stripped from the child environment so claude-based commands work when
-// sortie itself runs inside a Claude Code session.
+// sakusen itself runs inside a Claude Code session.
 func TestRunSync_StripsClaudeCode(t *testing.T) {
 	requireSh(t)
 	t.Setenv("CLAUDECODE", "1")

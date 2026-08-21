@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // fakeAgentResult is one scripted return value for a fakeAgentRunner call.
@@ -359,7 +359,7 @@ func TestRunTaskFakeRunner_UnresolvableAgentFailsStep(t *testing.T) {
 
 // TestRunTaskFakeRunner_AgentEnvAndRecord verifies that runStep hands the
 // runner the RESOLVED agent record and exports the resolved slug as
-// SORTIE_AGENT: a step-level `agent:` override wins over the workflow default,
+// SAKUSEN_AGENT: a step-level `agent:` override wins over the workflow default,
 // and a step without one falls back to the implicit "claude" record.
 func TestRunTaskFakeRunner_AgentEnvAndRecord(t *testing.T) {
 	wf := config.WorkflowConfig{
@@ -382,8 +382,8 @@ func TestRunTaskFakeRunner_AgentEnvAndRecord(t *testing.T) {
 	if len(implCalls) != 1 {
 		t.Fatalf("expected 1 implement call, got %d", len(implCalls))
 	}
-	if got := implCalls[0].env["SORTIE_AGENT"]; got != "claude" {
-		t.Errorf("implement SORTIE_AGENT = %q, want %q (the implicit default)", got, "claude")
+	if got := implCalls[0].env["SAKUSEN_AGENT"]; got != "claude" {
+		t.Errorf("implement SAKUSEN_AGENT = %q, want %q (the implicit default)", got, "claude")
 	}
 	if got := implCalls[0].agent.Command; got != "true" {
 		t.Errorf("implement resolved agent command = %q, want %q", got, "true")
@@ -393,8 +393,8 @@ func TestRunTaskFakeRunner_AgentEnvAndRecord(t *testing.T) {
 	if len(reviewCalls) != 1 {
 		t.Fatalf("expected 1 review call, got %d", len(reviewCalls))
 	}
-	if got := reviewCalls[0].env["SORTIE_AGENT"]; got != "alt" {
-		t.Errorf("review SORTIE_AGENT = %q, want %q (the step-level override)", got, "alt")
+	if got := reviewCalls[0].env["SAKUSEN_AGENT"]; got != "alt" {
+		t.Errorf("review SAKUSEN_AGENT = %q, want %q (the step-level override)", got, "alt")
 	}
 	if got := reviewCalls[0].agent.Command; got != "alt-agent-cmd" {
 		t.Errorf("review resolved agent command = %q, want %q", got, "alt-agent-cmd")

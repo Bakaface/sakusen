@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

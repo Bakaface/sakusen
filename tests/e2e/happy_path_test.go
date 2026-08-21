@@ -33,9 +33,9 @@ workflows:
 // - the stub was called exactly once with purpose=step
 func TestHappyPath(t *testing.T) {
 	e := setupE2E(t, "happy_path")
-	e.WriteSortieYAML(simpleWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(simpleWorkflowYAML(e.StubPath))
 
-	e.MustSortie("create", "--title", "do thing", "do thing")
+	e.MustSakusen("create", "--title", "do thing", "do thing")
 
 	e.WaitStatus(1, "completed", 10*time.Second)
 	e.AssertMergedFor(1)

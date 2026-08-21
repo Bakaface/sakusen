@@ -1,14 +1,14 @@
-# ✈ Sortie
+# ✈ Sakusen
 
-Sortie is a daemon that orchestrates coding agents through long-lived, multi-step workflows. An agent is just a shell command you declare in config — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), opencode, aider, a raw model CLI, anything — and Sortie talks to it through a small environment-variable contract. Each task runs in its own git worktree on its own branch, advances through whatever steps you define in config — anything from a single "implement" step to a full plan/implement/review/approve/merge chain with loops and human gates — and reports back to a terminal UI where you stay in the driver's seat.
+Sakusen is a daemon that orchestrates coding agents through long-lived, multi-step workflows. An agent is just a shell command you declare in config — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), opencode, aider, a raw model CLI, anything — and Sakusen talks to it through a small environment-variable contract. Each task runs in its own git worktree on its own branch, advances through whatever steps you define in config — anything from a single "implement" step to a full plan/implement/review/approve/merge chain with loops and human gates — and reports back to a terminal UI where you stay in the driver's seat.
 
-You decide what runs, how many run at once, where the human gates go, and how finished work lands on your base branch. Sortie just keeps the agents on the rails.
+You decide what runs, how many run at once, where the human gates go, and how finished work lands on your base branch. Sakusen just keeps the agents on the rails.
 
-> ⚠️ **Early days — breaking changes expected.** Sortie is under active development. Config formats, CLI flags, and the database schema may change without notice between releases. Pin to a tagged version if you need stability.
+> ⚠️ **Early days — breaking changes expected.** Sakusen is under active development. Config formats, CLI flags, and the database schema may change without notice between releases. Pin to a tagged version if you need stability.
 
 ```
 ┌─────────────┐    ┌────────────────┐    ┌─────────────────┐
-│  sortie tui │ ←→ │ sortie daemon  │ ←→ │ coding agents   │
+│  sakusen tui │ ←→ │ sakusen daemon  │ ←→ │ coding agents   │
 │  (control)  │    │ (orchestrator) │    │ (your commands) │
 └─────────────┘    └────────────────┘    │ in git worktrees│
                           │              └─────────────────┘
@@ -25,12 +25,12 @@ You decide what runs, how many run at once, where the human gates go, and how fi
 - **Parallelism without conflicts.** Every task gets a dedicated git worktree and branch, so N agents can work concurrently on the same repo without stepping on each other.
 - **Workflows, not one-shots.** Chain planning, implementation, review, and final-approval steps. Loop the review/implement cycle until it converges. Pass artifacts between steps.
 - **It survives a reboot.** Tasks live in SQLite. Logs are persisted per step. Stop the daemon, restart it, pick up where you left off.
-- **Local first.** No cloud, no telemetry. A Go binary, a Unix socket, a SQLite file under `~/.config/sortie/`.
+- **Local first.** No cloud, no telemetry. A Go binary, a Unix socket, a SQLite file under `~/.config/sakusen/`.
 
 ## Install
 
 ```bash
-go install github.com/Bakaface/sortie/cmd/sortie@latest
+go install github.com/Bakaface/sakusen/cmd/sakusen@latest
 ```
 
 Requires Go 1.25+. The binary lands in `$(go env GOBIN)` (defaults to `$(go env GOPATH)/bin`) — make sure that's on your `PATH`.
@@ -38,55 +38,55 @@ Requires Go 1.25+. The binary lands in `$(go env GOBIN)` (defaults to `$(go env 
 To pin to a specific release, replace `@latest` with a tag (e.g. `@v0.1.0`). To verify what you installed:
 
 ```bash
-sortie version
+sakusen version
 ```
 
 Building from a checkout works too:
 
 ```bash
-git clone https://github.com/Bakaface/sortie && cd sortie
-go build -o sortie ./cmd/sortie
+git clone https://github.com/Bakaface/sakusen && cd sakusen
+go build -o sakusen ./cmd/sakusen
 ```
 
 ## Quick Start
 
 ```bash
 # Inside any git repo:
-sortie init               # writes .sortie.yml + user-owned agent scripts under .sortie/agents/
-sortie daemon start       # starts the background daemon (Unix socket)
-sortie tui                # opens the TUI
+sakusen init               # writes .sakusen.yml + user-owned agent scripts under .sakusen/agents/
+sakusen daemon start       # starts the background daemon (Unix socket)
+sakusen tui                # opens the TUI
 ```
 
-The scaffolded config defines two Claude Code agent records (`claude` headless, `claude-tmux` interactive) backed by editable scripts in `.sortie/agents/` (they require `claude` and `jq` on `PATH`). Swap the commands to use any other tool — Sortie itself has no agent hardcoded.
+The scaffolded config defines two Claude Code agent records (`claude` headless, `claude-tmux` interactive) backed by editable scripts in `.sakusen/agents/` (they require `claude` and `jq` on `PATH`). Swap the commands to use any other tool — Sakusen itself has no agent hardcoded.
 
 In the TUI, press `n` to create a new task, pick a workflow, and watch it run. Press `enter` on a task to follow its live logs.
 
 To run from the command line instead:
 
 ```bash
-sortie create "Add a /healthz endpoint"          # creates a pending task
-sortie start <id>                                # kicks off its workflow
-sortie logs <id>                                 # tails its logs
-sortie tasks                                     # list, or `sortie tasks <id>` for detail
+sakusen create "Add a /healthz endpoint"          # creates a pending task
+sakusen start <id>                                # kicks off its workflow
+sakusen logs <id>                                 # tails its logs
+sakusen tasks                                     # list, or `sakusen tasks <id>` for detail
 ```
 
 ## How a task runs
 
-1. **You create a task** (TUI or `sortie create`) and pick a workflow.
+1. **You create a task** (TUI or `sakusen create`) and pick a workflow.
 2. **The daemon picks it up** when a worker slot is free (`max_workers` controls concurrency).
 3. **A worktree is provisioned** at `.worktrees/<branch>` on a new branch derived from `git.branch_template`. `worktree-sync-paths` and `worktree-setup-commands` run here (e.g. copy `.env`, run `bun install`).
-4. **Each workflow step spawns an agent** in that worktree: Sortie resolves the step's agent record (step → workflow → `default_agent` → `claude`), writes the rendered prompt to a file, and runs the agent's shell command with the `SORTIE_*` env contract exported (`SORTIE_PROMPT_FILE`, `SORTIE_RESULT_FILE`, ...). Stdout is streamed to the unified task log and broadcast to the TUI.
-5. **Step context is captured** at the end of each step (the agent's result text from `$SORTIE_RESULT_FILE` by default, or a summary produced by your `summarizer:` command when `summarization_strategy: summarize_chat`) and made available to later steps via `{{steps.<name>.context}}`.
+4. **Each workflow step spawns an agent** in that worktree: Sakusen resolves the step's agent record (step → workflow → `default_agent` → `claude`), writes the rendered prompt to a file, and runs the agent's shell command with the `SAKUSEN_*` env contract exported (`SAKUSEN_PROMPT_FILE`, `SAKUSEN_RESULT_FILE`, ...). Stdout is streamed to the unified task log and broadcast to the TUI.
+5. **Step context is captured** at the end of each step (the agent's result text from `$SAKUSEN_RESULT_FILE` by default, or a summary produced by your `summarizer:` command when `summarization_strategy: summarize_chat`) and made available to later steps via `{{steps.<name>.context}}`.
 6. **Human gates pause** the workflow on `human: true` steps; **tmux-mode agents** suspend the workflow at an interactive session until a turn-end sentinel lands or you advance manually. **Loops** jump back to an earlier step until an exit condition is met or `max_iterations` is reached.
-7. **On completion**, depending on `on_complete` (project-level, or the running workflow's override), Sortie either leaves the work as a `commit` on the branch or `merge`s it into the base branch.
+7. **On completion**, depending on `on_complete` (project-level, or the running workflow's override), Sakusen either leaves the work as a `commit` on the branch or `merge`s it into the base branch.
 
 ## Workflow configuration
 
-Workflows live in `.sortie.yml` at the repo root as a flat `workflows:` list. Each entry is either a string ref (resolved to `.sortie/workflows/<name>.yml`) or an inline workflow mapping.
+Workflows live in `.sakusen.yml` at the repo root as a flat `workflows:` list. Each entry is either a string ref (resolved to `.sakusen/workflows/<name>.yml`) or an inline workflow mapping.
 
 A workflow may **pin** any subset of New Task screen fields (`input`, `worktree`, `branch`, `checkout`, `target`). Pinned fields are pre-filled and hidden from the form. If all fields are pinned the New Task screen is skipped entirely and the task is created immediately. (A separate top-level `description:` is human-readable metadata — a one-line summary surfaced in the workflow picker and via MCP `list_workflows`; it is **not** a pin and never becomes the task input.)
 
-Minimal `.sortie.yml`:
+Minimal `.sakusen.yml`:
 
 ```yaml
 max_workers: 3
@@ -95,11 +95,11 @@ default_agent: claude
 agents:
   claude:                         # any shell command; this one is Claude Code headless
     mode: headless
-    command: 'claude --dangerously-skip-permissions -p "$(cat "$SORTIE_PROMPT_FILE")" | tee "$SORTIE_RESULT_FILE"'
+    command: 'claude --dangerously-skip-permissions -p "$(cat "$SAKUSEN_PROMPT_FILE")" | tee "$SAKUSEN_RESULT_FILE"'
 
 git:
   base_branch: main
-  branch_template: sortie/{{task_id}}-{{task_slug}}
+  branch_template: sakusen/{{task_id}}-{{task_slug}}
 
 on_complete: merge                # commit | merge | none (per-workflow overridable)
 
@@ -129,14 +129,14 @@ workflows:
     description: "Run standard maintenance: linting, dead code removal"   # metadata (picker/MCP)
     input: "Audit and clean the codebase: lint, remove dead code."        # pins the task input
     worktree: true
-    branch: sortie/housekeeping-{{task.id}}
+    branch: sakusen/housekeeping-{{task.id}}
     target: main
     steps:
       - name: cleaning
         prompt: "Audit and clean the codebase."
 ```
 
-File pool is flat: `.sortie/workflows/<name>.yml` (no `tasks/`, `one-off/`, or `init/` subdirectories). Global pool: `~/.sortie/workflows/<name>.yml`.
+File pool is flat: `.sakusen/workflows/<name>.yml` (no `tasks/`, `one-off/`, or `init/` subdirectories). Global pool: `~/.sakusen/workflows/<name>.yml`.
 
 ### Step options
 
@@ -198,16 +198,16 @@ worktree-setup-commands:            # run sequentially after sync
   - bun run db:migrate
 
 tmux-setup-command: |               # run once after tmux session creation
-  tmux split-window -h "tail -f .sortie/logs/<id>/<step>.log"
+  tmux split-window -h "tail -f .sakusen/logs/<id>/<step>.log"
 ```
 
 ## Project layout reset
 
 
 ```
-cmd/sortie/         CLI entry points (daemon, tui, task CRUD)
+cmd/sakusen/         CLI entry points (daemon, tui, task CRUD)
 internal/
-  config/           .sortie.yml parsing, agent registry, project type auto-detection
+  config/           .sakusen.yml parsing, agent registry, project type auto-detection
   daemon/           Background daemon: Unix socket server, scheduling, pub/sub
   workflow/         Step engine, prompt templating, summarizer, merge logic
   runner/           Agent command spawning (headless Process, RunSync, tmux wrapper scripts)
@@ -219,14 +219,14 @@ internal/
   tmux/             Tmux session lifecycle, capture, monitoring
   client/           IPC client (RPC + event subscription) for tui/cli
   notify/           Desktop notifications
-claude-code-plugin/ Companion Claude Code plugin (sortie-configurer skill)
+claude-code-plugin/ Companion Claude Code plugin (sakusen-configurer skill)
 ```
 
-The daemon listens on a Unix socket at `~/.config/sortie/daemon.sock` (or `$XDG_CONFIG_HOME/sortie/`) and persists state to `tasks.db` next to it. Project-level data (logs, the `.worktrees/` directory) lives under `.sortie/` inside the repo.
+The daemon listens on a Unix socket at `~/.config/sakusen/daemon.sock` (or `$XDG_CONFIG_HOME/sakusen/`) and persists state to `tasks.db` next to it. Project-level data (logs, the `.worktrees/` directory) lives under `.sakusen/` inside the repo.
 
 ## TUI
 
-Launch with `sortie tui`. Add `-g` / `--global` to see tasks across every project Sortie has tracked.
+Launch with `sakusen tui`. Add `-g` / `--global` to see tasks across every project Sakusen has tracked.
 
 Common keys (full help with `ctrl+h`):
 
@@ -252,8 +252,8 @@ In the detail view, `j/k/G/gg/ctrl+u/ctrl+d` scroll logs; `esc` toggles between 
 
 Every workflow step runs an **agent**: a shell command declared under the top-level `agents:` map. Steps pick one via `agent: <slug>` (step-level beats workflow-level beats `default_agent:`, which falls back to the `claude` slug). The agent record's `mode` decides how the step executes:
 
-- **`headless`** (default) — Sortie spawns the command, streams its stdout to the task log, and reads the final result text from `$SORTIE_RESULT_FILE` when it exits.
-- **`tmux`** — Sortie runs the command inside a detached tmux session (`<project>-<task_id>`); the workflow pauses at the interactive session.
+- **`headless`** (default) — Sakusen spawns the command, streams its stdout to the task log, and reads the final result text from `$SAKUSEN_RESULT_FILE` when it exits.
+- **`tmux`** — Sakusen runs the command inside a detached tmux session (`<project>-<task_id>`); the workflow pauses at the interactive session.
 
 ```yaml
 default_agent: claude
@@ -261,21 +261,21 @@ default_agent: claude
 agents:
   claude:
     mode: headless
-    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-headless.sh"'
+    command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-headless.sh"'
   claude-tmux:
     mode: tmux
-    command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-tmux.sh"'
-    resume_command: 'claude --dangerously-skip-permissions --resume "$SORTIE_SESSION_ID"'
-    chat_log_command: '"$SORTIE_PROJECT_PATH/.sortie/agents/claude-chat-log.sh"'
+    command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-tmux.sh"'
+    resume_command: 'claude --dangerously-skip-permissions --resume "$SAKUSEN_SESSION_ID"'
+    chat_log_command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-chat-log.sh"'
 
 summarizer:                 # utility LLM: chat/step/task summaries + AI task titles
   command: claude -p --output-format text --model haiku --dangerously-skip-permissions
   max_prompt_bytes: 380000
 ```
 
-Sortie communicates with agents purely through environment variables: `SORTIE_PROMPT_FILE` (the fully-resolved step prompt), `SORTIE_RESULT_FILE` (headless result text), `SORTIE_DONE_DIR`/`SORTIE_DONE_PREFIX` (tmux turn-end sentinels), plus `SORTIE_TASK_ID`, `SORTIE_STEP`, `SORTIE_WORKTREE`, `SORTIE_PROJECT_PATH`, `SORTIE_AGENT`, and `SORTIE_PURPOSE`.
+Sakusen communicates with agents purely through environment variables: `SAKUSEN_PROMPT_FILE` (the fully-resolved step prompt), `SAKUSEN_RESULT_FILE` (headless result text), `SAKUSEN_DONE_DIR`/`SAKUSEN_DONE_PREFIX` (tmux turn-end sentinels), plus `SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH`, `SAKUSEN_AGENT`, and `SAKUSEN_PURPOSE`.
 
-**Tmux auto-advance is sentinel-driven**: when the agent finishes a turn, something inside the session (a hook, the agent itself, an idle-watcher) writes `"$SORTIE_DONE_DIR/$SORTIE_DONE_PREFIX-$(date +%s%N).json"`; the daemon polls for these files and advances the workflow (unless the step has `human: true`). The file may carry a JSON payload with `session_id` (enables `resume_command` restore and `chat_log_command` lookup) and `transcript_path`. The scaffolded `claude-tmux` agent wires this up via a Claude Code `Stop` hook; agents that never write a sentinel are **manual-advance** — the task waits in `tmux` status until you advance it. Agents without a `chat_log_command` can't capture `summarize_chat` context for tmux steps. Without a `summarizer:` there are no AI titles or summaries (titles fall back to truncated input).
+**Tmux auto-advance is sentinel-driven**: when the agent finishes a turn, something inside the session (a hook, the agent itself, an idle-watcher) writes `"$SAKUSEN_DONE_DIR/$SAKUSEN_DONE_PREFIX-$(date +%s%N).json"`; the daemon polls for these files and advances the workflow (unless the step has `human: true`). The file may carry a JSON payload with `session_id` (enables `resume_command` restore and `chat_log_command` lookup) and `transcript_path`. The scaffolded `claude-tmux` agent wires this up via a Claude Code `Stop` hook; agents that never write a sentinel are **manual-advance** — the task waits in `tmux` status until you advance it. Agents without a `chat_log_command` can't capture `summarize_chat` context for tmux steps. Without a `summarizer:` there are no AI titles or summaries (titles fall back to truncated input).
 
 | agent `mode` | `human` | Behavior |
 |---|---|---|
@@ -284,15 +284,15 @@ Sortie communicates with agents purely through environment variables: `SORTIE_PR
 | tmux | false | tmux + auto-advance on turn-end sentinel (manual-advance if the agent writes none) |
 | tmux | true | tmux + manual approval (drop into the session, then press `a`/`c`) |
 
-Press `t` in the TUI to attach to a tmux session. Sortie detects nested-tmux situations (you're already inside tmux) and either switches client or nests a session, controlled by `tmux_nested_attach_behavior` (`switch` / `nest`).
+Press `t` in the TUI to attach to a tmux session. Sakusen detects nested-tmux situations (you're already inside tmux) and either switches client or nests a session, controlled by `tmux_nested_attach_behavior` (`switch` / `nest`).
 
-`sortie attach <task_id>` does the same from the shell.
+`sakusen attach <task_id>` does the same from the shell.
 
 ### Migrating from `claude:` / `yolo:` / `print:` configs
 
 The old Claude-specific keys were removed and are now hard load errors with migration messages:
 
-- `claude:` (binary override) → define agents under `agents:` (run `sortie init` in a fresh project for scaffolded records)
+- `claude:` (binary override) → define agents under `agents:` (run `sakusen init` in a fresh project for scaffolded records)
 - `yolo:` → put permission flags (e.g. `--dangerously-skip-permissions`) directly in the agent's `command`
 - `system_prompt:` → bake system-prompt flags into the agent's `command` or fold the text into step prompts
 - `allowed_summarization_models:` → the `summarizer:` command; pick the model inside it
@@ -304,50 +304,50 @@ The old Claude-specific keys were removed and are now hard load errors with migr
 **Daemon**
 
 ```bash
-sortie daemon start           # start (foreground; background it with '&' or your service manager)
-sortie daemon stop            # graceful shutdown
-sortie daemon status          # is it running, what PID
+sakusen daemon start           # start (foreground; background it with '&' or your service manager)
+sakusen daemon stop            # graceful shutdown
+sakusen daemon status          # is it running, what PID
 ```
 
 **Tasks**
 
 ```bash
-sortie create <input> [--workflow w] [--priority high] [--title T]
+sakusen create <input> [--workflow w] [--priority high] [--title T]
               [--branch tmpl] [--target main] [--checkout existing-branch]
               [--no-worktree]
-sortie tasks [<id>] [--json]  # list, or detail for one
-sortie edit <id> [--title T] [--input I] [--context C] [--priority P]
-sortie delete <id> [-y]
-sortie start <id>             # manually kick off a pending task
-sortie stop <id>              # stop a running task
-sortie retry <id> [--from-step name]  # restart workflow (default) or jump to a specific step
-sortie revert <id>            # revert all commits made by a completed task
-sortie continue <id>          # resume an awaiting-approval / completed / failed task
-sortie logs <id> [step] [-n N]
-sortie cleanup [<id>]         # remove worktree + branch + logs for completed/failed
-sortie agents [--json]        # list running agents
-sortie depends-on add <id> <blocked-by-id>     # mark <id> as blocked by another task
-sortie depends-on rm  <id> <blocked-by-id>     # remove a dependency
-sortie depends-on list <id>                    # list tasks blocking <id>
+sakusen tasks [<id>] [--json]  # list, or detail for one
+sakusen edit <id> [--title T] [--input I] [--context C] [--priority P]
+sakusen delete <id> [-y]
+sakusen start <id>             # manually kick off a pending task
+sakusen stop <id>              # stop a running task
+sakusen retry <id> [--from-step name]  # restart workflow (default) or jump to a specific step
+sakusen revert <id>            # revert all commits made by a completed task
+sakusen continue <id>          # resume an awaiting-approval / completed / failed task
+sakusen logs <id> [step] [-n N]
+sakusen cleanup [<id>]         # remove worktree + branch + logs for completed/failed
+sakusen agents [--json]        # list running agents
+sakusen depends-on add <id> <blocked-by-id>     # mark <id> as blocked by another task
+sakusen depends-on rm  <id> <blocked-by-id>     # remove a dependency
+sakusen depends-on list <id>                    # list tasks blocking <id>
 ```
 
 **Worktree branch management**
 
 ```bash
-sortie detach <id>            # detach branch so you can check it out elsewhere
-sortie attach-branch <id>     # reattach after detach
-sortie attach <id>            # attach to the task's tmux session
+sakusen detach <id>            # detach branch so you can check it out elsewhere
+sakusen attach-branch <id>     # reattach after detach
+sakusen attach <id>            # attach to the task's tmux session
 ```
 
 **TUI**
 
 ```bash
-sortie tui [-g]               # -g for cross-project view
+sakusen tui [-g]               # -g for cross-project view
 ```
 
 ## Requirements
 
 - Go 1.25+
 - git (worktree support, ≥ 2.5)
-- Whatever your configured agent commands need — the `sortie init` scaffold uses the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI (`claude`) and `jq`
-- tmux (only required if you use tmux-mode agents or `sortie attach`)
+- Whatever your configured agent commands need — the `sakusen init` scaffold uses the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI (`claude`) and `jq`
+- tmux (only required if you use tmux-mode agents or `sakusen attach`)

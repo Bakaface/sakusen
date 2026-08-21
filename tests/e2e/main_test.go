@@ -19,14 +19,14 @@ func TestMain(m *testing.M) {
 	}
 	repoRoot = root
 
-	binPath, err := buildSortieBinary(root)
+	binPath, err := buildSakusenBinary(root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "e2e: build sortie binary: %v\n", err)
+		fmt.Fprintf(os.Stderr, "e2e: build sakusen binary: %v\n", err)
 		os.Exit(1)
 	}
 	defer os.Remove(binPath)
 
-	sortieBinPath = binPath
+	sakusenBinPath = binPath
 	os.Exit(m.Run())
 }
 
@@ -50,16 +50,16 @@ func findRepoRoot() (string, error) {
 	}
 }
 
-// buildSortieBinary builds the sortie binary into a temp directory and returns
+// buildSakusenBinary builds the sakusen binary into a temp directory and returns
 // the path to the compiled binary.
-func buildSortieBinary(repoRoot string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "sortie-e2e-bin-*")
+func buildSakusenBinary(repoRoot string) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "sakusen-e2e-bin-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
 
-	binPath := filepath.Join(tmpDir, "sortie")
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/sortie")
+	binPath := filepath.Join(tmpDir, "sakusen")
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/sakusen")
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
 	if err != nil {

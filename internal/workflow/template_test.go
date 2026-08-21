@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func makeLookup(tasks map[int64]*task.Task) func(int64) (*task.Task, error) {
@@ -23,7 +23,7 @@ func TestResolveTemplate_TaskRefFields(t *testing.T) {
 		42: {
 			ID:      42,
 			Title:   "Refactor parser",
-			Branch:  "sortie/42-refactor",
+			Branch:  "sakusen/42-refactor",
 			Input:   "Pull tokenizer out of parser.go",
 			Context: "Done — landed in commit abc123.",
 		},
@@ -35,7 +35,7 @@ func TestResolveTemplate_TaskRefFields(t *testing.T) {
 		want string
 	}{
 		{"title", "title={{tasks.42.title}}", "title=Refactor parser"},
-		{"branch", "branch={{tasks.42.branch}}", "branch=sortie/42-refactor"},
+		{"branch", "branch={{tasks.42.branch}}", "branch=sakusen/42-refactor"},
 		{"description", "desc={{tasks.42.input}}", "desc=Pull tokenizer out of parser.go"},
 		{"context", "ctx={{tasks.42.context}}", "ctx=Done — landed in commit abc123."},
 	}

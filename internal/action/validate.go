@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 type ValidateArgs struct {
-	Path string // empty == cwd/.sortie.yml
+	Path string // empty == cwd/.sakusen.yml
 }
 
 func (a ValidateArgs) Validate() error {
@@ -18,7 +18,7 @@ func (a ValidateArgs) Validate() error {
 	return nil
 }
 
-// RunValidate resolves the .sortie.yml path and runs config.Diagnose. Unlike
+// RunValidate resolves the .sakusen.yml path and runs config.Diagnose. Unlike
 // every other action this verb does no client call — it goes straight at the
 // local filesystem so it works without a running daemon.
 func RunValidate(ctx Ctx, args ValidateArgs) (Result, error) {
@@ -53,9 +53,9 @@ func resolveConfigPath(p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	candidate := filepath.Join(cwd, ".sortie.yml")
+	candidate := filepath.Join(cwd, ".sakusen.yml")
 	if _, err := os.Stat(candidate); err != nil {
-		return "", fmt.Errorf("no .sortie.yml found in %s — pass a path explicitly", cwd)
+		return "", fmt.Errorf("no .sakusen.yml found in %s — pass a path explicitly", cwd)
 	}
 	return candidate, nil
 }
@@ -63,7 +63,7 @@ func resolveConfigPath(p string) (string, error) {
 func init() {
 	Registry["validate"] = Action{
 		ID:   "validate",
-		Help: "Validate a .sortie.yml configuration file",
+		Help: "Validate a .sakusen.yml configuration file",
 		Run: func(ctx Ctx, a Args) (Result, error) {
 			return RunValidate(ctx, a.(ValidateArgs))
 		},

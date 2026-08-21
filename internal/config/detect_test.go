@@ -9,7 +9,7 @@ import (
 func TestDetectGo(t *testing.T) {
 	dir := t.TempDir()
 	goMod := filepath.Join(dir, "go.mod")
-	content := "module github.com/Bakaface/sortie\n\ngo 1.23\n"
+	content := "module github.com/Bakaface/sakusen\n\ngo 1.23\n"
 	if err := os.WriteFile(goMod, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSanitizeProjectName(t *testing.T) {
 		{".docs", "_docs"},
 		{"my.project.name", "my_project_name"},
 		{".", "_"},
-		{"sortie", "sortie"},
+		{"sakusen", "sakusen"},
 		{"no-dots-here", "no-dots-here"},
 	}
 	for _, tt := range tests {
@@ -103,7 +103,7 @@ func TestProjectNameFromPath(t *testing.T) {
 		{"/Users/me/dev/.pai", "_pai"},
 		{"/Users/me/dev/.docs", "_docs"},
 		{"/tmp/my.project", "my_project"},
-		{"sortie", "sortie"},
+		{"sakusen", "sakusen"},
 		// Trailing slashes should be ignored by filepath.Base.
 		{"/Users/me/dev/.pai/", "_pai"},
 	}

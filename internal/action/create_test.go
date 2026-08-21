@@ -3,8 +3,8 @@ package action_test
 import (
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/action"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/action"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // TestRunCreate_WorktreePassthrough locks in the precedence-critical contract:

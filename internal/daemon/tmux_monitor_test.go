@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // These tests pin down maybeAutoAdvance's sentinel gating: the step-done

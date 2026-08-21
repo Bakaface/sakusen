@@ -29,8 +29,8 @@ func TestProcessResultFile(t *testing.T) {
 	workDir := t.TempDir()
 	resultFile := filepath.Join(workDir, "result.txt")
 
-	proc := NewProcess("test", workDir, `echo working; printf 'final result' > "$SORTIE_RESULT_FILE"`, resultFile)
-	proc.SetEnv(map[string]string{"SORTIE_RESULT_FILE": resultFile})
+	proc := NewProcess("test", workDir, `echo working; printf 'final result' > "$SAKUSEN_RESULT_FILE"`, resultFile)
+	proc.SetEnv(map[string]string{"SAKUSEN_RESULT_FILE": resultFile})
 
 	var mu sync.Mutex
 	var captured []string
@@ -58,7 +58,7 @@ func TestProcessResultFile(t *testing.T) {
 		t.Errorf("OutputFunc lines = %v, want a timestamped 'working' line", captured)
 	}
 
-	// Raw capture lands in .sortie-output.log.
+	// Raw capture lands in .sakusen-output.log.
 	data, err := os.ReadFile(filepath.Join(workDir, OutputLogFileName))
 	if err != nil {
 		t.Fatalf("read output log: %v", err)

@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
 )
 
 // isolateTracksHome points HOME (and XDG_CONFIG_HOME) at fresh temp dirs so
-// the developer's real ~/.sortie/tracks tree can't leak into fingerprint
+// the developer's real ~/.sakusen/tracks tree can't leak into fingerprint
 // tests — tracksFingerprint always scans the global tier too.
 func isolateTracksHome(t *testing.T) string {
 	t.Helper()
@@ -55,7 +55,7 @@ func TestTracksFingerprint(t *testing.T) {
 	t.Run("counts only workflow yml/yaml files", func(t *testing.T) {
 		isolateTracksHome(t)
 		repoRoot := t.TempDir()
-		tracksDir := filepath.Join(repoRoot, ".sortie", "tracks")
+		tracksDir := filepath.Join(repoRoot, ".sakusen", "tracks")
 
 		writeTrackWorkflowFile(t, tracksDir, "pay", "impl.yml")
 		// Non-workflow files are ignored by the count component.
@@ -83,7 +83,7 @@ func TestTracksFingerprint(t *testing.T) {
 	t.Run("deletion caught by count even with restored mtimes", func(t *testing.T) {
 		isolateTracksHome(t)
 		repoRoot := t.TempDir()
-		tracksDir := filepath.Join(repoRoot, ".sortie", "tracks")
+		tracksDir := filepath.Join(repoRoot, ".sakusen", "tracks")
 
 		kept := writeTrackWorkflowFile(t, tracksDir, "pay", "impl.yml")
 		removed := writeTrackWorkflowFile(t, tracksDir, "pay", "extra.yml")
@@ -125,7 +125,7 @@ func TestTracksFingerprint(t *testing.T) {
 		if fp := tracksFingerprint(repoRoot); fp != "" {
 			t.Fatalf("precondition: fingerprint = %q, want empty", fp)
 		}
-		writeTrackWorkflowFile(t, filepath.Join(homeDir, ".sortie", "tracks"), "sprint", "impl.yml")
+		writeTrackWorkflowFile(t, filepath.Join(homeDir, ".sakusen", "tracks"), "sprint", "impl.yml")
 		if fp := tracksFingerprint(repoRoot); fp == "" {
 			t.Error("expected global-tier track workflows to contribute to the fingerprint")
 		}
@@ -136,12 +136,12 @@ func TestTracksFingerprint(t *testing.T) {
 // freshness signal end to end at the unit level: a track workflow file
 // created (or removed) AFTER the project config was cached evicts the cache
 // entry and the reloaded config resolves (or drops) the namespaced workflow —
-// with .sortie.yml untouched throughout, so only the tracks fingerprint can
+// with .sakusen.yml untouched throughout, so only the tracks fingerprint can
 // have triggered the reload.
 func TestGetProjectContextReloadsOnTrackWorkflowChange(t *testing.T) {
 	isolateTracksHome(t)
 	projectDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte("git:\n  base_branch: main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte("git:\n  base_branch: main\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,7 +172,7 @@ func TestGetProjectContextReloadsOnTrackWorkflowChange(t *testing.T) {
 	}
 
 	// Drop a track workflow on disk — the fingerprint must evict the cache.
-	writeTrackWorkflowFile(t, filepath.Join(projectDir, ".sortie", "tracks"), "pay", "impl.yml")
+	writeTrackWorkflowFile(t, filepath.Join(projectDir, ".sakusen", "tracks"), "pay", "impl.yml")
 	pc2, err := s.getProjectContext(proj.ID)
 	if err != nil {
 		t.Fatalf("getProjectContext after add: %v", err)
@@ -185,7 +185,7 @@ func TestGetProjectContextReloadsOnTrackWorkflowChange(t *testing.T) {
 	}
 
 	// Removing the file must also be picked up (count component).
-	if err := os.Remove(filepath.Join(projectDir, ".sortie", "tracks", "pay", "workflows", "impl.yml")); err != nil {
+	if err := os.Remove(filepath.Join(projectDir, ".sakusen", "tracks", "pay", "workflows", "impl.yml")); err != nil {
 		t.Fatal(err)
 	}
 	pc3, err := s.getProjectContext(proj.ID)

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // trackContextPreviewLen is how many bytes of a track's own context list_tracks
@@ -261,7 +261,7 @@ func (s *Server) handleUpdateTaskTrackContext(conn net.Conn, req UpdateTaskTrack
 }
 
 // handleSetTrackDescription is the CLI-facing arbitrary-track description
-// write (sortie tracks set-description). Replace-only.
+// write (sakusen tracks set-description). Replace-only.
 func (s *Server) handleSetTrackDescription(conn net.Conn, req SetTrackDescriptionRequest) {
 	var projectID *int64
 	if req.ProjectPath != "" {

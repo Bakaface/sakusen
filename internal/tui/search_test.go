@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 func TestPerformSearch(t *testing.T) {

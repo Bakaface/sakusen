@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const WorktreePrefix = "sortie-task-"
+const WorktreePrefix = "sakusen-task-"
 
 type Worktree struct {
 	Path     string
@@ -19,7 +19,7 @@ type Worktree struct {
 }
 
 // CreateWorktree creates a new worktree (and branch, unless it already
-// exists) under the repo's .sortie/worktrees directory. If branchName is
+// exists) under the repo's .sakusen/worktrees directory. If branchName is
 // empty, a name is derived from taskID. If the branch already exists, this
 // falls back to adding a worktree that checks it out rather than creating it.
 func (r *Repo) CreateWorktree(taskID int64, baseBranch, branchName string) (*Worktree, error) {
@@ -172,8 +172,8 @@ func (r *Repo) RemoveWorktree(worktreePath string) error {
 	return nil
 }
 
-// ListWorktrees returns the paths of every sortie-managed worktree
-// (identified by the WorktreePrefix / "sortie-" naming convention)
+// ListWorktrees returns the paths of every sakusen-managed worktree
+// (identified by the WorktreePrefix / "sakusen-" naming convention)
 // registered against the repo root.
 func (r *Repo) ListWorktrees() ([]string, error) {
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
@@ -193,7 +193,7 @@ func (r *Repo) ListWorktrees() ([]string, error) {
 	for _, line := range lines {
 		if strings.HasPrefix(line, "worktree ") {
 			path := strings.TrimPrefix(line, "worktree ")
-			if strings.Contains(path, WorktreePrefix) || strings.Contains(path, "sortie-") {
+			if strings.Contains(path, WorktreePrefix) || strings.Contains(path, "sakusen-") {
 				worktrees = append(worktrees, path)
 			}
 		}

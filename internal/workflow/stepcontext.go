@@ -5,8 +5,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // STEP-CONTEXT LIFECYCLE
@@ -19,7 +19,7 @@ import (
 //     update_step_context MCP tool while the step's session was live. A
 //     manual write always wins; automatic capture is skipped entirely.
 //  2. LAST_MESSAGE — the agent's result text from a headless step (read from
-//     $SORTIE_RESULT_FILE, stdout-tail fallback). This is the synchronous
+//     $SAKUSEN_RESULT_FILE, stdout-tail fallback). This is the synchronous
 //     fallback captured the instant the step finishes, before any
 //     summarization runs.
 //  3. SUMMARIZE_CHAT — a summary of the step's full chat content produced by

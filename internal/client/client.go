@@ -9,8 +9,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // errConnectionClosed is the sentinel pushed onto errChan when readLoop exits
@@ -19,7 +19,7 @@ import (
 // response channel.
 var errConnectionClosed = errors.New("daemon connection closed")
 
-// Reconnect contract (Fix #102, sortie-102):
+// Reconnect contract (Fix #102, sakusen-102):
 //
 //   - sendAndWait and send do EXACTLY ONE reconnect-and-retry on a wire-level
 //     failure (Write error or readLoop signaling errConnectionClosed). A second

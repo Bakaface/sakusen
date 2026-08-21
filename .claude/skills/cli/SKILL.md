@@ -1,14 +1,14 @@
 ---
 name: cli
 description: >
-  Sortie's CLI entry point and command registration: subcommands, flags, project
-  config enforcement, and command routing. Use when editing files in cmd/sortie/,
+  Sakusen's CLI entry point and command registration: subcommands, flags, project
+  config enforcement, and command routing. Use when editing files in cmd/sakusen/,
   adding new CLI commands, modifying flags, or changing pre-run validation logic.
 ---
 
 # CLI Entry Point
 
-Cobra-based CLI split across multiple files in `cmd/sortie/`.
+Cobra-based CLI split across multiple files in `cmd/sakusen/`.
 
 | File | Contents |
 |------|----------|
@@ -17,7 +17,7 @@ Cobra-based CLI split across multiple files in `cmd/sortie/`.
 | `task_crud.go` | `create`, `edit`, `delete` commands |
 | `tasks.go` | `tasks`, `start`, `stop`, `list`/`agents`, `retry`, `revert`, `continue`, `logs`, `cleanup`, `attach`, `detach`, `attach-branch` commands |
 | `tui.go` | `tui` command, `resolveProjectMode()` helper |
-| `init.go` | `init` command (scaffolds `.sortie.yml` + user-owned agent scripts under `.sortie/agents/` from the embedded `scaffold/` FS; never overwrites existing files) |
+| `init.go` | `init` command (scaffolds `.sakusen.yml` + user-owned agent scripts under `.sakusen/agents/` from the embedded `scaffold/` FS; never overwrites existing files) |
 | `validate.go` | `validate [path]` command — runs config validation, surfaces errors directly (PersistentPreRunE suppresses generic load errors for this command) |
 | `mcp.go` | `mcp` command — starts the MCP server over stdio (see `internal/mcp/`) |
 | `backfill_context.go` | `backfill-context` — backfills missing step contexts for older tasks |
@@ -36,8 +36,8 @@ All subcommands registered in `init()`:
 | `daemon stop` | — | Stop daemon |
 | `daemon status` | — | Check daemon status |
 | `tui` | `--global/-g` | Launch terminal UI |
-| `init` | — | Initialize `.sortie.yml` |
-| `validate [path]` | — | Validate `.sortie.yml` (path optional, defaults to cwd) |
+| `init` | — | Initialize `.sakusen.yml` |
+| `validate [path]` | — | Validate `.sakusen.yml` (path optional, defaults to cwd) |
 | `mcp` | — | Run MCP server over stdio for Claude Code to consume |
 | `version` | — | Print build version |
 | `backfill-context` | — | Backfill missing step contexts for older tasks |
@@ -82,7 +82,7 @@ var noProjectRequired = map[string]bool{
 Runs before every command:
 1. Loads config via `config.Load()` into package-level `var cfg *config.Config`. The `validate` command suppresses load errors here so it can surface them itself.
 2. Skips project check for daemon subcommands (`start`, `stop`, `status`) and `tui`.
-3. For all other non-exempted commands, requires `.sortie.yml` to exist (returns error if missing).
+3. For all other non-exempted commands, requires `.sakusen.yml` to exist (returns error if missing).
 
 ## Patterns
 

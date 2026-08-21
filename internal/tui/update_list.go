@@ -8,13 +8,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	// Aliased: this file uses "task" as the local variable name for
 	// *daemon.TaskInfo throughout (e.g. "if task := m.list.Selected(); ...");
 	// the alias avoids that shadowing the package.
-	taskpkg "github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/workflow"
+	taskpkg "github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // tmuxContinueAction returns "advance" when the tmux step has more workflow

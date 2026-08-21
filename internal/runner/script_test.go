@@ -10,13 +10,13 @@ import (
 
 func TestBuildWrapperScript_Shape(t *testing.T) {
 	script := BuildWrapperScript("echo hello", map[string]string{
-		"SORTIE_TASK_ID": "42",
+		"SAKUSEN_TASK_ID": "42",
 	})
 
 	if !strings.HasPrefix(script, "#!/bin/bash\n") {
 		t.Errorf("script should start with bash shebang, got %q", script)
 	}
-	if !strings.Contains(script, `export SORTIE_TASK_ID='42'`+"\n") {
+	if !strings.Contains(script, `export SAKUSEN_TASK_ID='42'`+"\n") {
 		t.Errorf("script should export env vars, got %q", script)
 	}
 	if !strings.Contains(script, "echo hello\n") {
@@ -29,9 +29,9 @@ func TestBuildWrapperScript_Shape(t *testing.T) {
 
 func TestBuildWrapperScript_SortedKeysAreDeterministic(t *testing.T) {
 	env := map[string]string{
-		"SORTIE_WORKTREE": "/w",
-		"SORTIE_TASK_ID":  "1",
-		"SORTIE_STEP":     "plan",
+		"SAKUSEN_WORKTREE": "/w",
+		"SAKUSEN_TASK_ID":  "1",
+		"SAKUSEN_STEP":     "plan",
 	}
 	first := BuildWrapperScript("cmd", env)
 	for i := 0; i < 10; i++ {
@@ -39,9 +39,9 @@ func TestBuildWrapperScript_SortedKeysAreDeterministic(t *testing.T) {
 			t.Fatalf("script not deterministic across builds:\n%q\nvs\n%q", got, first)
 		}
 	}
-	stepIdx := strings.Index(first, "SORTIE_STEP")
-	taskIdx := strings.Index(first, "SORTIE_TASK_ID")
-	wtIdx := strings.Index(first, "SORTIE_WORKTREE")
+	stepIdx := strings.Index(first, "SAKUSEN_STEP")
+	taskIdx := strings.Index(first, "SAKUSEN_TASK_ID")
+	wtIdx := strings.Index(first, "SAKUSEN_WORKTREE")
 	if !(stepIdx < taskIdx && taskIdx < wtIdx) {
 		t.Errorf("env exports should be in sorted key order, got:\n%s", first)
 	}
@@ -49,9 +49,9 @@ func TestBuildWrapperScript_SortedKeysAreDeterministic(t *testing.T) {
 
 func TestBuildWrapperScript_QuotesEnvValues(t *testing.T) {
 	script := BuildWrapperScript("cmd", map[string]string{
-		"SORTIE_PROMPT_FILE": `/tmp/dir with spaces/prompt "quoted".txt`,
+		"SAKUSEN_PROMPT_FILE": `/tmp/dir with spaces/prompt "quoted".txt`,
 	})
-	if !strings.Contains(script, `export SORTIE_PROMPT_FILE='/tmp/dir with spaces/prompt "quoted".txt'`) {
+	if !strings.Contains(script, `export SAKUSEN_PROMPT_FILE='/tmp/dir with spaces/prompt "quoted".txt'`) {
 		t.Errorf("env values should be single-quoted, got %q", script)
 	}
 }
@@ -102,8 +102,8 @@ func TestBuildWrapperScript_IsValidBash(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	script := BuildWrapperScript("echo 'agent run'", map[string]string{
-		"SORTIE_TASK_ID":     "7",
-		"SORTIE_PROMPT_FILE": "/tmp/it's got a quote.txt",
+		"SAKUSEN_TASK_ID":     "7",
+		"SAKUSEN_PROMPT_FILE": "/tmp/it's got a quote.txt",
 	})
 	cmd := exec.Command("bash", "-n")
 	cmd.Stdin = strings.NewReader(script)
@@ -127,23 +127,23 @@ func TestBuildWrapperScript_EmptyEnv(t *testing.T) {
 
 func TestMergeEnv_ContractWins(t *testing.T) {
 	contract := map[string]string{
-		"SORTIE_TASK_ID": "1",
-		"SORTIE_STEP":    "plan",
+		"SAKUSEN_TASK_ID": "1",
+		"SAKUSEN_STEP":    "plan",
 	}
 	agentEnv := map[string]string{
-		"SORTIE_TASK_ID": "masked", // must lose to the contract
-		"AGENT_FLAG":     "on",
+		"SAKUSEN_TASK_ID": "masked", // must lose to the contract
+		"AGENT_FLAG":      "on",
 	}
 
 	got := MergeEnv(contract, agentEnv)
 
-	if got["SORTIE_TASK_ID"] != "1" {
-		t.Errorf("contract must win on collisions, got SORTIE_TASK_ID=%q", got["SORTIE_TASK_ID"])
+	if got["SAKUSEN_TASK_ID"] != "1" {
+		t.Errorf("contract must win on collisions, got SAKUSEN_TASK_ID=%q", got["SAKUSEN_TASK_ID"])
 	}
-	if got["SORTIE_STEP"] != "plan" || got["AGENT_FLAG"] != "on" {
+	if got["SAKUSEN_STEP"] != "plan" || got["AGENT_FLAG"] != "on" {
 		t.Errorf("merged env missing entries: %v", got)
 	}
-	if agentEnv["SORTIE_TASK_ID"] != "masked" || contract["SORTIE_TASK_ID"] != "1" {
+	if agentEnv["SAKUSEN_TASK_ID"] != "masked" || contract["SAKUSEN_TASK_ID"] != "1" {
 		t.Errorf("inputs must not be mutated: contract=%v agentEnv=%v", contract, agentEnv)
 	}
 }

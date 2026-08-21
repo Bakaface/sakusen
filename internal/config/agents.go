@@ -19,43 +19,43 @@ const (
 
 // DefaultAgentSlug is the implicit fallback agent slug used when neither the
 // step, the workflow, nor the top-level `default_agent:` names one. It is NOT
-// synthesized by sortie — `sortie init` scaffolds an agent record under this
+// synthesized by sakusen — `sakusen init` scaffolds an agent record under this
 // slug, but a config that never defines it simply fails at step-run time with
 // an instructive error (everything that doesn't spawn an agent keeps working).
 const DefaultAgentSlug = "claude"
 
-// AgentConfig defines a user-configured agent: the shell command sortie runs
+// AgentConfig defines a user-configured agent: the shell command sakusen runs
 // to execute a workflow step. Agents are declared under the top-level
-// `agents:` map (slug → record) in .sortie.yml / ~/.sortie.yml and referenced
+// `agents:` map (slug → record) in .sakusen.yml / ~/.sakusen.yml and referenced
 // from workflows and steps via `agent: <slug>`.
 //
 // Commands are executed via `sh -c` in the task's working directory (worktree
-// or repo root) with sortie's environment contract exported:
+// or repo root) with sakusen's environment contract exported:
 //
-//	SORTIE_TASK_ID       task id
-//	SORTIE_STEP          step name
-//	SORTIE_WORKTREE      absolute path of the task workdir
-//	SORTIE_PROJECT_PATH  absolute path of the project repo root
-//	SORTIE_PURPOSE       "step" (or "merge_conflict" for the conflict resolver)
-//	SORTIE_TRACK_ID      task's track id (only when the task is on a track)
-//	SORTIE_PROMPT_FILE   file containing the fully-resolved step prompt
+//	SAKUSEN_TASK_ID       task id
+//	SAKUSEN_STEP          step name
+//	SAKUSEN_WORKTREE      absolute path of the task workdir
+//	SAKUSEN_PROJECT_PATH  absolute path of the project repo root
+//	SAKUSEN_PURPOSE       "step" (or "merge_conflict" for the conflict resolver)
+//	SAKUSEN_TRACK_ID      task's track id (only when the task is on a track)
+//	SAKUSEN_PROMPT_FILE   file containing the fully-resolved step prompt
 //
 // Headless mode additionally exports:
 //
-//	SORTIE_RESULT_FILE   file the command (pipeline) should write the agent's
-//	                     final result text to; when absent after exit, sortie
+//	SAKUSEN_RESULT_FILE   file the command (pipeline) should write the agent's
+//	                     final result text to; when absent after exit, sakusen
 //	                     falls back to the tail of captured stdout (crude —
 //	                     write the file)
 //
 // Tmux mode additionally exports (inside the session wrapper script):
 //
-//	SORTIE_DONE_DIR      directory sentinel files must be written to
-//	SORTIE_DONE_PREFIX   filename prefix a sentinel for this step must use
+//	SAKUSEN_DONE_DIR      directory sentinel files must be written to
+//	SAKUSEN_DONE_PREFIX   filename prefix a sentinel for this step must use
 //
 // Turn-end signalling for tmux agents is the generic sentinel convention: when
 // the agent finishes a unit of work, something (a hook, the agent itself, a
 // userland idle-watcher) writes a file named
-// "$SORTIE_DONE_DIR/$SORTIE_DONE_PREFIX-$(date +%s%N).json". The file's
+// "$SAKUSEN_DONE_DIR/$SAKUSEN_DONE_PREFIX-$(date +%s%N).json". The file's
 // content MAY be a JSON object carrying "session_id" (an opaque, agent-native
 // session identifier recorded for resume + chat-log lookup) and
 // "transcript_path" (a chat transcript file). Agents that never write a
@@ -68,15 +68,15 @@ type AgentConfig struct {
 	Command string `yaml:"command"`
 
 	// ResumeCommand (tmux only), when non-empty, marks the agent resumable
-	// after a daemon restart: instead of Command, sortie runs this with
-	// SORTIE_SESSION_ID set to the recorded session id (captured from a
+	// after a daemon restart: instead of Command, sakusen runs this with
+	// SAKUSEN_SESSION_ID set to the recorded session id (captured from a
 	// sentinel payload's session_id). Empty → restored sessions start fresh.
 	ResumeCommand string `yaml:"resume_command,omitempty"`
 
 	// ChatLogCommand (tmux only), when non-empty, is run to obtain the step's
 	// chat log for the summarize_chat strategy: it must print the
-	// conversation log on stdout. Env: SORTIE_SESSION_ID (recorded session id,
-	// may be empty), SORTIE_TRANSCRIPT_PATH and SORTIE_SENTINEL_FILE (from the
+	// conversation log on stdout. Env: SAKUSEN_SESSION_ID (recorded session id,
+	// may be empty), SAKUSEN_TRANSCRIPT_PATH and SAKUSEN_SENTINEL_FILE (from the
 	// step's most recent sentinel, when present). Empty → tmux steps of this
 	// agent cannot capture summarize_chat context (they degrade to no context,
 	// or fail when the step sets require_context: true).
@@ -111,11 +111,11 @@ func (a *AgentConfig) IsTmux() bool {
 	return a.EffectiveMode() == AgentModeTmux
 }
 
-// SummarizerConfig configures the utility LLM command sortie shells out to for
+// SummarizerConfig configures the utility LLM command sakusen shells out to for
 // text-in/text-out work: chat/step summarization, the final task summarizer,
-// AI title generation, and `sortie backfill-context`. The command is executed
+// AI title generation, and `sakusen backfill-context`. The command is executed
 // via `sh -c` with the prompt piped on STDIN and must print the response on
-// stdout. SORTIE_PURPOSE identifies the call site ("summarize",
+// stdout. SAKUSEN_PURPOSE identifies the call site ("summarize",
 // "summarize_chat", "summarize_chat_chunk", "title", "backfill_context").
 //
 // When no summarizer is configured, everything degrades gracefully: titles
@@ -174,13 +174,13 @@ func (c *Config) WorkflowAgentSlug(wf *WorkflowConfig) string {
 // StepAgent resolves the agent record that runs a step. Returns the resolved
 // slug and record, or an error when the slug has no record in the registry —
 // explicit refs are rejected at config load, so in practice this error means
-// "nothing configured at all" and carries the `sortie init` hint.
+// "nothing configured at all" and carries the `sakusen init` hint.
 func (c *Config) StepAgent(wf *WorkflowConfig, step *StepConfig) (string, AgentConfig, error) {
 	slug := c.StepAgentSlug(wf, step)
 	agent, ok := c.ResolveAgent(slug)
 	if !ok {
 		return slug, AgentConfig{}, fmt.Errorf(
-			"no agent %q configured: define it under `agents:` in .sortie.yml (or set `agent:`/`default_agent:` to an existing slug); run `sortie init` in a fresh project to scaffold defaults", slug)
+			"no agent %q configured: define it under `agents:` in .sakusen.yml (or set `agent:`/`default_agent:` to an existing slug); run `sakusen init` in a fresh project to scaffold defaults", slug)
 	}
 	return slug, agent, nil
 }
@@ -476,18 +476,18 @@ func mergeAgentAliases(dst map[string]string, src map[string]string) map[string]
 	return dst
 }
 
-// removedProjectKeys maps removed .sortie.yml top-level keys to their
+// removedProjectKeys maps removed .sakusen.yml top-level keys to their
 // migration errors. Hard load-time errors, no back-compat mapping.
 var removedProjectKeys = map[string]string{
-	"claude":                       "the `claude:` block was removed: define agents under the top-level `agents:` map instead (run `sortie init` in a fresh project for scaffolded claude agent records)",
+	"claude":                       "the `claude:` block was removed: define agents under the top-level `agents:` map instead (run `sakusen init` in a fresh project for scaffolded claude agent records)",
 	"yolo":                         "`yolo:` was removed with the `claude:` block: put permission flags (e.g. --dangerously-skip-permissions) directly in your agent's `command`",
 	"system_prompt":                "`system_prompt:` was removed: bake system-prompt flags into your agent's `command` (e.g. claude --append-system-prompt \"...\") or fold the text into step prompts",
 	"allowed_summarization_models": "`allowed_summarization_models` was removed: summarization now runs the top-level `summarizer:` command; pick the model inside that command",
 }
 
 // checkRemovedProjectKeys scans the top level of a config document for removed
-// keys and returns their migration errors. Applied to both .sortie.yml /
-// ~/.sortie.yml and the global ~/.config/sortie/config.yaml (whose old shape
+// keys and returns their migration errors. Applied to both .sakusen.yml /
+// ~/.sakusen.yml and the global ~/.config/sakusen/config.yaml (whose old shape
 // also carried `claude:`/`yolo:`). Works on the raw bytes so the friendly
 // message fires even though yaml decoding would silently drop the unknown key.
 func checkRemovedProjectKeys(data []byte) error {

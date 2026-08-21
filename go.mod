@@ -1,4 +1,4 @@
-module github.com/Bakaface/sortie
+module github.com/Bakaface/sakusen
 
 go 1.25.0
 

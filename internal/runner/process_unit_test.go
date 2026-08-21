@@ -16,7 +16,7 @@ import (
 // side: the result file wins when present and non-empty (trimmed), while an
 // absent, empty, whitespace-only, or unconfigured result file falls back to
 // the retained stdout tail. The empty-file case matters in practice: an agent
-// pipeline that creates $SORTIE_RESULT_FILE and then crashes before writing
+// pipeline that creates $SAKUSEN_RESULT_FILE and then crashes before writing
 // must not yield an empty step context when stdout carried usable output.
 func TestResultText_Branches(t *testing.T) {
 	dir := t.TempDir()
@@ -82,12 +82,12 @@ func TestBuildEnv_StripsClaudeCode(t *testing.T) {
 
 	t.Run("after SetEnv", func(t *testing.T) {
 		p := NewProcess("1", t.TempDir(), "true", "")
-		p.SetEnv(map[string]string{"SORTIE_TASK_ID": "1"})
+		p.SetEnv(map[string]string{"SAKUSEN_TASK_ID": "1"})
 		env := p.buildEnv()
 		assertStripped(t, env)
 		var foundContract bool
 		for _, e := range env {
-			if e == "SORTIE_TASK_ID=1" {
+			if e == "SAKUSEN_TASK_ID=1" {
 				foundContract = true
 			}
 		}

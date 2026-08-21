@@ -6,8 +6,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -17,7 +17,7 @@ import (
 // can copy-paste a spec between tools without remapping fields.
 type ChildTaskSpec struct {
 	Input          string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
-	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sortie.yml and workflows."`
+	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sakusen.yml and workflows."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
 	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every child except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch children still run their workflow steps, so the requirement applies to them too."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent."`
@@ -35,15 +35,15 @@ type ChildTaskSpec struct {
 type CreateTasksAndWaitArgs struct {
 	// ParentTaskID is the calling task whose currently-executing step will
 	// suspend pending child completion. Defaults to the value of the
-	// SORTIE_TASK_ID env var injected by the workflow engine, so an agent
+	// SAKUSEN_TASK_ID env var injected by the workflow engine, so an agent
 	// running inside a step does not need to pass it explicitly.
-	ParentTaskID int64           `json:"parent_task_id,omitempty" jsonschema:"Task ID that should suspend on the spawned children. Defaults to $SORTIE_TASK_ID (set by the workflow engine for the active step)."`
+	ParentTaskID int64           `json:"parent_task_id,omitempty" jsonschema:"Task ID that should suspend on the spawned children. Defaults to $SAKUSEN_TASK_ID (set by the workflow engine for the active step)."`
 	Tasks        []ChildTaskSpec `json:"tasks" jsonschema:"One spec per child task to spawn. Must be non-empty."`
 }
 
 // WaitForTasksArgs is the input schema for wait_for_tasks.
 type WaitForTasksArgs struct {
-	ParentTaskID int64   `json:"parent_task_id,omitempty" jsonschema:"Task ID that should suspend. Defaults to $SORTIE_TASK_ID."`
+	ParentTaskID int64   `json:"parent_task_id,omitempty" jsonschema:"Task ID that should suspend. Defaults to $SAKUSEN_TASK_ID."`
 	ChildTaskIDs []int64 `json:"child_task_ids" jsonschema:"IDs of pre-existing tasks the parent will wait on. Already-terminal tasks are skipped."`
 }
 
@@ -68,7 +68,7 @@ func registerCreateTasksAndWait(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"create_tasks_and_wait",
 		mcp.WithDescription(
-			"Spawn one or more child sortie tasks and suspend the calling task's current step until ALL children reach a terminal status (completed or failed). "+
+			"Spawn one or more child sakusen tasks and suspend the calling task's current step until ALL children reach a terminal status (completed or failed). "+
 				"The calling step is paused on the daemon side; this tool returns immediately with the child task IDs. "+
 				"When the children all finish, the calling step is re-run from the same step index — the agent must check {{children.<id>.status}} to detect failures and decide whether to proceed, retry, or abort. "+
 				"Children may be created in a different project via project_path; the parent suspends and resumes identically. On resume, check {{children.<id>.status}} — it is 'completed' or 'failed' regardless of which project the child ran in. "+
@@ -189,7 +189,7 @@ func handleWaitForTasks(c *client.Client, args WaitForTasksArgs) (*mcp.CallToolR
 }
 
 // resolveParentTaskID returns explicit if non-zero, else parses the
-// SORTIE_TASK_ID env var that the workflow engine sets for every step's
+// SAKUSEN_TASK_ID env var that the workflow engine sets for every step's
 // Claude subprocess (and which MCP servers spawned inside that process
 // inherit). Returns an explanatory error if neither source is available so
 // the agent gets a clear remediation hint.
@@ -197,13 +197,13 @@ func resolveParentTaskID(explicit int64) (int64, error) {
 	if explicit > 0 {
 		return explicit, nil
 	}
-	env := os.Getenv("SORTIE_TASK_ID")
+	env := os.Getenv("SAKUSEN_TASK_ID")
 	if env == "" {
-		return 0, fmt.Errorf("parent_task_id is required (SORTIE_TASK_ID env var not set; this tool must be called from a running sortie step)")
+		return 0, fmt.Errorf("parent_task_id is required (SAKUSEN_TASK_ID env var not set; this tool must be called from a running sakusen step)")
 	}
 	id, err := strconv.ParseInt(env, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("invalid SORTIE_TASK_ID=%q", env)
+		return 0, fmt.Errorf("invalid SAKUSEN_TASK_ID=%q", env)
 	}
 	return id, nil
 }

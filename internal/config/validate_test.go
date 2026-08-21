@@ -10,7 +10,7 @@ import (
 func writeTempConfig(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".sortie.yml")
+	path := filepath.Join(dir, ".sakusen.yml")
 	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
 		t.Fatalf("write temp config: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestValidateFile_Valid(t *testing.T) {
 max_workers: 2
 default_priority: high
 git:
-  branch_template: "sortie/{{task_id}}-{{task_slug}}"
+  branch_template: "sakusen/{{task_id}}-{{task_slug}}"
 on_complete: commit
 workflows:
   - name: default
@@ -372,7 +372,7 @@ workflows:
 func TestValidateFile_MissingFileRefIsError(t *testing.T) {
 	// String ref to a non-existent file should be a hard error.
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".sortie.yml")
+	path := filepath.Join(dir, ".sakusen.yml")
 	if err := os.WriteFile(path, []byte(`
 workflows:
   - phantom
@@ -388,14 +388,14 @@ workflows:
 func TestValidateFile_InlineFileCollisionIsError(t *testing.T) {
 	// Inline workflow that collides with a file-based workflow of the same name.
 	dir := t.TempDir()
-	wfDir := filepath.Join(dir, ".sortie", "workflows")
+	wfDir := filepath.Join(dir, ".sakusen", "workflows")
 	if err := os.MkdirAll(wfDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(wfDir, "foo.yml"), []byte("steps:\n  - name: a\n    prompt: a\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	ymlPath := filepath.Join(dir, ".sortie.yml")
+	ymlPath := filepath.Join(dir, ".sakusen.yml")
 	if err := os.WriteFile(ymlPath, []byte(`
 workflows:
   - name: foo
@@ -465,15 +465,15 @@ workflows:
 }
 
 // TestValidateFile_SubdirectoryInWorkflowsRejected verifies that subdirectories
-// under .sortie/workflows/ produce an error (flat-only layout).
+// under .sakusen/workflows/ produce an error (flat-only layout).
 func TestValidateFile_SubdirectoryInWorkflowsRejected(t *testing.T) {
 	dir := t.TempDir()
-	subDir := filepath.Join(dir, ".sortie", "workflows", "tasks")
+	subDir := filepath.Join(dir, ".sakusen", "workflows", "tasks")
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	// Subdirectory exists — loadWorkflowFilePool should reject it.
-	ymlPath := filepath.Join(dir, ".sortie.yml")
+	ymlPath := filepath.Join(dir, ".sakusen.yml")
 	if err := os.WriteFile(ymlPath, []byte("workflows: []\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

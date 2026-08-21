@@ -5,10 +5,10 @@ import (
 	"net"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/agent"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/agent"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // broadcastWriteTimeout bounds how long the daemon will wait when pushing a
@@ -312,7 +312,7 @@ func agentToInfo(a *agent.Agent) AgentInfo {
 // TaskInfoFromTask converts a *task.Task into the wire-format TaskInfo using
 // only fields available directly on the DB row. It is the single source of
 // truth for that pure mapping, shared by the daemon (taskToInfo, below) and
-// the CLI's offline fallback (cmd/sortie/tasks.go) when the daemon is
+// the CLI's offline fallback (cmd/sakusen/tasks.go) when the daemon is
 // unreachable.
 //
 // It deliberately does NOT populate fields that require extra state beyond

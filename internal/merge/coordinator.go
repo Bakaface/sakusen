@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/task"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // Action is the on_complete behaviour the coordinator should run.

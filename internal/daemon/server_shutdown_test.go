@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
 )
 
-// TestShutdownCompletesBeforeStartReturns covers the sortie#337 race: the
+// TestShutdownCompletesBeforeStartReturns covers the sakusen#337 race: the
 // MsgShutdown handler runs shutdown() on a connection goroutine, and its first
 // act — closing the listener — unblocks Start()'s accept loop. Before the fix,
 // Start() could return (and the process exit) while shutdown() was still
@@ -59,7 +59,7 @@ func TestShutdownCompletesBeforeStartReturns(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Send MsgShutdown over the socket, exactly like `sortie daemon stop`.
+	// Send MsgShutdown over the socket, exactly like `sakusen daemon stop`.
 	conn, err := net.Dial("unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatalf("dial: %v", err)

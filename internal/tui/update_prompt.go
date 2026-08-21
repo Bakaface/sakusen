@@ -122,10 +122,10 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 		deferred := m.continueTask(taskID, workflow, description)
 		if m.animationEnabled() {
 			positions := m.planePositions(description)
-			m.sortie = newSortieAnimation(positions, m.width, m.height, m.animationDuration())
-			m.sortieCmd = deferred
-			m.view = viewSortie
-			return m, sortieTickCmd()
+			m.sakusen = newSakusenAnimation(positions, m.width, m.height, m.animationDuration())
+			m.sakusenCmd = deferred
+			m.view = viewSakusen
+			return m, sakusenTickCmd()
 		}
 		m.view = viewList
 		return m, deferred
@@ -152,10 +152,10 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 	deferred := m.createTaskWithPrompt(title, description, branchName, worktree, images, targetBranch, checkoutBranch)
 	if m.animationEnabled() {
 		positions := m.planePositions(description)
-		m.sortie = newSortieAnimation(positions, m.width, m.height, m.animationDuration())
-		m.sortieCmd = deferred
-		m.view = viewSortie
-		return m, sortieTickCmd()
+		m.sakusen = newSakusenAnimation(positions, m.width, m.height, m.animationDuration())
+		m.sakusenCmd = deferred
+		m.view = viewSakusen
+		return m, sakusenTickCmd()
 	}
 	m.view = viewList
 	return m, deferred
@@ -176,7 +176,7 @@ func (m Model) selectedWorkflowAllowsEmptyInput() bool {
 	return wf.Input != "" || m.cfg.FirstStepIsTmux(wf)
 }
 
-// animationEnabled returns true if the sortie animation is configured on.
+// animationEnabled returns true if the sakusen animation is configured on.
 // Enabled by default; can be disabled via options.animation.enabled: false in config.
 func (m Model) animationEnabled() bool {
 	if m.width == 0 || m.height == 0 {

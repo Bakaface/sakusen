@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func TestShouldSummarizeChat(t *testing.T) {
@@ -128,14 +128,14 @@ func TestSummarizeChatLogNoSummarizerConfigured(t *testing.T) {
 // a prompt under the ceiling (or with chunking disabled) runs a single
 // summarizer invocation, while an oversized chat is split map-reduce style —
 // several summarize_chat_chunk passes followed by one final summarize_chat
-// reduce pass. Invocations are counted via SORTIE_PURPOSE lines the stub
+// reduce pass. Invocations are counted via SAKUSEN_PURPOSE lines the stub
 // appends to a file.
 func TestSummarizeChatLogMapReduce(t *testing.T) {
 	newSummarizerEngine := func(t *testing.T, maxPromptBytes int) (*Engine, string) {
 		t.Helper()
 		dir := t.TempDir()
 		callLog := filepath.Join(dir, "calls.log")
-		cmd := fmt.Sprintf(`cat > /dev/null; echo "$SORTIE_PURPOSE" >> %q; echo SUMMARY`, callLog)
+		cmd := fmt.Sprintf(`cat > /dev/null; echo "$SAKUSEN_PURPOSE" >> %q; echo SUMMARY`, callLog)
 		cfg := &config.Config{
 			Summarizer: config.SummarizerConfig{Command: cmd, MaxPromptBytes: maxPromptBytes},
 		}
@@ -197,14 +197,14 @@ func TestSummarizeChatLogMapReduce(t *testing.T) {
 
 // TestLoadStepChatContentTmuxEnvContract verifies the tmux half of
 // loadStepChatContent: the agent record's chat_log_command runs with the
-// documented env contract (SORTIE_SESSION_ID from the recorded chat row,
-// SORTIE_TASK_ID/SORTIE_STEP, and SORTIE_TRANSCRIPT_PATH/SORTIE_SENTINEL_FILE
+// documented env contract (SAKUSEN_SESSION_ID from the recorded chat row,
+// SAKUSEN_TASK_ID/SAKUSEN_STEP, and SAKUSEN_TRANSCRIPT_PATH/SAKUSEN_SENTINEL_FILE
 // from the step's most recent sentinel), and its stdout becomes the chat
 // content. A failing chat_log_command surfaces an error naming the mechanism.
 func TestLoadStepChatContentTmuxEnvContract(t *testing.T) {
 	// Echoes each env-contract variable so the returned chat content doubles
 	// as an assertion surface; ${VAR:-none} pins the "absent" cases.
-	const envDumpCmd = `echo "sid=${SORTIE_SESSION_ID:-none} task=$SORTIE_TASK_ID step=$SORTIE_STEP tp=${SORTIE_TRANSCRIPT_PATH:-none} sf=${SORTIE_SENTINEL_FILE:-none}"`
+	const envDumpCmd = `echo "sid=${SAKUSEN_SESSION_ID:-none} task=$SAKUSEN_TASK_ID step=$SAKUSEN_STEP tp=${SAKUSEN_TRANSCRIPT_PATH:-none} sf=${SAKUSEN_SENTINEL_FILE:-none}"`
 
 	newTmuxChatEngine := func(t *testing.T, chatLogCommand string) (*Engine, *config.WorkflowConfig, config.StepConfig, *fakeTaskStore, *task.Task) {
 		t.Helper()
@@ -253,7 +253,7 @@ func TestLoadStepChatContentTmuxEnvContract(t *testing.T) {
 
 	t.Run("no session and no transcript_path degrade to absent env vars", func(t *testing.T) {
 		e, wf, step, _, tk := newTmuxChatEngine(t, envDumpCmd)
-		// Sentinel exists (so SORTIE_SENTINEL_FILE is set) but carries no
+		// Sentinel exists (so SAKUSEN_SENTINEL_FILE is set) but carries no
 		// payload fields; no chat row was ever recorded.
 		writeSentinel(t, tk.WorktreePath, "grill-1234567890.json", `{}`)
 		sentinelPath := filepath.Join(StepDoneDir(tk.WorktreePath), "grill-1234567890.json")
@@ -295,7 +295,7 @@ func TestSummarizeChatLogMapReduceHeadroom(t *testing.T) {
 	lastPrompt := filepath.Join(dir, "last-prompt.txt")
 	// The stub records "<purpose> <prompt bytes>" per call, keeps the most
 	// recent prompt (the reduce pass runs last), and returns a fixed summary.
-	cmd := fmt.Sprintf(`p=$(cat); printf '%%s %%s\n' "$SORTIE_PURPOSE" "${#p}" >> %q; printf '%%s' "$p" > %q; echo CHUNK-OK`, callLog, lastPrompt)
+	cmd := fmt.Sprintf(`p=$(cat); printf '%%s %%s\n' "$SAKUSEN_PURPOSE" "${#p}" >> %q; printf '%%s' "$p" > %q; echo CHUNK-OK`, callLog, lastPrompt)
 
 	const maxPromptBytes = 40 * 1024 // well above chunkHeadroomBytes: normal path
 	cfg := &config.Config{

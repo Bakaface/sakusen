@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // Agent is a concurrency-slot handle the Manager uses to track a running

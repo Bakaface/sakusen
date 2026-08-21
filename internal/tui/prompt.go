@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 // imageExtensions contains the file extensions we recognize as images
@@ -126,7 +126,7 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 	titleIn.CharLimit = 200
 
 	bi := textinput.New()
-	bi.Placeholder = "sortie/{{task_id}}-{{task_slug}}"
+	bi.Placeholder = "sakusen/{{task_id}}-{{task_slug}}"
 	bi.CharLimit = 200
 
 	ci := textinput.New()

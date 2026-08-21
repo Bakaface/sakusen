@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/merge"
-	"github.com/Bakaface/sortie/internal/notify"
-	"github.com/Bakaface/sortie/internal/runner"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/merge"
+	"github.com/Bakaface/sakusen/internal/notify"
+	"github.com/Bakaface/sakusen/internal/runner"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 const (
@@ -74,7 +74,7 @@ func NewEngine(cfg *config.Config, database taskStore, notifier *notify.Notifier
 		notifier: notifier,
 		repoRoot: repoRoot,
 		repo:     gitpkg.NewRepo(repoRoot),
-		dataDir:  filepath.Join(repoRoot, ".sortie"),
+		dataDir:  filepath.Join(repoRoot, ".sakusen"),
 		runner:   realAgentRunner{},
 	}
 	e.coord = merge.NewCoordinator(
@@ -98,7 +98,7 @@ func (e *Engine) Coord() *merge.Coordinator { return e.coord }
 // runs synchronously on the runner goroutine, before RunTask returns, so it
 // must not block. The registry the daemon keeps behind this callback must live
 // on the daemon side, not on the Engine: engines are reconstructed whenever a
-// project's .sortie.yml changes, which would silently drop any pause state
+// project's .sakusen.yml changes, which would silently drop any pause state
 // held here.
 func (e *Engine) SetPauseCallback(cb func(taskID int64)) {
 	e.onPause = cb
@@ -301,7 +301,7 @@ type workspaceContext struct {
 
 // prepareWorkspace runs everything RunTask needs to do exactly once, before
 // the per-step loop: provisioning/reusing the worktree, syncing configured
-// paths into it, running worktree setup command(s), ensuring the .sortie
+// paths into it, running worktree setup command(s), ensuring the .sakusen
 // work dirs exist, and copying attached images. Extracted verbatim from the
 // front of RunTask; see EnsureWorktree's doc comment for the worktree
 // provisioning semantics this delegates to.
@@ -348,9 +348,9 @@ func (e *Engine) prepareWorkspace(ctx context.Context, t *task.Task, wf *config.
 		}
 	}
 
-	// Ensure .sortie directories exist in worktree
+	// Ensure .sakusen directories exist in worktree
 	if err := EnsureWorkDirs(t.WorktreePath); err != nil {
-		return workspaceContext{}, fmt.Errorf("failed to create sortie dirs: %w", err)
+		return workspaceContext{}, fmt.Errorf("failed to create sakusen dirs: %w", err)
 	}
 
 	// Copy attached images to worktree
@@ -501,25 +501,25 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 
 	// Set environment variables
 	env := map[string]string{
-		"SORTIE_TASK_ID":  fmt.Sprintf("%d", t.ID),
-		"SORTIE_STEP":     step.Name,
-		"SORTIE_WORKTREE": t.WorktreePath,
-		"SORTIE_PURPOSE":  "step",
-		// SORTIE_PROJECT_PATH is the absolute path to the project repo
+		"SAKUSEN_TASK_ID":  fmt.Sprintf("%d", t.ID),
+		"SAKUSEN_STEP":     step.Name,
+		"SAKUSEN_WORKTREE": t.WorktreePath,
+		"SAKUSEN_PURPOSE":  "step",
+		// SAKUSEN_PROJECT_PATH is the absolute path to the project repo
 		// root (NOT the worktree). MCP servers / scripts spawned inside
 		// the step that need to create child tasks under the same
 		// project use this so they don't accidentally register their
 		// `git rev-parse --show-toplevel` (which in a worktree returns
 		// the worktree path) as a new project row.
-		"SORTIE_PROJECT_PATH": e.repoRoot,
+		"SAKUSEN_PROJECT_PATH": e.repoRoot,
 	}
 	if t.TrackID != nil {
 		// Lets agents target "their" track via the update_track_context MCP tool.
-		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
+		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 	// The resolved agent slug, so stubs/scripts can tell which agent record a
 	// spawn came from without re-deriving the cascade.
-	env["SORTIE_AGENT"] = agentSlug
+	env["SAKUSEN_AGENT"] = agentSlug
 
 	// Spawn the step's agent (tmux or headless, per the agent record's mode)
 	useTmux := agentCfg.IsTmux()

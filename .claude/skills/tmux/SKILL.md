@@ -1,7 +1,7 @@
 ---
 name: tmux
 description: >
-  Sortie's tmux session management: session creation, lifecycle, pane capture,
+  Sakusen's tmux session management: session creation, lifecycle, pane capture,
   key sending, nested tmux detection, and activity monitoring. Use when editing
   files in internal/tmux/, working on tmux session creation, attachment, log
   piping, session cleanup, or activity detection.
@@ -55,7 +55,7 @@ KillSessionsForTask(projectName, taskID string) error      // Kill all sessions 
 // SetupVars holds template variables for tmux setup command interpolation.
 type SetupVars struct {
     AgentCommand string  // raw agent shell command from the agent record
-    RunAgent     string  // path to the wrapper script that runs the agent with the SORTIE_* env exported (prefer this)
+    RunAgent     string  // path to the wrapper script that runs the agent with the SAKUSEN_* env exported (prefer this)
 }
 
 // Returns true if setup command contains {{run_agent}} or {{agent_command}},

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	mcppkg "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -116,7 +116,7 @@ func (f *fakeDaemon) handleConn(conn net.Conn) {
 
 // startMCPServer wires the MCP server in-process against a fake daemon and
 // returns a connected MCP client. The MCP server is otherwise identical to
-// what `sortie mcp` runs in production — same registerTools call.
+// what `sakusen mcp` runs in production — same registerTools call.
 func startMCPServer(t *testing.T, fake *fakeDaemon) *mcppkg.Client {
 	t.Helper()
 
@@ -129,7 +129,7 @@ func startMCPServer(t *testing.T, fake *fakeDaemon) *mcppkg.Client {
 	}
 	t.Cleanup(func() { c.Close() })
 
-	s := server.NewMCPServer("sortie-test", "0.0.0", server.WithToolCapabilities(false))
+	s := server.NewMCPServer("sakusen-test", "0.0.0", server.WithToolCapabilities(false))
 	registerTools(s, c)
 
 	mcpClient, err := mcppkg.NewInProcessClient(s)

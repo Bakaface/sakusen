@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// AppTitle is the display title for Sortie, with an airplane (✈) reflecting
-// the aviation origin of the word "sortie" — a short combat mission.
-const AppTitle = "✈ Sortie"
+// AppTitle is the display title for Sakusen, written in Japanese (作戦,
+// "operation/strategy").
+const AppTitle = "作戦"
 
 // PromptPrefix is the airplane character used as a prompt prefix for task input,
 // similar to Claude Code's ❯ character.

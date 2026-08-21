@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // transitionEvent is the test-visible shape of a fired StateChangeCallback

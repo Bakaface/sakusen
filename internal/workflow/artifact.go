@@ -8,10 +8,10 @@ import (
 
 // LogsDir returns the path to the logs directory in a worktree.
 func LogsDir(worktreePath string) string {
-	return filepath.Join(worktreePath, ".sortie", "logs")
+	return filepath.Join(worktreePath, ".sakusen", "logs")
 }
 
-// EnsureWorkDirs creates the .sortie/logs directory in a worktree.
+// EnsureWorkDirs creates the .sakusen/logs directory in a worktree.
 func EnsureWorkDirs(worktreePath string) error {
 	return os.MkdirAll(LogsDir(worktreePath), 0755)
 }
@@ -30,10 +30,10 @@ func ProjectLogPath(dataDir string, taskID int64) string {
 
 // ImagesDir returns the path to the images directory in a worktree.
 func ImagesDir(worktreePath string) string {
-	return filepath.Join(worktreePath, ".sortie", "images")
+	return filepath.Join(worktreePath, ".sakusen", "images")
 }
 
-// CopyImagesToWorktree copies the given image files into .sortie/images/ in the worktree.
+// CopyImagesToWorktree copies the given image files into .sakusen/images/ in the worktree.
 // Returns the list of worktree-relative paths for the copied images.
 func CopyImagesToWorktree(worktreePath string, imagePaths []string) ([]string, error) {
 	if len(imagePaths) == 0 {

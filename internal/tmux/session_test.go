@@ -17,7 +17,7 @@ func TestSanitizeName(t *testing.T) {
 		{"leading dot", ".docs", "_docs"},
 		{"multiple dots", "my.project.name", "my_project_name"},
 		{"only dot", ".", "_"},
-		{"no change needed", "sortie", "sortie"},
+		{"no change needed", "sakusen", "sakusen"},
 	}
 
 	for _, tt := range tests {
@@ -52,9 +52,9 @@ func TestSessionPrefix(t *testing.T) {
 }
 
 func TestNewSession(t *testing.T) {
-	s := NewSession("sortie", "42", "/tmp/work")
-	if s.Name != "sortie-42" {
-		t.Errorf("expected name sortie-42, got %s", s.Name)
+	s := NewSession("sakusen", "42", "/tmp/work")
+	if s.Name != "sakusen-42" {
+		t.Errorf("expected name sakusen-42, got %s", s.Name)
 	}
 	if s.WorkDir != "/tmp/work" {
 		t.Errorf("expected workdir /tmp/work, got %s", s.WorkDir)
@@ -158,9 +158,9 @@ func TestExtractTaskID(t *testing.T) {
 		input       string
 		expected    string
 	}{
-		{"basic", "sortie", "sortie-42", "42"},
-		{"no prefix match", "sortie", "other-42", "other-42"},
-		{"prefix only", "sortie", "sortie-", ""},
+		{"basic", "sakusen", "sakusen-42", "42"},
+		{"no prefix match", "sakusen", "other-42", "other-42"},
+		{"prefix only", "sakusen", "sakusen-", ""},
 		{"dot-prefixed project", ".docs", "_docs-42", "42"},
 		{"dot-prefixed no match", ".docs", ".docs-42", ".docs-42"},
 	}

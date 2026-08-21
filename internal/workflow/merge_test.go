@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // TestResolveConflictsAgentSelection verifies the agent-selection logic at the
@@ -91,14 +91,14 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 			// The headless fallback records which slug it was spawned as (so
 			// the test can prove selection picked "claude", not "my-tmux") and
 			// satisfies the result-file contract.
-			"claude": {Command: `printf '%s' "$SORTIE_AGENT" > agent-slug.txt; printf resolved > "$SORTIE_RESULT_FILE"`},
+			"claude": {Command: `printf '%s' "$SAKUSEN_AGENT" > agent-slug.txt; printf resolved > "$SAKUSEN_RESULT_FILE"`},
 		})
 		e := &Engine{
 			cfg:      newEngineConfig(cfg),
 			dataDir:  filepath.Join(t.TempDir(), "data"),
 			repoRoot: worktree,
 		}
-		tk := &task.Task{ID: 7, Workflow: "wf", Branch: "sortie/7", WorktreePath: worktree}
+		tk := &task.Task{ID: 7, Workflow: "wf", Branch: "sakusen/7", WorktreePath: worktree}
 
 		if err := e.resolveConflicts(context.Background(), tk, []string{"main.go"}, nil); err != nil {
 			t.Fatalf("expected fallback selection to succeed, got %v", err)
@@ -109,7 +109,7 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 			t.Fatalf("expected the headless fallback agent to have run: %v", err)
 		}
 		if got := strings.TrimSpace(string(slug)); got != config.DefaultAgentSlug {
-			t.Errorf("SORTIE_AGENT seen by the conflict resolver = %q, want %q", got, config.DefaultAgentSlug)
+			t.Errorf("SAKUSEN_AGENT seen by the conflict resolver = %q, want %q", got, config.DefaultAgentSlug)
 		}
 	})
 }

@@ -17,7 +17,7 @@ func writeGlobalConfigYaml(t *testing.T, yml string) (string, string, string) {
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
 	t.Setenv("HOME", homeDir)
 
-	want := filepath.Join(xdgDir, "sortie", "config.yaml")
+	want := filepath.Join(xdgDir, "sakusen", "config.yaml")
 	if got := getGlobalConfigPath(); got != want {
 		t.Fatalf("getGlobalConfigPath() = %q, want %q", got, want)
 	}
@@ -31,7 +31,7 @@ func writeGlobalConfigYaml(t *testing.T, yml string) (string, string, string) {
 }
 
 // TestAgentsGlobalConfigYamlTier verifies agents:/default_agent:/summarizer:
-// defined in the XDG global config file ($XDG_CONFIG_HOME/sortie/config.yaml)
+// defined in the XDG global config file ($XDG_CONFIG_HOME/sakusen/config.yaml)
 // reach the merged Config via LoadForProject when the project defines none of
 // its own.
 func TestAgentsGlobalConfigYamlTier(t *testing.T) {
@@ -48,7 +48,7 @@ summarizer:
 `)
 
 	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	if err := os.WriteFile(projectPath, []byte("max_workers: 2\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,12 +76,12 @@ summarizer:
 	}
 }
 
-// TestAgentsGlobalSortieYmlOverridesConfigYaml verifies the load order of the
-// two global tiers: a slug defined in both config.yaml and ~/.sortie.yml is
-// taken wholesale from ~/.sortie.yml (which loads after config.yaml) — no
+// TestAgentsGlobalSakusenYmlOverridesConfigYaml verifies the load order of the
+// two global tiers: a slug defined in both config.yaml and ~/.sakusen.yml is
+// taken wholesale from ~/.sakusen.yml (which loads after config.yaml) — no
 // field merging (the config.yaml record's tmux-only resume_command must not
 // survive on the replacing headless record, or validation would reject it).
-func TestAgentsGlobalSortieYmlOverridesConfigYaml(t *testing.T) {
+func TestAgentsGlobalSakusenYmlOverridesConfigYaml(t *testing.T) {
 	_, homeDir, _ := writeGlobalConfigYaml(t, `
 agents:
   shared:
@@ -92,17 +92,17 @@ agents:
     command: "config-yaml only"
 `)
 
-	globalSortieYml := `
+	globalSakusenYml := `
 agents:
   shared:
-    command: "sortie-yml shared"
+    command: "sakusen-yml shared"
 `
-	if err := os.WriteFile(filepath.Join(homeDir, ".sortie.yml"), []byte(globalSortieYml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeDir, ".sakusen.yml"), []byte(globalSakusenYml), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	projectDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte("max_workers: 2\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte("max_workers: 2\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -115,8 +115,8 @@ agents:
 	if !ok {
 		t.Fatal("expected shared agent in merged registry")
 	}
-	if shared.Command != "sortie-yml shared" {
-		t.Errorf("shared.Command = %q, want ~/.sortie.yml tier to win over config.yaml", shared.Command)
+	if shared.Command != "sakusen-yml shared" {
+		t.Errorf("shared.Command = %q, want ~/.sakusen.yml tier to win over config.yaml", shared.Command)
 	}
 	if shared.IsTmux() || shared.ResumeCommand != "" {
 		t.Errorf("shared must be replaced wholesale, got %+v", shared)
@@ -130,7 +130,7 @@ agents:
 
 // TestAgentsCrossTierRefResolution verifies the rationale for running
 // validateAgents only after every tier merges: a project workflow may
-// reference an agent defined solely in the global ~/.sortie.yml, and
+// reference an agent defined solely in the global ~/.sakusen.yml, and
 // LoadForProject must both accept the ref and resolve it via StepAgent.
 func TestAgentsCrossTierRefResolution(t *testing.T) {
 	globalYml := `
@@ -290,18 +290,18 @@ func TestStepAgentResolutionNilStep(t *testing.T) {
 	}
 }
 
-// TestRemovedKeysInGlobalSortieYml verifies a removed top-level key in the
-// global ~/.sortie.yml fails LoadForProject with the migration message
+// TestRemovedKeysInGlobalSakusenYml verifies a removed top-level key in the
+// global ~/.sakusen.yml fails LoadForProject with the migration message
 // prefixed by the offending file's path.
-func TestRemovedKeysInGlobalSortieYml(t *testing.T) {
+func TestRemovedKeysInGlobalSakusenYml(t *testing.T) {
 	globalYml := "claude:\n  command: /tmp/foo\n"
 	projectDir := setupGlobalAndProject(t, globalYml, nil, "max_workers: 2\n", nil)
 
 	_, err := LoadForProject(projectDir)
 	if err == nil {
-		t.Fatal("expected removed-key error from global ~/.sortie.yml")
+		t.Fatal("expected removed-key error from global ~/.sakusen.yml")
 	}
-	wantPath := filepath.Join(os.Getenv("HOME"), ".sortie.yml")
+	wantPath := filepath.Join(os.Getenv("HOME"), ".sakusen.yml")
 	if !strings.Contains(err.Error(), wantPath+":") {
 		t.Errorf("error must be prefixed with the offending file path %q, got: %v", wantPath, err)
 	}
@@ -362,7 +362,7 @@ summarizer:
 
 	projectDir := t.TempDir()
 	projectYml := "summarizer:\n  command: \"project summarize\"\n"
-	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte(projectYml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(projectYml), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -389,14 +389,14 @@ func TestAgentVariantsExpansion(t *testing.T) {
 	yaml := `
 agents:
   claude:
-    command: run --model "$SORTIE_MODEL"
+    command: run --model "$SAKUSEN_MODEL"
     env:
-      SORTIE_MODEL: default
+      SAKUSEN_MODEL: default
       KEEP: base
     variants:
       opus:
         env:
-          SORTIE_MODEL: opus-model
+          SAKUSEN_MODEL: opus-model
 default_agent: claude:opus
 workflows:
   - name: w
@@ -418,14 +418,14 @@ workflows:
 	if !ok {
 		t.Fatal("expected expanded claude:opus in the registry")
 	}
-	if variant.Command != `run --model "$SORTIE_MODEL"` {
+	if variant.Command != `run --model "$SAKUSEN_MODEL"` {
 		t.Errorf("variant.Command = %q, want the parent's command inherited", variant.Command)
 	}
 	if variant.EffectiveMode() != AgentModeHeadless {
 		t.Errorf("variant mode = %q, want inherited headless", variant.EffectiveMode())
 	}
-	if variant.Env["SORTIE_MODEL"] != "opus-model" {
-		t.Errorf("Env[SORTIE_MODEL] = %q, want the variant's override", variant.Env["SORTIE_MODEL"])
+	if variant.Env["SAKUSEN_MODEL"] != "opus-model" {
+		t.Errorf("Env[SAKUSEN_MODEL] = %q, want the variant's override", variant.Env["SAKUSEN_MODEL"])
 	}
 	if variant.Env["KEEP"] != "base" {
 		t.Errorf("Env[KEEP] = %q, want the parent-only key to survive the merge", variant.Env["KEEP"])
@@ -435,8 +435,8 @@ workflows:
 	if !ok {
 		t.Fatal("parent claude must remain a usable agent")
 	}
-	if parent.Env["SORTIE_MODEL"] != "default" {
-		t.Errorf("parent Env[SORTIE_MODEL] = %q, want untouched %q", parent.Env["SORTIE_MODEL"], "default")
+	if parent.Env["SAKUSEN_MODEL"] != "default" {
+		t.Errorf("parent Env[SAKUSEN_MODEL] = %q, want untouched %q", parent.Env["SAKUSEN_MODEL"], "default")
 	}
 	if parent.Variants != nil {
 		t.Errorf("parent.Variants = %v, want nil after expansion", parent.Variants)
@@ -447,7 +447,7 @@ workflows:
 	if err != nil {
 		t.Fatalf("StepAgent: %v", err)
 	}
-	if slug != "claude:opus" || agent.Env["SORTIE_MODEL"] != "opus-model" {
+	if slug != "claude:opus" || agent.Env["SAKUSEN_MODEL"] != "opus-model" {
 		t.Errorf("StepAgent = (%q, env %v), want claude:opus with the variant env", slug, agent.Env)
 	}
 	// s2 has no step-level agent: the workflow-level claude:opus ref applies.
@@ -726,7 +726,7 @@ agents:
 
 	projectDir := t.TempDir()
 	projectYml := "agents:\n  worker:\n    command: \"project cmd\"\n    env:\n      SHARED: project\n"
-	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte(projectYml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(projectYml), 0644); err != nil {
 		t.Fatal(err)
 	}
 

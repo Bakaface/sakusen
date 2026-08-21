@@ -13,7 +13,7 @@ import (
 // crossProjectParentYAML is project A's config: a one-step "spawn" workflow
 // whose stub hook fans out into project B (see
 // testdata/cross_project_children/step-spawn.hook.sh) and registers wait-on
-// edges via `sortie wait-for-tasks --use-env`.
+// edges via `sakusen wait-for-tasks --use-env`.
 //
 // The prompt embeds {{children.2.status}} / {{children.3.status}} markers —
 // child IDs are deterministic because the parent is always task 1 in a fresh
@@ -91,7 +91,7 @@ func childProjectPathForTask(e *Env, taskID int64) string {
 // FAILED — with {{children.<id>.status}} visible to the resumed step.
 func TestCrossProjectChildrenSuspendAndResume(t *testing.T) {
 	e := setupE2E(t, "cross_project_children")
-	e.WriteSortieYAML(crossProjectParentYAML(e.StubPath, 3))
+	e.WriteSakusenYAML(crossProjectParentYAML(e.StubPath, 3))
 
 	childDir := e.AddProject(crossProjectChildYAML(e.StubPath))
 
@@ -101,7 +101,7 @@ func TestCrossProjectChildrenSuspendAndResume(t *testing.T) {
 	e.WriteHookFile("e2e-child-specs", "child\nchild-fail\n")
 
 	// Parent is task 1; its hook spawns children 2 (child) and 3 (child-fail).
-	e.MustSortie("create", "--title", "cross project parent", "-w", "parent", "parent work")
+	e.MustSakusen("create", "--title", "cross project parent", "-w", "parent", "parent work")
 
 	// a) Parent suspends on the cross-project children.
 	e.WaitStatus(1, "awaiting-children", 20*time.Second)
@@ -169,7 +169,7 @@ func TestCrossProjectChildrenSuspendAndResume(t *testing.T) {
 // at max_workers = 1 demonstrates no hold-and-wait, hence no deadlock.
 func TestCrossProjectChildrenNoDeadlockUnderContention(t *testing.T) {
 	e := setupE2E(t, "cross_project_children")
-	e.WriteSortieYAML(crossProjectParentYAML(e.StubPath, 1))
+	e.WriteSakusenYAML(crossProjectParentYAML(e.StubPath, 1))
 	// max_workers is read once at server construction; the daemon started
 	// before the YAML existed, so restart to make max_workers: 1 effective.
 	e.RestartDaemon()
@@ -178,7 +178,7 @@ func TestCrossProjectChildrenNoDeadlockUnderContention(t *testing.T) {
 	e.WriteHookFile("e2e-child-project", childDir)
 	e.WriteHookFile("e2e-child-specs", "child\nchild\nchild\n")
 
-	e.MustSortie("create", "--title", "cross project parent", "-w", "parent", "parent work")
+	e.MustSakusen("create", "--title", "cross project parent", "-w", "parent", "parent work")
 
 	// Parent (task 1) suspends on children 2, 3, 4.
 	e.WaitStatus(1, "awaiting-children", 20*time.Second)

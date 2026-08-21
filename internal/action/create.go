@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/daemon"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
-// CreateArgs collects every option supported by `sortie create` and the TUI
+// CreateArgs collects every option supported by `sakusen create` and the TUI
 // new-task prompt. Empty Title is allowed: the daemon falls back to an
 // AI-derived (or branch-derived) title when the input / checkout branch
 // makes that meaningful.

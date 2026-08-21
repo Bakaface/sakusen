@@ -1,26 +1,26 @@
 [tasks.build]
 alias = "b"
-description = "Build + install the sortie binary into GOBIN (first on PATH, so `sortie ...` runs this build)"
-run = "go install ./cmd/sortie"
+description = "Build + install the sakusen binary into GOBIN (first on PATH, so `sakusen ...` runs this build)"
+run = "go install ./cmd/sakusen"
 
 [tasks.daemon]
 alias = "d"
 description = "Start the daemon"
-run = "sortie daemon start"
+run = "sakusen daemon start"
 
 [tasks."daemon:fg"]
 description = "Start the daemon in foreground mode"
-run = "sortie daemon start -f"
+run = "sakusen daemon start -f"
 depends = ["build"]
 
 [tasks.db]
 description = "Open SQLite database console"
-run = "sqlite3 $(git rev-parse --show-toplevel)/.sortie/tasks.db"
+run = "sqlite3 ${XDG_CONFIG_HOME:-$HOME/.config}/sakusen/tasks.db"
 
 [tasks.tui]
 alias = "t"
 description = "Launch the TUI"
-run = "sortie tui"
+run = "sakusen tui"
 
 [tasks.test]
 description = "Run unit tests (excludes integration- and e2e-tagged files)"
@@ -48,5 +48,5 @@ run = "claude --dangerously-skip-permissions 'Run the /e2e-test command'"
 
 [tasks.claude]
 alias = "c"
-description = "Launch Claude Code with the local sortie plugin live-loaded from source"
+description = "Launch Claude Code with the local sakusen plugin live-loaded from source"
 run = "claude --dangerously-skip-permissions --plugin-dir ./claude-code-plugin"

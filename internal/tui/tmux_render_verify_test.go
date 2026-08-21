@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 // TestStatusText_TmuxRealStatusMatrix exhaustively verifies the rendered
@@ -108,7 +108,7 @@ func TestStatusText_TmuxRealStatusMatrix(t *testing.T) {
 			wantLabel: "review [T]",
 		},
 		{
-			// Regression for sortie#95: when the coordinator transitions to
+			// Regression for sakusen#95: when the coordinator transitions to
 			// resolving-conflicts mid-finalization, the previous tmux step's
 			// lingering session must NOT cause us to render "implement [wip]" —
 			// we should show the resolving-conflicts status explicitly.

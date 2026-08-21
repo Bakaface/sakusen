@@ -10,16 +10,16 @@ import (
 	"time"
 )
 
-// TestDaemonStopCleanShutdown asserts that `sortie daemon stop` lets the
+// TestDaemonStopCleanShutdown asserts that `sakusen daemon stop` lets the
 // daemon finish its full shutdown sequence before the process exits
-// (sortie#337): previously the MsgShutdown handler's listener.Close()
+// (sakusen#337): previously the MsgShutdown handler's listener.Close()
 // unblocked the main goroutine's accept loop, so the process could exit
 // mid-shutdown — leaving a stale daemon.pid, an unclosed SQLite database,
 // and a daemon log without the final "Daemon stopped" line.
 func TestDaemonStopCleanShutdown(t *testing.T) {
 	e := setupE2E(t, "happy_path")
 
-	e.MustSortie("daemon", "stop")
+	e.MustSakusen("daemon", "stop")
 
 	// The daemon process must exit.
 	done := make(chan struct{})
@@ -35,11 +35,11 @@ func TestDaemonStopCleanShutdown(t *testing.T) {
 	}
 
 	// The pid and socket files must be gone.
-	pidFile := filepath.Join(e.XDGDir, "sortie", "daemon.pid")
+	pidFile := filepath.Join(e.XDGDir, "sakusen", "daemon.pid")
 	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
 		t.Errorf("daemon.pid still present after daemon stop (stat err: %v)", err)
 	}
-	sockFile := filepath.Join(e.XDGDir, "sortie", "daemon.sock")
+	sockFile := filepath.Join(e.XDGDir, "sakusen", "daemon.sock")
 	if _, err := os.Stat(sockFile); !os.IsNotExist(err) {
 		t.Errorf("daemon.sock still present after daemon stop (stat err: %v)", err)
 	}

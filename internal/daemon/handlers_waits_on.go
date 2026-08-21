@@ -6,7 +6,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // handleCreateTasksAndWait creates each child task in req.Tasks and records
@@ -27,7 +27,7 @@ import (
 //
 // A child that never reaches terminal status leaves the parent suspended
 // indefinitely. That is a stuck wait, not a deadlock — nothing is held.
-// Recovery is `sortie delete <child_id>`, which drops the wait-on edge (see
+// Recovery is `sakusen delete <child_id>`, which drops the wait-on edge (see
 // DeleteTask) and lets the poller resume the parent on the next tick.
 //
 // Validation is fail-fast: if any child fails to create, the partial children

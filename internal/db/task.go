@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func (db *DB) CreateTask(projectID int64, title, input, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error) {

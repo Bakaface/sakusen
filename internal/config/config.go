@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/tmux"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,11 +23,11 @@ func defaultConfig() *Config {
 	return &Config{
 		MaxWorkers: 3,
 		Git: GitConfig{
-			BranchTemplate: "sortie/{{task_id}}-{{task_slug}}",
+			BranchTemplate: "sakusen/{{task_id}}-{{task_slug}}",
 		},
 		OnComplete: "commit",
 		Workflows:  nil, // Empty - DefaultWorkflow() handles fallback
-		// Desktop notifications are opt-in: an environment with no sortie
+		// Desktop notifications are opt-in: an environment with no sakusen
 		// config at all (e.g. the e2e harness, which points HOME/XDG_CONFIG_HOME
 		// at a temp dir) must stay silent rather than posting real OS
 		// notifications for every agent it completes.
@@ -61,11 +61,11 @@ func DefaultWorkflow() WorkflowConfig {
 	}
 }
 
-// loadCommon loads the global config and global .sortie.yml into cfg, and
+// loadCommon loads the global config and global .sakusen.yml into cfg, and
 // captures the resolved global workflows into cfg.globalPool so that the
 // subsequent project-level load can reference them by name via string refs.
 func loadCommon(cfg *Config) error {
-	// Load global config (~/.config/sortie/config.yaml)
+	// Load global config (~/.config/sakusen/config.yaml)
 	globalPath := getGlobalConfigPath()
 	if globalPath != "" {
 		if err := loadGlobalConfig(globalPath, cfg); err != nil && !os.IsNotExist(err) {
@@ -73,12 +73,12 @@ func loadCommon(cfg *Config) error {
 		}
 	}
 
-	// Load global .sortie.yml (~/.sortie.yml). cfg.globalPool is still nil at
+	// Load global .sakusen.yml (~/.sakusen.yml). cfg.globalPool is still nil at
 	// this point, so the global file's own workflows resolve only against its
-	// local .sortie/workflows/ — no self-recursion.
-	globalSortieYml := getGlobalSortieYmlPath()
-	if globalSortieYml != "" {
-		if err := loadProjectConfigTier(globalSortieYml, cfg, false); err != nil && !os.IsNotExist(err) {
+	// local .sakusen/workflows/ — no self-recursion.
+	globalSakusenYml := getGlobalSakusenYmlPath()
+	if globalSakusenYml != "" {
+		if err := loadProjectConfigTier(globalSakusenYml, cfg, false); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -91,19 +91,19 @@ func loadCommon(cfg *Config) error {
 	return nil
 }
 
-// Load loads config from global config, global .sortie.yml, and project .sortie.yml,
+// Load loads config from global config, global .sakusen.yml, and project .sakusen.yml,
 // returning a merged Config. Loading order (later overrides earlier):
 //  1. Built-in defaults
-//  2. ~/.config/sortie/config.yaml (global daemon config)
-//  3. ~/.sortie.yml (global sortie.yml defaults)
-//  4. ./.sortie.yml (project config)
+//  2. ~/.config/sakusen/config.yaml (global daemon config)
+//  3. ~/.sakusen.yml (global sakusen.yml defaults)
+//  4. ./.sakusen.yml (project config)
 func Load() (*Config, error) {
 	cfg := defaultConfig()
 	if err := loadCommon(cfg); err != nil {
 		return nil, err
 	}
 
-	// Load project config (.sortie.yml at repo root)
+	// Load project config (.sakusen.yml at repo root)
 	projectPath := getProjectConfigPath()
 	if projectPath != "" {
 		if err := loadProjectConfig(projectPath, cfg); err != nil && !os.IsNotExist(err) {
@@ -116,7 +116,7 @@ func Load() (*Config, error) {
 	cfg.computePaths()
 
 	// Track workflows register AFTER the project-level config resolves (never
-	// inside loadProjectConfig, which also runs for the global ~/.sortie.yml —
+	// inside loadProjectConfig, which also runs for the global ~/.sakusen.yml —
 	// registering there would double-add global track workflows with the wrong
 	// tiering).
 	if err := appendTrackWorkflows(cfg, cfg.ProjectDir); err != nil {
@@ -146,8 +146,8 @@ func LoadForProject(projectDir string) (*Config, error) {
 		return nil, err
 	}
 
-	// Load project config (.sortie.yml)
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	// Load project config (.sakusen.yml)
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	if _, err := os.Stat(projectPath); err == nil {
 		if err := loadProjectConfig(projectPath, cfg); err != nil {
 			return nil, err
@@ -221,16 +221,16 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	return nil
 }
 
-// loadProjectConfig loads a .sortie.yml at the project tier. Kept as a thin
+// loadProjectConfig loads a .sakusen.yml at the project tier. Kept as a thin
 // wrapper so existing callers (and tests) that always load project-scope
-// files keep their signature; loadCommon loads ~/.sortie.yml with
+// files keep their signature; loadCommon loads ~/.sakusen.yml with
 // projectTier=false via loadProjectConfigTier.
 func loadProjectConfig(path string, cfg *Config) error {
 	return loadProjectConfigTier(path, cfg, true)
 }
 
-// loadProjectConfigTier loads a .sortie.yml-shaped file into cfg. projectTier
-// distinguishes the project ./.sortie.yml (true) from the global ~/.sortie.yml
+// loadProjectConfigTier loads a .sakusen.yml-shaped file into cfg. projectTier
+// distinguishes the project ./.sakusen.yml (true) from the global ~/.sakusen.yml
 // (false), which shares the same format but is a less-local scope: settings
 // explicitly set at the project tier are recorded (OnCompleteFromProject) so
 // finalization can apply locality precedence against global workflows.
@@ -249,7 +249,7 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 		return err
 	}
 
-	// Discover file-based workflows under <dir>/.sortie/workflows/ (flat, no subdirs)
+	// Discover file-based workflows under <dir>/.sakusen/workflows/ (flat, no subdirs)
 	baseDir := filepath.Dir(path)
 	filePool, err := loadWorkflowFilePool(baseDir)
 	if err != nil {
@@ -300,9 +300,9 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 	return resolveWorkflows(cfg, &proj, filePool)
 }
 
-// globalWorkflowPool holds workflows resolved from the global ~/.sortie.yml
-// (both inline and file-based under ~/.sortie/workflows/) keyed by name.
-// Project-level string refs that don't match a local .sortie/workflows/<name>.yml
+// globalWorkflowPool holds workflows resolved from the global ~/.sakusen.yml
+// (both inline and file-based under ~/.sakusen/workflows/) keyed by name.
+// Project-level string refs that don't match a local .sakusen/workflows/<name>.yml
 // fall back to this pool, letting projects reuse globally-defined workflows by
 // name.
 //
@@ -338,7 +338,7 @@ func (p *globalWorkflowPool) add(wf WorkflowConfig) {
 
 // snapshotGlobalPool captures the currently-resolved workflows on cfg into a
 // pool that project-level config resolution can consult to look up workflows
-// by name. Called after the global ~/.sortie.yml is loaded so that later
+// by name. Called after the global ~/.sakusen.yml is loaded so that later
 // project loads can reference global workflows via string refs.
 func snapshotGlobalPool(cfg *Config) *globalWorkflowPool {
 	pool := newGlobalWorkflowPool()
@@ -354,8 +354,8 @@ func snapshotGlobalPool(cfg *Config) *globalWorkflowPool {
 }
 
 // workflowFilePool holds workflow definitions discovered on disk under
-// .sortie/workflows/, keyed by name → loaded workflow. Files that haven't been
-// referenced from .sortie.yml at the end of resolution are appended to the
+// .sakusen/workflows/, keyed by name → loaded workflow. Files that haven't been
+// referenced from .sakusen.yml at the end of resolution are appended to the
 // resolved list as Hidden=true.
 type workflowFilePool struct {
 	// byName[name] → WorkflowConfig (with Source set, Hidden=false).
@@ -404,20 +404,20 @@ func (p *workflowFilePool) remainingNames() []string {
 	return names
 }
 
-// loadWorkflowFilePool scans <baseDir>/.sortie/workflows/ (flat, no subdirs)
+// loadWorkflowFilePool scans <baseDir>/.sakusen/workflows/ (flat, no subdirs)
 // and returns the discovered workflows. Returns an empty pool when the
-// .sortie/workflows directory doesn't exist (not an error).
+// .sakusen/workflows directory doesn't exist (not an error).
 func loadWorkflowFilePool(baseDir string) (*workflowFilePool, error) {
 	if baseDir == "" {
 		return newWorkflowFilePool(), nil
 	}
-	return loadWorkflowDir(filepath.Join(baseDir, ".sortie", "workflows"))
+	return loadWorkflowDir(filepath.Join(baseDir, ".sakusen", "workflows"))
 }
 
 // loadWorkflowDir scans a workflows directory (flat, no subdirs) and returns
 // the discovered workflows. Shared by loadWorkflowFilePool (the classic
-// .sortie/workflows/ tier) and loadTrackWorkflows (per-track
-// .sortie/tracks/<slug>/workflows/ dirs). Returns an empty pool when the
+// .sakusen/workflows/ tier) and loadTrackWorkflows (per-track
+// .sakusen/tracks/<slug>/workflows/ dirs). Returns an empty pool when the
 // directory doesn't exist (not an error).
 func loadWorkflowDir(root string) (*workflowFilePool, error) {
 	pool := newWorkflowFilePool()
@@ -481,13 +481,13 @@ func loadWorkflowDir(root string) (*workflowFilePool, error) {
 	return pool, nil
 }
 
-// loadTrackWorkflows scans tracksDir (a ".sortie/tracks" or "~/.sortie/tracks"
+// loadTrackWorkflows scans tracksDir (a ".sakusen/tracks" or "~/.sakusen/tracks"
 // directory) and returns each track's workflows — discovered under
 // <tracksDir>/<slug>/workflows/*.yml — as hidden, namespaced "<slug>:<name>"
 // WorkflowConfigs, in slug-alphabetical then name-alphabetical order. Missing
 // tracksDir is not an error. Non-directory entries in tracksDir are skipped;
 // non-kebab-case slug directory names are a hard error. The per-track
-// workflows dirs follow the exact same file rules as .sortie/workflows/
+// workflows dirs follow the exact same file rules as .sakusen/workflows/
 // (flat, .yml/.yaml only, kebab-case base names, no `name:` field).
 func loadTrackWorkflows(tracksDir string) ([]WorkflowConfig, error) {
 	info, err := os.Stat(tracksDir)
@@ -530,20 +530,20 @@ func loadTrackWorkflows(tracksDir string) ([]WorkflowConfig, error) {
 	return out, nil
 }
 
-// globalTracksDir returns the global track-workflow root (~/.sortie/tracks).
-// Deliberately NOT derived from getGlobalSortieYmlPath(): that helper returns
-// "" when ~/.sortie.yml doesn't exist, and global track workflows must resolve
+// globalTracksDir returns the global track-workflow root (~/.sakusen/tracks).
+// Deliberately NOT derived from getGlobalSakusenYmlPath(): that helper returns
+// "" when ~/.sakusen.yml doesn't exist, and global track workflows must resolve
 // regardless of whether a global config file is present.
 func globalTracksDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".sortie", "tracks"), nil
+	return filepath.Join(home, ".sakusen", "tracks"), nil
 }
 
-// appendTrackWorkflows appends project-tier (<projectBaseDir>/.sortie/tracks)
-// then global-tier (~/.sortie/tracks) track workflows to cfg.Workflows as
+// appendTrackWorkflows appends project-tier (<projectBaseDir>/.sakusen/tracks)
+// then global-tier (~/.sakusen/tracks) track workflows to cfg.Workflows as
 // hidden "<slug>:<name>" entries. Project shadows global on identical
 // namespaced names (skipped silently, matching the workflow-config precedence
 // direction); a project-tier collision with an already-resolved workflow is a
@@ -588,7 +588,7 @@ func appendTrackWorkflows(cfg *Config, projectBaseDir string) error {
 	}
 
 	if projectBaseDir != "" {
-		if err := appendTier(filepath.Join(projectBaseDir, ".sortie", "tracks"), true); err != nil {
+		if err := appendTier(filepath.Join(projectBaseDir, ".sakusen", "tracks"), true); err != nil {
 			return err
 		}
 	}
@@ -629,12 +629,12 @@ func assertNoNameField(data []byte) error {
 // resolved flat list. It merges in file-based workflows from filePool, ensures
 // all workflows have names, and validates them.
 //
-// File-based workflows referenced via string entries in .sortie.yml become
-// active (in listing order). Files in the pool not referenced from .sortie.yml
+// File-based workflows referenced via string entries in .sakusen.yml become
+// active (in listing order). Files in the pool not referenced from .sakusen.yml
 // are appended to the resolved list as Hidden=true (alphabetical order for
 // stability). Inline + file collision is a hard error.
 func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePool) error {
-	// cfg.globalPool is populated by loadCommon after the global ~/.sortie.yml
+	// cfg.globalPool is populated by loadCommon after the global ~/.sakusen.yml
 	// is processed. It is nil while the global config itself is being loaded
 	// (so global resolution never self-references) and during direct
 	// loadProjectConfig() calls from tests that bypass loadCommon.
@@ -684,7 +684,7 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 // wf.Steps into concrete StepConfigs pulled from the same-named base workflow.
 //
 // The base is the workflow with the same name in globalPool — i.e. the global
-// ~/.sortie.yml workflow this project-level workflow overrides. A project can
+// ~/.sakusen.yml workflow this project-level workflow overrides. A project can
 // thus reuse a global workflow's steps by name (reordering, dropping, or
 // interleaving new inline steps) without re-declaring each one:
 //
@@ -747,7 +747,7 @@ func resolveWorkflowSteps(wf *WorkflowConfig, globalPool *globalWorkflowPool) er
 // order; any files in the local pool not referenced are appended as Hidden.
 //
 // String refs are resolved against the local file pool first; if not found,
-// globalPool (workflows defined in the global ~/.sortie.yml, both inline and
+// globalPool (workflows defined in the global ~/.sakusen.yml, both inline and
 // file-based) is consulted as a fallback. This lets project configs reuse
 // globally-defined workflows by name.
 //
@@ -776,7 +776,7 @@ func resolveFlat(entries []WorkflowEntry, filePool *workflowFilePool, globalPool
 				ok = true
 			}
 			if !ok {
-				return nil, fmt.Errorf("workflows: referenced workflow %q has no file at .sortie/workflows/%s.yml and is not defined in the global config", name, name)
+				return nil, fmt.Errorf("workflows: referenced workflow %q has no file at .sakusen/workflows/%s.yml and is not defined in the global config", name, name)
 			}
 			wf.Hidden = false
 			if err := resolveWorkflowSteps(&wf, globalPool); err != nil {
@@ -796,7 +796,7 @@ func resolveFlat(entries []WorkflowEntry, filePool *workflowFilePool, globalPool
 			// own scope. An inline definition that shadows a global workflow
 			// is a legal override.
 			if _, dup := filePool.lookup(wf.Name); dup {
-				return nil, fmt.Errorf("workflows: inline workflow %q collides with file at .sortie/workflows/%s.yml — define it in one place only", wf.Name, wf.Name)
+				return nil, fmt.Errorf("workflows: inline workflow %q collides with file at .sakusen/workflows/%s.yml — define it in one place only", wf.Name, wf.Name)
 			}
 			wf.Source = "inline"
 			wf.Hidden = false
@@ -832,7 +832,7 @@ func (c *Config) computePaths() {
 		c.ProjectDir = cwd
 	}
 
-	// Daemon paths are global (under ~/.config/sortie/)
+	// Daemon paths are global (under ~/.config/sakusen/)
 	globalDir := getGlobalDataDir()
 	c.DatabasePath = filepath.Join(globalDir, "tasks.db")
 	c.SocketPath = filepath.Join(globalDir, "daemon.sock")
@@ -842,13 +842,13 @@ func (c *Config) computePaths() {
 // getGlobalDataDir returns the global data directory for daemon state.
 func getGlobalDataDir() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		return filepath.Join(xdgConfig, "sortie")
+		return filepath.Join(xdgConfig, "sakusen")
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "sortie")
+		return filepath.Join(os.TempDir(), "sakusen")
 	}
-	return filepath.Join(homeDir, ".config", "sortie")
+	return filepath.Join(homeDir, ".config", "sakusen")
 }
 
 // GetGlobalDataDir is the exported version for use by other packages.
@@ -856,7 +856,7 @@ func GetGlobalDataDir() string {
 	return getGlobalDataDir()
 }
 
-// EnsureDirs creates the .sortie directory and any parent dirs needed.
+// EnsureDirs creates the .sakusen directory and any parent dirs needed.
 func (c *Config) EnsureDirs() error {
 	dirs := []string{
 		filepath.Dir(c.SocketPath),
@@ -907,7 +907,7 @@ func (c *Config) ApplyDetectedProject(dir string) {
 
 func getGlobalConfigPath() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		return filepath.Join(xdgConfig, "sortie", "config.yaml")
+		return filepath.Join(xdgConfig, "sakusen", "config.yaml")
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -915,12 +915,12 @@ func getGlobalConfigPath() string {
 		return ""
 	}
 
-	return filepath.Join(homeDir, ".config", "sortie", "config.yaml")
+	return filepath.Join(homeDir, ".config", "sakusen", "config.yaml")
 }
 
-func getGlobalSortieYmlPath() string {
+func getGlobalSakusenYmlPath() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		path := filepath.Join(xdgConfig, "sortie", "config.yml")
+		path := filepath.Join(xdgConfig, "sakusen", "config.yml")
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
@@ -929,7 +929,7 @@ func getGlobalSortieYmlPath() string {
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(homeDir, ".sortie.yml")
+	path := filepath.Join(homeDir, ".sakusen.yml")
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
@@ -942,8 +942,8 @@ func getProjectConfigPath() string {
 		return ""
 	}
 
-	// Look for .sortie.yml at repo root
-	path := filepath.Join(cwd, ".sortie.yml")
+	// Look for .sakusen.yml at repo root
+	path := filepath.Join(cwd, ".sakusen.yml")
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}

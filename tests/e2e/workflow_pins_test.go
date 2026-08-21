@@ -27,7 +27,7 @@ workflows:
   - name: pinned
     input: "Pinned task input"
     worktree: true
-    branch: "sortie/pinned-{{task_id}}"
+    branch: "sakusen/pinned-{{task_id}}"
     target: main
     steps:
       - name: implementing
@@ -42,19 +42,19 @@ workflows:
 //   - the task reaches "completed" and merges to main
 func TestWorkflowPinsSkipPath(t *testing.T) {
 	e := setupE2E(t, "workflow_pins")
-	e.WriteSortieYAML(pinnedWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(pinnedWorkflowYAML(e.StubPath))
 
 	// No input argument — the workflow pins it. (--title is supplied only
 	// to skip the title-refinement round-trip, matching the other e2e scenarios;
 	// the input still comes entirely from the workflow pin.)
-	e.MustSortie("create", "--title", "pinned run", "--workflow", "pinned")
+	e.MustSakusen("create", "--title", "pinned run", "--workflow", "pinned")
 
 	// The pinned input and branch template are applied at creation time.
 	if got := e.TaskField(1, "input"); got != "Pinned task input" {
 		t.Errorf("pinned input: got %q, want %q", got, "Pinned task input")
 	}
-	if got := e.TaskField(1, "branch_name"); got != "sortie/pinned-{{task_id}}" {
-		t.Errorf("pinned branch template: got %q, want %q", got, "sortie/pinned-{{task_id}}")
+	if got := e.TaskField(1, "branch_name"); got != "sakusen/pinned-{{task_id}}" {
+		t.Errorf("pinned branch template: got %q, want %q", got, "sakusen/pinned-{{task_id}}")
 	}
 
 	e.WaitStatus(1, "completed", 10*time.Second)
@@ -121,10 +121,10 @@ workflows:
 // unpinned fields (worktree, branch) to the project defaults / auto-resolution.
 func TestWorkflowPinsPartial(t *testing.T) {
 	e := setupE2E(t, "workflow_pins")
-	e.WriteSortieYAML(partialPinWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(partialPinWorkflowYAML(e.StubPath))
 
 	// No `-d` — only the pinned input should reach the task.
-	e.MustSortie("create", "--title", "partial run", "--workflow", "partial")
+	e.MustSakusen("create", "--title", "partial run", "--workflow", "partial")
 
 	if got := e.TaskField(1, "input"); got != "Partially pinned input" {
 		t.Errorf("pinned input: got %q, want %q", got, "Partially pinned input")
@@ -143,13 +143,13 @@ func TestWorkflowPinsPartial(t *testing.T) {
 
 // TestWorkflowPinsWorktreeFalse exercises the worktree:false pin end-to-end: the
 // task must run in the project root (no git worktree, no branch), and on_complete
-// must be a no-op (a non-worktree task shares the user's working tree, so sortie
+// must be a no-op (a non-worktree task shares the user's working tree, so sakusen
 // leaves it as-is — nothing is committed or merged).
 func TestWorkflowPinsWorktreeFalse(t *testing.T) {
 	e := setupE2E(t, "workflow_pins") // reuses the "implementing" step stub fixtures
-	e.WriteSortieYAML(noWorktreePinnedYAML(e.StubPath))
+	e.WriteSakusenYAML(noWorktreePinnedYAML(e.StubPath))
 
-	e.MustSortie("create", "--title", "in-place run", "--workflow", "inplace")
+	e.MustSakusen("create", "--title", "in-place run", "--workflow", "inplace")
 
 	// Pinned worktree:false → task carries worktree=false and never gets a branch.
 	if got := e.TaskField(1, "worktree"); got != "false" {
@@ -171,7 +171,7 @@ func TestWorkflowPinsWorktreeFalse(t *testing.T) {
 	}
 
 	// on_complete must NOT commit or merge for a non-worktree task — main stays at
-	// the two setup commits ("initial" + "add .sortie.yml").
+	// the two setup commits ("initial" + "add .sakusen.yml").
 	logOut := gitInDir(e.ProjectDir, "log", "main", "--oneline")
 	if n := len(strings.Split(strings.TrimSpace(logOut), "\n")); n != 2 {
 		t.Errorf("main commit count: got %d, want 2 (non-worktree on_complete must be a no-op):\n%s", n, logOut)

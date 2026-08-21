@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 
-	"github.com/Bakaface/sortie/internal/client"
+	"github.com/Bakaface/sakusen/internal/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -16,7 +16,7 @@ type AdvanceTaskArgs struct {
 func registerAdvanceTask(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"advance_task",
-		mcp.WithDescription("Advance a sortie task paused on a tmux step. Marks the tmux step as done: the daemon kills the task's tmux session and either resumes the workflow at the next step or, when the tmux step was the last one, runs full finalization (merge + summarize + cleanup). Fails if the task is not in tmux state. Returns the daemon's outcome message."),
+		mcp.WithDescription("Advance a sakusen task paused on a tmux step. Marks the tmux step as done: the daemon kills the task's tmux session and either resumes the workflow at the next step or, when the tmux step was the last one, runs full finalization (merge + summarize + cleanup). Fails if the task is not in tmux state. Returns the daemon's outcome message."),
 		mcp.WithInputSchema[AdvanceTaskArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args AdvanceTaskArgs) (*mcp.CallToolResult, error) {

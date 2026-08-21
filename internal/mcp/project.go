@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	gitpkg "github.com/Bakaface/sortie/internal/git"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
 )
 
 // resolveProjectPath returns an absolute repo root for the project the caller

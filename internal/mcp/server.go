@@ -1,5 +1,5 @@
 // Package mcp implements a Model Context Protocol server that lets Claude Code
-// (or any MCP client) interact with a running sortie daemon over its Unix
+// (or any MCP client) interact with a running sakusen daemon over its Unix
 // socket. The server speaks MCP over stdio and exposes task lifecycle
 // management: creating, listing, retrying, advancing, and editing tasks,
 // managing dependencies, listing workflows, reading task state, and creating
@@ -10,14 +10,14 @@ package mcp
 import (
 	"fmt"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
 const (
-	serverName    = "sortie"
+	serverName    = "sakusen"
 	serverVersion = "0.1.0"
 )
 
@@ -34,7 +34,7 @@ func Serve(cfg *config.Config) error {
 	// running. The connection is held for the lifetime of the MCP process.
 	c := client.New(cfg)
 	if err := c.Connect(); err != nil {
-		return fmt.Errorf("sortie daemon not reachable on %s: %w", cfg.SocketPath, err)
+		return fmt.Errorf("sakusen daemon not reachable on %s: %w", cfg.SocketPath, err)
 	}
 	defer c.Close()
 

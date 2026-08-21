@@ -1,12 +1,12 @@
 {
-  "name": "sortie",
+  "name": "sakusen",
   "version": "0.1.0",
-  "description": "Skills for configuring and working with Sortie — a daemon that orchestrates Claude Code agents on parallel tasks using git worktrees",
+  "description": "Skills for configuring and working with Sakusen — a daemon that orchestrates Claude Code agents on parallel tasks using git worktrees",
   "author": {
     "name": "Bakaface"
   },
-  "homepage": "https://github.com/Bakaface/sortie",
-  "repository": "https://github.com/Bakaface/sortie",
+  "homepage": "https://github.com/Bakaface/sakusen",
+  "repository": "https://github.com/Bakaface/sakusen",
   "license": "MIT",
-  "keywords": ["sortie", "claude-code", "orchestration", "worktree", "workflows"]
+  "keywords": ["sakusen", "claude-code", "orchestration", "worktree", "workflows"]
 }

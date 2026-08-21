@@ -6,8 +6,8 @@ import (
 	"net"
 	"os"
 
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // handleCleanup removes worktrees, branches, and log directories for one or
@@ -71,7 +71,7 @@ func (s *Server) cleanupTask(t *task.Task) (bool, error) {
 		s.cleanupWorktreeAndBranch(pc, t)
 		cleaned = true
 	} else if t.Worktree && t.Branch != "" && t.CheckoutBranch == "" {
-		// No worktree path but a sortie-created branch remains — remove it.
+		// No worktree path but a sakusen-created branch remains — remove it.
 		pc.engine.Coord().Lock().WithLock(func() {
 			if err := pc.repo.ForceDeleteBranch(t.Branch); err != nil {
 				log.Printf("%sWarning: failed to delete branch for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)

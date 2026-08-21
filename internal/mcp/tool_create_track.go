@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -15,7 +15,7 @@ type CreateTrackArgs struct {
 	Name        string `json:"name" jsonschema:"Human-readable track name. Slugified (lowercase, kebab-case) to form the canonical track handle."`
 	ParentTrack string `json:"parent_track,omitempty" jsonschema:"Parent track (slug or numeric ID). The parent's context is automatically concatenated before this track's in {{track.context}}. Parent must be same-or-broader scope: a project track may have a global parent, but not vice versa."`
 	Scope       string `json:"scope,omitempty" jsonschema:"'project' (default) scopes the track to project_path's project; 'global' makes it attachable from any project."`
-	Workflow    string `json:"workflow,omitempty" jsonschema:"Workflow to run for tasks attached to this track when they don't specify one explicitly. May reference a namespaced track workflow like '<slug>:<name>' from .sortie/tracks/<slug>/workflows/."`
+	Workflow    string `json:"workflow,omitempty" jsonschema:"Workflow to run for tasks attached to this track when they don't specify one explicitly. May reference a namespaced track workflow like '<slug>:<name>' from .sakusen/tracks/<slug>/workflows/."`
 	Description string `json:"description,omitempty" jsonschema:"A stable one-liner stating what this track is for. Routing agents read it from list_tracks to pick a track for a new task, so state the scope, not the current state of work. Distinct from context: it is never injected into agent prompts and does not accumulate."`
 	Context     string `json:"context,omitempty" jsonschema:"Initial context seed. WARNING: track context flows verbatim into the prompts of every future task attached to this track (or its children) — treat it as a persistent cross-task prompt surface."`
 	ProjectPath string `json:"project_path,omitempty" jsonschema:"Project repo root. Required for scope 'project'; defaults to the git toplevel of the MCP process's cwd."`

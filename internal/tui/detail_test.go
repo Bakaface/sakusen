@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 )
 
 func setupDetailView(lines []string) detailView {

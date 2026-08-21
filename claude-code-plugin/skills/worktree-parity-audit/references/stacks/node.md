@@ -23,7 +23,7 @@ Always prefer the frozen variant in `worktree-setup-commands` — it fails on lo
 
 ## Gotchas
 
-- **Monorepo workspaces** (`pnpm-workspace.yaml`, `package.json#workspaces`) need install at the repo root, not per-package. Sortie's worktrees are at repo root, so this is fine.
+- **Monorepo workspaces** (`pnpm-workspace.yaml`, `package.json#workspaces`) need install at the repo root, not per-package. Sakusen's worktrees are at repo root, so this is fine.
 - **Native modules** (`sharp`, `node-canvas`, `better-sqlite3`) — fresh install per worktree can take 30s+. If same-FS and the project doesn't mutate `node_modules` at runtime, share via `worktree-sync-paths.link: [node_modules]` for instant setup.
 - **`.npmrc` / `.yarnrc.yml`** — usually committed; if gitignored (auth tokens), share via `link:`.
 - **Prisma**: run `pnpm prisma generate` after install if `prisma/schema.prisma` exists; run `pnpm prisma migrate deploy` for DB.

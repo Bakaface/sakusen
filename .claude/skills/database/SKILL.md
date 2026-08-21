@@ -1,7 +1,7 @@
 ---
 name: database
 description: >
-  Sortie's SQLite persistence layer: schema, migrations, task/project queries, and
+  Sakusen's SQLite persistence layer: schema, migrations, task/project queries, and
   dependency management. Use when editing files in internal/db/, working on schema
   migrations, task queries, project persistence, or dependency blocking logic.
 ---

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -3160,7 +3160,7 @@ func TestListView_TitleAlwaysVisible(t *testing.T) {
 	}
 
 	lines := strings.Split(output, "\n")
-	if len(lines) == 0 || !strings.Contains(lines[0], "Sortie") {
+	if len(lines) == 0 || !strings.Contains(lines[0], AppTitle) {
 		t.Error("expected title to be on the first line")
 	}
 
@@ -3170,7 +3170,7 @@ func TestListView_TitleAlwaysVisible(t *testing.T) {
 	}
 	output = l.View()
 	lines = strings.Split(output, "\n")
-	if len(lines) == 0 || !strings.Contains(lines[0], "Sortie") {
+	if len(lines) == 0 || !strings.Contains(lines[0], AppTitle) {
 		t.Error("expected title to remain on first line after scrolling")
 	}
 }
@@ -3602,7 +3602,7 @@ func TestExecRunTask_FullyPinned(t *testing.T) {
 					Name:     "pinned-wf",
 					Input:    "Do the thing",
 					Worktree: &worktreeTrue,
-					Branch:   "sortie/{{task_id}}-auto",
+					Branch:   "sakusen/{{task_id}}-auto",
 					Target:   "main",
 				},
 			},
@@ -3631,7 +3631,7 @@ func fullyPinnedConfig() *config.Config {
 				Name:     "pinned-wf",
 				Input:    "Do the thing",
 				Worktree: &worktreeTrue,
-				Branch:   "sortie/{{task_id}}-auto",
+				Branch:   "sakusen/{{task_id}}-auto",
 				Target:   "main",
 			},
 		},
@@ -3881,7 +3881,7 @@ func TestLaunchWorkflow_FullyPinned(t *testing.T) {
 					Name:     "auto-wf",
 					Input:    "Automated task",
 					Worktree: &worktreeTrue,
-					Branch:   "sortie/{{task_id}}-auto",
+					Branch:   "sakusen/{{task_id}}-auto",
 					Target:   "main",
 				},
 			},

@@ -7,8 +7,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 func (s *Server) handleListAgents(conn net.Conn) {

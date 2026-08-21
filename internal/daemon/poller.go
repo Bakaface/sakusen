@@ -7,12 +7,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/agent"
-	"github.com/Bakaface/sortie/internal/config"
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/agent"
+	"github.com/Bakaface/sakusen/internal/config"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 func (s *Server) taskPollerLoop() {

@@ -1,7 +1,7 @@
 # internal/mcp — MCP Server
 
 Model Context Protocol server that lets Claude Code (or any MCP client) talk to a running
-sortie daemon over its Unix socket. Exposes task lifecycle management, but **no
+sakusen daemon over its Unix socket. Exposes task lifecycle management, but **no
 irrecoverably destructive operations**.
 
 ## Critical Invariants

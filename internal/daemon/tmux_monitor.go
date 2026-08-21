@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 func (s *Server) tmuxMonitorLoop() {
@@ -109,10 +109,10 @@ func (s *Server) checkTmuxActivity(monitor *tmux.Monitor) {
 }
 
 // maybeAutoAdvance inspects a tmux-state task and triggers auto-advance only
-// when a step-done sentinel file has appeared in <worktree>/.sortie/step-done/
+// when a step-done sentinel file has appeared in <worktree>/.sakusen/step-done/
 // for the just-finished step.
 //
-// The sentinel-file convention is the SOLE auto-advance signal. Sortie does not
+// The sentinel-file convention is the SOLE auto-advance signal. Sakusen does not
 // infer completion from terminal state: an idle pane is indistinguishable from
 // an agent that never started, is waiting for input, or is stalled mid-turn, so
 // using idleness as a trigger advances the workflow with empty context (see

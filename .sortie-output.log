@@ -1,1 +1,0 @@
-Permission allow rule (/Users/aface/.claude/settings.json): Write(.*) is not matched by file permission checks — only Edit(path) rules are. Use Edit(.*) instead (Edit rules cover all file-editing tools).

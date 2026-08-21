@@ -5,22 +5,22 @@ description: >
   worktree from reaching parity with the main checkout — everything an agent
   needs to run tests, linters, typecheckers, codegen, and formatters inside a
   worktree. Produces a findings report mapping each gap to a concrete
-  `.sortie.yml` knob (`worktree-sync-paths`, `worktree-setup-commands`).
-  Use whenever (1) configuring Sortie on a project with worktrees, (2) tests
+  `.sakusen.yml` knob (`worktree-sync-paths`, `worktree-setup-commands`).
+  Use whenever (1) configuring Sakusen on a project with worktrees, (2) tests
   pass in root but fail in a worktree, (3) the user asks what the init
   pipeline should do, what belongs in worktree-sync-paths, or why agents
   fail to lint/test, (4) the user mentions worktree parity, back-pressure,
   fresh-checkout reproducibility, or missing deps in a worktree — even if
-  they don't say "audit". Auto-trigger when configuring Sortie on a project
+  they don't say "audit". Auto-trigger when configuring Sakusen on a project
   whose `.gitignore` lists dep dirs (`node_modules`, `vendor`, `venv`,
   `target`), env files, or whose CI does more than a single command.
-  Do NOT use for writing `.sortie.yml` itself — hand findings to
-  `sortie-configurer`.
+  Do NOT use for writing `.sakusen.yml` itself — hand findings to
+  `sakusen-configurer`.
 ---
 
 # Worktree Parity Audit
 
-Confirm that running the project's back-pressure suite (tests, linters, typecheckers, codegen, formatters) inside a fresh Sortie worktree produces the same result as in the root checkout. Identify gaps, map them to Sortie config knobs, and produce a findings report.
+Confirm that running the project's back-pressure suite (tests, linters, typecheckers, codegen, formatters) inside a fresh Sakusen worktree produces the same result as in the root checkout. Identify gaps, map them to Sakusen config knobs, and produce a findings report.
 
 ## Why this matters
 
@@ -88,12 +88,12 @@ Read every `.gitignore` (root + nested). For each rule, place it in one of these
 #### Recreate vs. share — trade-offs
 
 - **Recreate (`worktree-setup-commands`)**: clean isolation, deterministic. Slower per-worktree but right default when install is fast (`go mod download`, `pnpm install --frozen-lockfile` on a warm cache, `uv sync`).
-- **Share via `link:`**: instant. **Sortie uses hard-links, not symlinks** (verified in `internal/workflow/sync.go`). Implications:
-  - Hard-links cannot cross filesystems. If `.sortie/worktrees/` lives on a different volume from the main checkout, `link:` fails at sync time — fall back to `copy:` or recreate.
-  - Hard-links cannot target directories. For a dir, Sortie recreates the tree and hard-links individual files. Sub-directories created later in the source won't auto-appear in the worktree.
+- **Share via `link:`**: instant. **Sakusen uses hard-links, not symlinks** (verified in `internal/workflow/sync.go`). Implications:
+  - Hard-links cannot cross filesystems. If `.sakusen/worktrees/` lives on a different volume from the main checkout, `link:` fails at sync time — fall back to `copy:` or recreate.
+  - Hard-links cannot target directories. For a dir, Sakusen recreates the tree and hard-links individual files. Sub-directories created later in the source won't auto-appear in the worktree.
   - Edits to file contents propagate (shared inode). Right for env files and read-only deps; wrong for anything stateful per task.
   - Symlinks at the source are copied as symlinks, not hard-linked (macOS `link(2)` returns EPERM on symlink sources).
-- **Share via `copy:`**: independent per-worktree, no inode sharing. Use when (a) source and `.sortie/worktrees/` are on different filesystems, (b) the worktree needs a writable, divergent copy (e.g., per-task `.env` mutation), or (c) the source tree has symlinks `link:` can't handle. Costs disk and copy time.
+- **Share via `copy:`**: independent per-worktree, no inode sharing. Use when (a) source and `.sakusen/worktrees/` are on different filesystems, (b) the worktree needs a writable, divergent copy (e.g., per-task `.env` mutation), or (c) the source tree has symlinks `link:` can't handle. Costs disk and copy time.
 
 ### Step 4: Audit env var usage
 
@@ -129,13 +129,13 @@ Each becomes a candidate `worktree-setup-commands` entry. **Order matters** — 
 
 Quick sanity checks:
 
-- `rg '\.\./\.\.' -tjs -tts -tgo -trust -tpy -truby` — `../..` patterns. Worktrees live at `.sortie/worktrees/<task>/`, so paths internal to the worktree behave identically; paths escaping the working tree to a sibling project will silently misbehave.
+- `rg '\.\./\.\.' -tjs -tts -tgo -trust -tpy -truby` — `../..` patterns. Worktrees live at `.sakusen/worktrees/<task>/`, so paths internal to the worktree behave identically; paths escaping the working tree to a sibling project will silently misbehave.
 - Tool-version managers: `.nvmrc`, `.tool-versions`, `.python-version`, `rust-toolchain.toml` — usually fine (they configure tools globally), but flag if the project uses per-project tool installs (e.g., `mise` shims tied to the working tree).
 - Git ops: `git tag`, `git log`, `git rev-parse` mostly work in a worktree because `.git` is shared, but flag code that assumes the working tree is a top-level clone (rare).
 
 ### Step 7: Verify parity (optional but recommended)
 
-The only true confirmation is running the golden command in a fresh worktree. Create the worktree **on the same filesystem as the real `.sortie/worktrees/` location** — otherwise the test will silently succeed under conditions Sortie can't reproduce (hard-link cross-FS failure).
+The only true confirmation is running the golden command in a fresh worktree. Create the worktree **on the same filesystem as the real `.sakusen/worktrees/` location** — otherwise the test will silently succeed under conditions Sakusen can't reproduce (hard-link cross-FS failure).
 
 ```bash
 # From repo root. Adjacent path on the same volume as the repo.
@@ -148,7 +148,7 @@ cd ../parity-test
 
 Avoid `/tmp/parity-test`: on Linux `/tmp` is often tmpfs, and on macOS the boundary between `/private/tmp` and the user's volume varies — neither reliably matches the real worktree volume.
 
-If it passes here, it will pass in Sortie's worktrees. If it fails, the audit missed something — iterate.
+If it passes here, it will pass in Sakusen's worktrees. If it fails, the audit missed something — iterate.
 
 Clean up: `git worktree remove ../parity-test`.
 
@@ -185,7 +185,7 @@ Source: `<file>:<line>`
 ### Setup commands beyond install
 - `<command>` — source: `<file>:<line>`.
 
-## Recommended `.sortie.yml` snippet
+## Recommended `.sakusen.yml` snippet
 
 \```yaml
 worktree-sync-paths:
@@ -207,10 +207,10 @@ worktree-setup-commands:
 - [ ] Ran golden command in a `git worktree add` scratch worktree with the recommended setup. Exit 0.
 
 ## Next step
-Hand this snippet to `sortie-configurer` to integrate into `.sortie.yml`, or paste it manually.
+Hand this snippet to `sakusen-configurer` to integrate into `.sakusen.yml`, or paste it manually.
 ```
 
-## Mapping gaps → Sortie knobs
+## Mapping gaps → Sakusen knobs
 
 | Gap | Knob |
 |---|---|
@@ -225,4 +225,4 @@ Hand this snippet to `sortie-configurer` to integrate into `.sortie.yml`, or pas
 
 ## Hand-off
 
-This skill stops at findings + snippet. Writing the snippet into `.sortie.yml` (with correct kebab/snake_case keys, validation, etc.) is `sortie-configurer`'s job. If the user wants the config edit applied immediately, state so explicitly and let `sortie-configurer` take over.
+This skill stops at findings + snippet. Writing the snippet into `.sakusen.yml` (with correct kebab/snake_case keys, validation, etc.) is `sakusen-configurer`'s job. If the user wants the config edit applied immediately, state so explicitly and let `sakusen-configurer` take over.

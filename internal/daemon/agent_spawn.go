@@ -6,15 +6,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/runner"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/runner"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // interactiveAgentSlug is the conventional slug for the interactive fallback
-// agent (`sortie init` scaffolds a tmux-mode record under this name).
+// agent (`sakusen init` scaffolds a tmux-mode record under this name).
 const interactiveAgentSlug = "claude-tmux"
 
 // interactiveAgent resolves the agent record used for ad-hoc interactive tmux
@@ -31,7 +31,7 @@ func interactiveAgent(cfg *config.Config) (string, config.AgentConfig, error) {
 		return interactiveAgentSlug, a, nil
 	}
 	return "", config.AgentConfig{}, fmt.Errorf(
-		"no interactive (tmux-mode) agent configured: define a tmux-mode agent under `agents:` (conventionally %q) or point `default_agent:` at one; run `sortie init` in a fresh project to scaffold defaults", interactiveAgentSlug)
+		"no interactive (tmux-mode) agent configured: define a tmux-mode agent under `agents:` (conventionally %q) or point `default_agent:` at one; run `sakusen init` in a fresh project to scaffold defaults", interactiveAgentSlug)
 }
 
 // interactiveSpawnOpts parameterizes spawnInteractiveSession.
@@ -40,7 +40,7 @@ type interactiveSpawnOpts struct {
 	// "tmux-direct", or a real step name on restore). It scopes the prompt
 	// file, wrapper script, sentinel prefix, and chat records.
 	label string
-	// prompt is the initial prompt text written to SORTIE_PROMPT_FILE. May be
+	// prompt is the initial prompt text written to SAKUSEN_PROMPT_FILE. May be
 	// empty — the agent command decides what an empty prompt means.
 	prompt string
 	// resumeSessionID, when non-empty AND the agent has a resume_command,
@@ -57,7 +57,7 @@ type interactiveSpawnOpts struct {
 }
 
 // spawnInteractiveSession creates a detached tmux session running the given
-// agent record for a task, with sortie's env contract exported. It is the
+// agent record for a task, with sakusen's env contract exported. It is the
 // shared implementation behind the terminal-task continue fallback,
 // tmux_direct task setup, and daemon-restart session restore, keeping the
 // wrapper-script/session/setup-command sequence in one place for all three.
@@ -80,9 +80,9 @@ func (s *Server) spawnInteractiveSession(pc *projectContext, t *task.Task, opts 
 		session.Kill()
 	}
 
-	sortieDir := filepath.Join(t.WorktreePath, ".sortie")
-	if err := os.MkdirAll(sortieDir, 0755); err != nil {
-		return false, fmt.Errorf("failed to create sortie dir: %w", err)
+	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")
+	if err := os.MkdirAll(sakusenDir, 0755); err != nil {
+		return false, fmt.Errorf("failed to create sakusen dir: %w", err)
 	}
 
 	// Ad-hoc session artifacts use a "session-"/"run-" prefix distinct from the
@@ -90,8 +90,8 @@ func (s *Server) spawnInteractiveSession(pc *projectContext, t *task.Task, opts 
 	// prompt file is the SOURCE of opts.prompt (see restoreTmuxSession), so
 	// this path must never clobber it.
 	label := workflow.SentinelPrefix(opts.label)
-	promptFile := filepath.Join(sortieDir, fmt.Sprintf("session-prompt-%s.txt", label))
-	scriptFile := filepath.Join(sortieDir, fmt.Sprintf("run-%s.sh", label))
+	promptFile := filepath.Join(sakusenDir, fmt.Sprintf("session-prompt-%s.txt", label))
+	scriptFile := filepath.Join(sakusenDir, fmt.Sprintf("run-%s.sh", label))
 	if err := os.WriteFile(promptFile, []byte(opts.prompt), 0644); err != nil {
 		return false, fmt.Errorf("failed to write prompt file: %w", err)
 	}
@@ -112,24 +112,24 @@ func (s *Server) spawnInteractiveSession(pc *projectContext, t *task.Task, opts 
 		repoRoot = pc.repoRoot
 	}
 	env := map[string]string{
-		"SORTIE_TASK_ID":      taskID,
-		"SORTIE_STEP":         opts.label,
-		"SORTIE_WORKTREE":     t.WorktreePath,
-		"SORTIE_PROJECT_PATH": repoRoot,
-		"SORTIE_PURPOSE":      "step",
-		"SORTIE_AGENT":        opts.slug,
-		"SORTIE_PROMPT_FILE":  promptFile,
-		"SORTIE_DONE_DIR":     workflow.StepDoneDir(t.WorktreePath),
-		"SORTIE_DONE_PREFIX":  workflow.SentinelPrefix(opts.label),
+		"SAKUSEN_TASK_ID":      taskID,
+		"SAKUSEN_STEP":         opts.label,
+		"SAKUSEN_WORKTREE":     t.WorktreePath,
+		"SAKUSEN_PROJECT_PATH": repoRoot,
+		"SAKUSEN_PURPOSE":      "step",
+		"SAKUSEN_AGENT":        opts.slug,
+		"SAKUSEN_PROMPT_FILE":  promptFile,
+		"SAKUSEN_DONE_DIR":     workflow.StepDoneDir(t.WorktreePath),
+		"SAKUSEN_DONE_PREFIX":  workflow.SentinelPrefix(opts.label),
 	}
 	if t.TrackID != nil {
-		env["SORTIE_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
+		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 
 	command := opts.agent.Command
 	if opts.resumeSessionID != "" && opts.agent.ResumeCommand != "" {
 		command = opts.agent.ResumeCommand
-		env["SORTIE_SESSION_ID"] = opts.resumeSessionID
+		env["SAKUSEN_SESSION_ID"] = opts.resumeSessionID
 		resumed = true
 	}
 

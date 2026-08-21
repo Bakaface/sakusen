@@ -3,8 +3,8 @@ package workflow
 import (
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func threeStepWorkflow() *config.WorkflowConfig {

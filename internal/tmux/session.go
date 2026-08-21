@@ -74,7 +74,7 @@ func (s *Session) Create(command string, args ...string) error {
 type SetupVars struct {
 	// AgentCommand is the raw agent shell command from the agent record.
 	// NOTE: running it outside the wrapper script loses the exported
-	// SORTIE_* env contract — prefer {{run_agent}} unless you re-export env
+	// SAKUSEN_* env contract — prefer {{run_agent}} unless you re-export env
 	// yourself.
 	AgentCommand string
 	// RunAgent is the path to the wrapper script that runs the agent (env

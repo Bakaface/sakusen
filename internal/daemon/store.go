@@ -1,8 +1,8 @@
 package daemon
 
 import (
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // taskStore is the slice of *db.DB that Server depends on. It exists for the

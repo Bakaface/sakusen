@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 
-	"github.com/Bakaface/sortie/internal/client"
+	"github.com/Bakaface/sakusen/internal/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

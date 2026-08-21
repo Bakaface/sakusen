@@ -7,13 +7,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AnimationConfig controls the sortie (airplane) animation on task submission.
+// AnimationConfig controls the sakusen (airplane) animation on task submission.
 type AnimationConfig struct {
 	Enabled  *bool `yaml:"enabled,omitempty"`
 	Duration *int  `yaml:"duration,omitempty"` // milliseconds
 }
 
-// OptionsConfig holds TUI display options configurable via .sortie.yml
+// OptionsConfig holds TUI display options configurable via .sakusen.yml
 type OptionsConfig struct {
 	Number     *bool            `yaml:"number,omitempty"`
 	Branch     *bool            `yaml:"branch,omitempty"`
@@ -68,7 +68,7 @@ func (w WorktreeSyncPathsConfig) AllPaths() []string {
 	return paths
 }
 
-// ProjectConfig is loaded from .sortie.yml (both global ~/.sortie.yml and project-local)
+// ProjectConfig is loaded from .sakusen.yml (both global ~/.sakusen.yml and project-local)
 type ProjectConfig struct {
 	MaxWorkers      int                 `yaml:"max_workers"`
 	DefaultPriority string              `yaml:"default_priority"`
@@ -103,8 +103,8 @@ type ProjectConfig struct {
 }
 
 // WorkflowEntry is a single item in the flat workflows: list. It is either
-// a string referencing a workflow (a file under .sortie/workflows/ or a
-// workflow defined in the global ~/.sortie.yml) or an inline WorkflowConfig
+// a string referencing a workflow (a file under .sakusen/workflows/ or a
+// workflow defined in the global ~/.sakusen.yml) or an inline WorkflowConfig
 // definition. Exactly one of Ref / Inline is set.
 type WorkflowEntry struct {
 	// Ref, when non-empty, is the name of a referenced workflow, resolved
@@ -290,20 +290,20 @@ type WorkflowConfig struct {
 	WorktreeSetupCommands []string                `yaml:"worktree-setup-commands,omitempty"`
 	TmuxSetupCommand      string                  `yaml:"tmux-setup-command,omitempty"`
 
-	// Hidden marks workflows loaded from .sortie/workflows/ that are NOT
-	// referenced from .sortie.yml. Hidden workflows remain engine-reachable
+	// Hidden marks workflows loaded from .sakusen/workflows/ that are NOT
+	// referenced from .sakusen.yml. Hidden workflows remain engine-reachable
 	// (CLI flags, pickers, DB-persisted refs) but do not appear in TUI menus.
 	// Not serialized to YAML — populated by the loader.
 	Hidden bool `yaml:"-"`
 
 	// Source records where this workflow definition originated:
-	//   "inline"           — defined inline in .sortie.yml
-	//   "<path>"           — file path under .sortie/workflows/
+	//   "inline"           — defined inline in .sakusen.yml
+	//   "<path>"           — file path under .sakusen/workflows/
 	// Not serialized to YAML — populated by the loader.
 	Source string `yaml:"-"`
 
 	// FromGlobal marks a workflow whose definition was adopted from the global
-	// scope (~/.sortie.yml inline, ~/.sortie/workflows/, or ~/.sortie/tracks/)
+	// scope (~/.sakusen.yml inline, ~/.sakusen/workflows/, or ~/.sakusen/tracks/)
 	// rather than defined by the project. Global workflows carry their settings
 	// along, but locality wins: an explicit project-level on_complete overrides
 	// a FromGlobal workflow's OnComplete (see Config.EffectiveOnComplete).
@@ -602,7 +602,7 @@ func (s *StepConfig) EffectiveSummarizationStrategy() string {
 	return s.SummarizationStrategy
 }
 
-// GlobalConfig from ~/.config/sortie/config.yaml
+// GlobalConfig from ~/.config/sakusen/config.yaml
 type GlobalConfig struct {
 	MaxWorkers               int                    `yaml:"max_workers"`
 	PollInterval             string                 `yaml:"poll_interval,omitempty"`
@@ -631,9 +631,9 @@ type CommandsConfig struct {
 }
 
 // Config is the merged runtime config used by all components.
-// It combines global config, project config (.sortie.yml), and computed paths.
+// It combines global config, project config (.sakusen.yml), and computed paths.
 type Config struct {
-	// From .sortie.yml (project config)
+	// From .sakusen.yml (project config)
 	MaxWorkers      int
 	DefaultPriority string
 	Verification    VerificationConfig
@@ -645,7 +645,7 @@ type Config struct {
 	OnComplete string
 
 	// OnCompleteFromProject records that OnComplete was explicitly set by the
-	// project-tier .sortie.yml (as opposed to inherited from ~/.sortie.yml or
+	// project-tier .sakusen.yml (as opposed to inherited from ~/.sakusen.yml or
 	// the built-in default). When true, the project's OnComplete beats a
 	// FromGlobal workflow's OnComplete in EffectiveOnComplete.
 	// Populated by the loader.
@@ -686,10 +686,10 @@ type Config struct {
 	Notifications            NotificationsConfig
 	TmuxNestedAttachBehavior string // "switch" (default) or "nest"
 
-	// TUI display options (from .sortie.yml options section)
+	// TUI display options (from .sakusen.yml options section)
 	Options OptionsConfig
 
-	// Whether a project config (.sortie.yml) was found
+	// Whether a project config (.sakusen.yml) was found
 	ProjectConfigFound bool
 
 	// Computed paths (project-local)
@@ -712,11 +712,11 @@ type Config struct {
 		AutoDetect bool
 	}
 
-	// globalPool holds workflows resolved from the global ~/.sortie.yml (both
-	// inline and file-based under ~/.sortie/workflows/). Project-level config
-	// string refs that don't match a local .sortie/workflows/<name>.yml
+	// globalPool holds workflows resolved from the global ~/.sakusen.yml (both
+	// inline and file-based under ~/.sakusen/workflows/). Project-level config
+	// string refs that don't match a local .sakusen/workflows/<name>.yml
 	// fall back to this pool, letting projects reuse globally-defined
 	// workflows by name. Populated during loadCommon, after the global
-	// .sortie.yml is processed. Not serialized.
+	// .sakusen.yml is processed. Not serialized.
 	globalPool *globalWorkflowPool
 }

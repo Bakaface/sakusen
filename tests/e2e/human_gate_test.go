@@ -31,19 +31,19 @@ workflows:
 
 // TestHumanApprovalPausesAndResumes verifies that a workflow with a human step:
 // 1. Pauses at the human step (status = "awaiting-approval")
-// 2. Resumes after sortie continue <id>
+// 2. Resumes after sakusen continue <id>
 // 3. Completes successfully
 func TestHumanApprovalPausesAndResumes(t *testing.T) {
 	e := setupE2E(t, "human_gate")
-	e.WriteSortieYAML(humanApprovalWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(humanApprovalWorkflowYAML(e.StubPath))
 
-	e.MustSortie("create", "--title", "human gate task", "human gate task")
+	e.MustSakusen("create", "--title", "human gate task", "human gate task")
 
 	// Should pause at the human step
 	e.WaitStatus(1, "awaiting-approval", 10*time.Second)
 
 	// Resume
-	e.MustSortie("continue", "1")
+	e.MustSakusen("continue", "1")
 
 	// Should complete
 	e.WaitStatus(1, "completed", 10*time.Second)

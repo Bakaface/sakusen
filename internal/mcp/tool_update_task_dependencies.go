@@ -3,8 +3,8 @@ package mcp
 import (
 	"context"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -19,7 +19,7 @@ type UpdateTaskDependenciesArgs struct {
 func registerUpdateTaskDependencies(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"update_task_dependencies",
-		mcp.WithDescription("Add and/or remove blocked_by dependencies on an existing sortie task. Removals are applied before additions, so an ID present in both lists ends up as a blocker. Adding an already-present blocker is a no-op; cycles are rejected by the daemon. Note: removing blockers can make the task immediately eligible to run. Returns the updated TaskInfo as JSON."),
+		mcp.WithDescription("Add and/or remove blocked_by dependencies on an existing sakusen task. Removals are applied before additions, so an ID present in both lists ends up as a blocker. Adding an already-present blocker is a no-op; cycles are rejected by the daemon. Note: removing blockers can make the task immediately eligible to run. Returns the updated TaskInfo as JSON."),
 		mcp.WithInputSchema[UpdateTaskDependenciesArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args UpdateTaskDependenciesArgs) (*mcp.CallToolResult, error) {

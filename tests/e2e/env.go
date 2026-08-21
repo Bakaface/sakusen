@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// sortieBinPath is set by TestMain once after building the binary.
-var sortieBinPath string
+// sakusenBinPath is set by TestMain once after building the binary.
+var sakusenBinPath string
 
 // repoRoot is computed once by TestMain.
 var repoRoot string
@@ -32,15 +32,15 @@ type Env struct {
 	daemonLog    string // path to daemon stdout+stderr log
 }
 
-// setupE2E initializes a full Sortie environment for the given scenario name.
+// setupE2E initializes a full Sakusen environment for the given scenario name.
 // It starts the daemon, initializes a git repo, and registers cleanup.
-// Tests must call e.WriteSortieYAML before creating any tasks.
+// Tests must call e.WriteSakusenYAML before creating any tasks.
 func setupE2E(t *testing.T, scenario string) *Env {
 	t.Helper()
 
 	// macOS unix sockets are limited to 104 bytes (sockaddr_un.sun_path).
 	// t.TempDir paths include the full test name and can exceed the limit, e.g.
-	// /var/folders/.../TestStepFailureAndRetry.../001/sortie/daemon.sock. Use a
+	// /var/folders/.../TestStepFailureAndRetry.../001/sakusen/daemon.sock. Use a
 	// short prefix under /tmp instead and register manual cleanup.
 	xdgDir, err := os.MkdirTemp("/tmp", "s")
 	if err != nil {
@@ -66,18 +66,18 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
 	t.Setenv("HOME", xdgDir)
 	t.Setenv("E2E_RESPONSES_DIR", responsesDir)
-	t.Setenv("SORTIE_E2E_LOG", stubLog)
+	t.Setenv("SAKUSEN_E2E_LOG", stubLog)
 	promptDir := filepath.Join(xdgDir, "prompts")
 	if err := os.MkdirAll(promptDir, 0755); err != nil {
 		t.Fatalf("mkdir prompt capture dir: %v", err)
 	}
 	t.Setenv("E2E_PROMPT_CAPTURE_DIR", promptDir)
-	// SORTIE_E2E_BIN lets stub hooks (e.g. awaiting_children's spawn hook)
-	// shell out to the same sortie binary the daemon was launched from.
+	// SAKUSEN_E2E_BIN lets stub hooks (e.g. awaiting_children's spawn hook)
+	// shell out to the same sakusen binary the daemon was launched from.
 	// The hooks need to call back into the daemon via CLI commands like
-	// `sortie create` / `sortie wait-for-tasks`, but the binary lives in
+	// `sakusen create` / `sakusen wait-for-tasks`, but the binary lives in
 	// a one-off tmp dir built by main_test.go and is not on PATH.
-	t.Setenv("SORTIE_E2E_BIN", sortieBinPath)
+	t.Setenv("SAKUSEN_E2E_BIN", sakusenBinPath)
 
 	e := &Env{
 		t:            t,
@@ -91,7 +91,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	}
 
 	// Initialize git repo with an initial commit on main.
-	// The .gitignore excludes .sortie/ (daemon-managed worktree state) so that
+	// The .gitignore excludes .sakusen/ (daemon-managed worktree state) so that
 	// git status on the project root remains clean — otherwise the workflow's
 	// merge step refuses to run with "target branch has pending changes".
 	e.mustRun(projectDir, "git", "init", "-b", "main")
@@ -100,7 +100,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	if err := os.WriteFile(filepath.Join(projectDir, ".gitkeep"), nil, 0644); err != nil {
 		t.Fatalf("write .gitkeep: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".gitignore"), []byte(".sortie/\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".gitignore"), []byte(".sakusen/\n"), 0644); err != nil {
 		t.Fatalf("write .gitignore: %v", err)
 	}
 	e.mustRun(projectDir, "git", "add", ".gitkeep", ".gitignore")
@@ -117,7 +117,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	e.startDaemon()
 	t.Cleanup(func() {
 		// Attempt graceful stop.
-		stopCmd := exec.Command(sortieBinPath, "daemon", "stop")
+		stopCmd := exec.Command(sakusenBinPath, "daemon", "stop")
 		stopCmd.Env = os.Environ()
 		stopCmd.Dir = projectDir
 		_ = stopCmd.Run()
@@ -142,7 +142,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 	})
 
 	// Wait for daemon socket.
-	socketPath := filepath.Join(xdgDir, "sortie", "daemon.sock")
+	socketPath := filepath.Join(xdgDir, "sakusen", "daemon.sock")
 	e.WaitDaemonReady(socketPath, 5*time.Second)
 
 	return e
@@ -150,7 +150,7 @@ func setupE2E(t *testing.T, scenario string) *Env {
 
 func (e *Env) startDaemon() {
 	e.t.Helper()
-	cmd := exec.Command(sortieBinPath, "daemon", "start")
+	cmd := exec.Command(sakusenBinPath, "daemon", "start")
 	cmd.Env = os.Environ()
 	cmd.Dir = e.ProjectDir
 
@@ -171,13 +171,13 @@ func (e *Env) startDaemon() {
 //
 // Needed when a test must change config that is read once at server
 // construction (e.g. max_workers → agent.NewManager): setupE2E starts the
-// daemon BEFORE the test calls WriteSortieYAML, so the initial daemon runs on
-// defaults. Restarting after WriteSortieYAML makes the committed .sortie.yml
+// daemon BEFORE the test calls WriteSakusenYAML, so the initial daemon runs on
+// defaults. Restarting after WriteSakusenYAML makes the committed .sakusen.yml
 // take effect.
 func (e *Env) RestartDaemon() {
 	e.t.Helper()
 
-	stopCmd := exec.Command(sortieBinPath, "daemon", "stop")
+	stopCmd := exec.Command(sakusenBinPath, "daemon", "stop")
 	stopCmd.Env = os.Environ()
 	stopCmd.Dir = e.ProjectDir
 	_ = stopCmd.Run()
@@ -199,19 +199,19 @@ func (e *Env) RestartDaemon() {
 	}
 
 	e.startDaemon()
-	e.WaitDaemonReady(filepath.Join(e.XDGDir, "sortie", "daemon.sock"), 5*time.Second)
+	e.WaitDaemonReady(filepath.Join(e.XDGDir, "sakusen", "daemon.sock"), 5*time.Second)
 }
 
-// WriteSortieYAML writes the given YAML string as .sortie.yml in the project
+// WriteSakusenYAML writes the given YAML string as .sakusen.yml in the project
 // directory and commits it so the working tree remains clean before tasks run.
-func (e *Env) WriteSortieYAML(yaml string) {
+func (e *Env) WriteSakusenYAML(yaml string) {
 	e.t.Helper()
-	path := filepath.Join(e.ProjectDir, ".sortie.yml")
+	path := filepath.Join(e.ProjectDir, ".sakusen.yml")
 	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
-		e.t.Fatalf("write .sortie.yml: %v", err)
+		e.t.Fatalf("write .sakusen.yml: %v", err)
 	}
-	e.mustRun(e.ProjectDir, "git", "add", ".sortie.yml")
-	e.mustRun(e.ProjectDir, "git", "commit", "-m", "add .sortie.yml")
+	e.mustRun(e.ProjectDir, "git", "add", ".sakusen.yml")
+	e.mustRun(e.ProjectDir, "git", "commit", "-m", "add .sakusen.yml")
 }
 
 // SwapResponses writes newSubdir as the active subdir pointer in ResponsesDir.
@@ -225,33 +225,33 @@ func (e *Env) SwapResponses(newSubdir string) {
 	}
 }
 
-// Sortie runs the sortie binary with the given args in the project directory.
+// Sakusen runs the sakusen binary with the given args in the project directory.
 // Returns combined stdout+stderr output and any error.
-func (e *Env) Sortie(args ...string) (string, error) {
-	cmd := exec.Command(sortieBinPath, args...)
+func (e *Env) Sakusen(args ...string) (string, error) {
+	cmd := exec.Command(sakusenBinPath, args...)
 	cmd.Env = os.Environ()
 	cmd.Dir = e.ProjectDir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// MustSortie runs sortie and calls t.Fatalf on error.
-func (e *Env) MustSortie(args ...string) string {
+// MustSakusen runs sakusen and calls t.Fatalf on error.
+func (e *Env) MustSakusen(args ...string) string {
 	e.t.Helper()
-	out, err := e.Sortie(args...)
+	out, err := e.Sakusen(args...)
 	if err != nil {
-		e.t.Fatalf("sortie %v: %v\noutput: %s", args, err, out)
+		e.t.Fatalf("sakusen %v: %v\noutput: %s", args, err, out)
 	}
 	return out
 }
 
 // AddProject creates a SECOND isolated git repo served by the same daemon and
 // returns its absolute path. The daemon socket and tasks.db live under
-// $XDG_CONFIG_HOME/sortie/, so `sortie create` run with cwd = the returned dir
+// $XDG_CONFIG_HOME/sakusen/, so `sakusen create` run with cwd = the returned dir
 // talks to the already-running daemon; the daemon builds that project's context
-// lazily from its own committed .sortie.yml.
+// lazily from its own committed .sakusen.yml.
 //
-// The .sortie.yml MUST be committed — cmd/sortie's PersistentPreRunE requires
+// The .sakusen.yml MUST be committed — cmd/sakusen's PersistentPreRunE requires
 // cfg.ProjectConfigFound for `create`, and an uncommitted file would also leave
 // the working tree dirty for finalization.
 func (e *Env) AddProject(yaml string) string {
@@ -275,17 +275,17 @@ func (e *Env) AddProject(yaml string) string {
 	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), nil, 0644); err != nil {
 		e.t.Fatalf("write .gitkeep: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".sortie/\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".sakusen/\n"), 0644); err != nil {
 		e.t.Fatalf("write .gitignore: %v", err)
 	}
 	e.mustRun(dir, "git", "add", ".gitkeep", ".gitignore")
 	e.mustRun(dir, "git", "commit", "-m", "initial")
 
-	if err := os.WriteFile(filepath.Join(dir, ".sortie.yml"), []byte(yaml), 0644); err != nil {
-		e.t.Fatalf("write .sortie.yml for second project: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, ".sakusen.yml"), []byte(yaml), 0644); err != nil {
+		e.t.Fatalf("write .sakusen.yml for second project: %v", err)
 	}
-	e.mustRun(dir, "git", "add", ".sortie.yml")
-	e.mustRun(dir, "git", "commit", "-m", "add .sortie.yml")
+	e.mustRun(dir, "git", "add", ".sakusen.yml")
+	e.mustRun(dir, "git", "commit", "-m", "add .sakusen.yml")
 
 	return dir
 }
@@ -305,12 +305,12 @@ func (e *Env) WriteHookFile(name, content string) {
 	}
 }
 
-// SortieJSON runs sortie with --json appended and decodes JSON output.
-func (e *Env) SortieJSON(args ...string) (map[string]any, error) {
+// SakusenJSON runs sakusen with --json appended and decodes JSON output.
+func (e *Env) SakusenJSON(args ...string) (map[string]any, error) {
 	argsWithJSON := append(args, "--json")
-	out, err := e.Sortie(argsWithJSON...)
+	out, err := e.Sakusen(argsWithJSON...)
 	if err != nil {
-		return nil, fmt.Errorf("sortie %v: %w\noutput: %s", argsWithJSON, err, out)
+		return nil, fmt.Errorf("sakusen %v: %w\noutput: %s", argsWithJSON, err, out)
 	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(out), &m); err != nil {
@@ -319,10 +319,10 @@ func (e *Env) SortieJSON(args ...string) (map[string]any, error) {
 	return m, nil
 }
 
-// TaskStatus returns the status string for the given task ID by calling sortie tasks.
+// TaskStatus returns the status string for the given task ID by calling sakusen tasks.
 func (e *Env) TaskStatus(id int64) string {
 	e.t.Helper()
-	m, err := e.SortieJSON("tasks", fmt.Sprintf("%d", id))
+	m, err := e.SakusenJSON("tasks", fmt.Sprintf("%d", id))
 	if err != nil {
 		return ""
 	}
@@ -330,10 +330,10 @@ func (e *Env) TaskStatus(id int64) string {
 	return s
 }
 
-// TaskField returns the named field from sortie tasks <id> --json as a string.
+// TaskField returns the named field from sakusen tasks <id> --json as a string.
 func (e *Env) TaskField(id int64, key string) string {
 	e.t.Helper()
-	m, err := e.SortieJSON("tasks", fmt.Sprintf("%d", id))
+	m, err := e.SakusenJSON("tasks", fmt.Sprintf("%d", id))
 	if err != nil {
 		return ""
 	}
@@ -348,7 +348,7 @@ func (e *Env) TaskField(id int64, key string) string {
 }
 
 // CapturedPrompt returns the resolved step prompt the stub saw for the given
-// task's step (a copy of $SORTIE_PROMPT_FILE written to E2E_PROMPT_CAPTURE_DIR
+// task's step (a copy of $SAKUSEN_PROMPT_FILE written to E2E_PROMPT_CAPTURE_DIR
 // — the TSV log deliberately omits the prompt). Waits briefly for the file,
 // then t.Fatal on missing.
 func (e *Env) CapturedPrompt(taskID int64, step string) string {

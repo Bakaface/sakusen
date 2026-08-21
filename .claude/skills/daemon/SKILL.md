@@ -1,7 +1,7 @@
 ---
 name: daemon
 description: >
-  Sortie's background daemon: Unix socket server, request handlers, client-server protocol,
+  Sakusen's background daemon: Unix socket server, request handlers, client-server protocol,
   task polling, agent lifecycle, and event broadcasting. Use when editing files in
   internal/daemon/, working on server startup, message handling, task scheduling,
   agent state changes, or pub/sub broadcasting.
@@ -114,7 +114,7 @@ type TaskInfo struct {
 ## Handler Patterns
 
 - Handlers receive `(conn, payload)`, respond via `sendMessage()` or `sendError()`
-- `handleCreateTask`: creates task + async AI title refinement via the configured `summarizer:` command (`runner.RunSync`, `SORTIE_PURPOSE=title`, 30s timeout); with no summarizer configured it falls back to a sanitized truncated input as title (no error). For non-worktree tasks, branch resolution is skipped.
+- `handleCreateTask`: creates task + async AI title refinement via the configured `summarizer:` command (`runner.RunSync`, `SAKUSEN_PURPOSE=title`, 30s timeout); with no summarizer configured it falls back to a sanitized truncated input as title (no error). For non-worktree tasks, branch resolution is skipped.
 - `handleContinueTask`: complex — resumes approval/tmux, or creates tmux for terminal tasks. Non-worktree tasks use project root as `WorktreePath`.
 - `handleAdvanceTask`: resumes the engine when more workflow steps remain; on the last step fast-tracks if no changes (worktree only), otherwise runs async summarizer (StatusSummarizing) + on_complete. Non-worktree tasks skip the fast-track check.
 

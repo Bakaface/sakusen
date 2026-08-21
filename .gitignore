@@ -1,17 +1,18 @@
 # Binary
-/sortie
+/sakusen
 
-# Sortie config and data
-.sortie.yml
-.sortie/
+# Sakusen config and data
+.sakusen.yml
+.sakusen/
 
 # Test files
 TEST_PRD.md
 
 bin/
 
-# Claude output logs
+# Agent output logs
 .claude-output.log
+.sakusen-output.log
 
 # Local-only Claude Code agents and skills
 .claude/agents/_*

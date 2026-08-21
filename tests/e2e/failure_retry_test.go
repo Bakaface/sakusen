@@ -30,15 +30,15 @@ workflows:
 // TestStepFailureAndRetry verifies that:
 // 1. A stub that exits non-zero causes the task to fail
 // 2. error_message is non-empty after failure
-// 3. After SwapResponses to a success stub, sortie retry succeeds
+// 3. After SwapResponses to a success stub, sakusen retry succeeds
 func TestStepFailureAndRetry(t *testing.T) {
 	e := setupE2E(t, "failure_retry")
 
 	// Use the fail.sh script which exits 1
 	failScript := filepath.Join(repoRoot, "tests", "e2e", "testdata", "failure_retry", "fail.sh")
-	e.WriteSortieYAML(failingWorkflowYAML(failScript))
+	e.WriteSakusenYAML(failingWorkflowYAML(failScript))
 
-	e.MustSortie("create", "--title", "failing task", "failing task")
+	e.MustSakusen("create", "--title", "failing task", "failing task")
 
 	// Task should fail
 	e.WaitStatus(1, "failed", 10*time.Second)
@@ -57,14 +57,14 @@ func TestStepFailureAndRetry(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(filepath.Join(e.ResponsesDir, ".current-subdir")) })
 
 	// Now retry with the regular stub (which will read from success/ subdir)
-	// Update .sortie.yml to use the regular stub
-	e.WriteSortieYAML(failingWorkflowYAML(e.StubPath))
+	// Update .sakusen.yml to use the regular stub
+	e.WriteSakusenYAML(failingWorkflowYAML(e.StubPath))
 
 	// Also update E2E_RESPONSES_DIR to point at failure_retry (SwapResponses handles subdir)
 	// E2E_RESPONSES_DIR is already failure_retry — SwapResponses wrote "success" as .current-subdir
 	// So stub will look at failure_retry/success/step-implementing.txt
 
-	e.MustSortie("retry", "1")
+	e.MustSakusen("retry", "1")
 
 	e.WaitStatus(1, "completed", 10*time.Second)
 }

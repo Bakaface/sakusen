@@ -12,8 +12,8 @@ import (
 // awaitChildrenWorkflowYAML defines two workflows used by TestAwaitingChildrenSuspendsAndResumes:
 //
 //   - parent: a one-step "spawn-and-wait" workflow whose stub hook spawns two
-//     child tasks via `sortie create -w child` and registers waits-on edges via
-//     `sortie wait-for-tasks --use-env`. The hook is gated by a marker file so
+//     child tasks via `sakusen create -w child` and registers waits-on edges via
+//     `sakusen wait-for-tasks --use-env`. The hook is gated by a marker file so
 //     only the FIRST step run spawns children; the resume run finds the marker
 //     and does nothing.
 //
@@ -58,10 +58,10 @@ workflows:
 //	   on first suspend, or never resumed it.)
 func TestAwaitingChildrenSuspendsAndResumes(t *testing.T) {
 	e := setupE2E(t, "awaiting_children")
-	e.WriteSortieYAML(awaitChildrenWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(awaitChildrenWorkflowYAML(e.StubPath))
 
 	// Create the parent task. Workflow "parent" has a single step "spawn".
-	e.MustSortie("create", "--title", "parent task", "-w", "parent", "parent task work")
+	e.MustSakusen("create", "--title", "parent task", "-w", "parent", "parent task work")
 
 	// Parent suspends mid-step on the two children it spawned.
 	e.WaitStatus(1, "awaiting-children", 15*time.Second)

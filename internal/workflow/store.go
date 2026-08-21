@@ -1,8 +1,8 @@
 package workflow
 
 import (
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // taskStore is the narrow slice of *db.DB that Engine actually depends on.
@@ -13,7 +13,7 @@ import (
 // instead of opening a real SQLite database (see the gitRepo seam in
 // internal/merge for the same pattern applied to git operations).
 //
-// *db.DB satisfies this implicitly, so callers (the daemon, tests, cmd/sortie)
+// *db.DB satisfies this implicitly, so callers (the daemon, tests, cmd/sakusen)
 // keep passing a *db.DB into NewEngine unchanged.
 //
 // Methods are grouped by concern, mirroring the order they're touched during

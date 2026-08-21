@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -51,7 +51,7 @@ type ListTasksResult struct {
 func registerListTasks(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"list_tasks",
-		mcp.WithDescription("List sortie tasks as compact summaries — for the current project by default, or across all projects with all_projects=true. Optionally filter by status. Use get_task for full details (description, steps, output) on a specific task."),
+		mcp.WithDescription("List sakusen tasks as compact summaries — for the current project by default, or across all projects with all_projects=true. Optionally filter by status. Use get_task for full details (description, steps, output) on a specific task."),
 		mcp.WithInputSchema[ListTasksArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args ListTasksArgs) (*mcp.CallToolResult, error) {

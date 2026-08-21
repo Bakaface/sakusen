@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/config"
 )
 
 // handleListWorkflows returns the flat list of workflows for the project rooted
@@ -38,7 +38,7 @@ func (s *Server) handleListWorkflows(conn net.Conn, req ListWorkflowsRequest) {
 	}
 
 	// If no workflows are configured, expose the built-in default so the MCP
-	// caller sees the same surface as `sortie create -w default`.
+	// caller sees the same surface as `sakusen create -w default`.
 	if len(resp.Workflows) == 0 {
 		def := config.DefaultWorkflow()
 		resp.Workflows = summarizeWorkflows(pc.cfg, []config.WorkflowConfig{def})

@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 )
@@ -100,7 +100,7 @@ func TestDetailView_ShowsOnlyLogs(t *testing.T) {
 		Title:        "Test task",
 		Input:        "Some description",
 		Status:       "running",
-		Branch:       "sortie/14-test",
+		Branch:       "sakusen/14-test",
 		CurrentStep:  "implement",
 		StepIndex:    1,
 		Context:      "some context info",

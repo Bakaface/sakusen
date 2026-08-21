@@ -7,8 +7,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 func decodePayload[T any](t *testing.T, msg *Message) T {
@@ -45,7 +45,7 @@ func TestHandleCreateTrack(t *testing.T) {
 	t.Run("project track created with slugified name", func(t *testing.T) {
 		s, _ := setupServerWithProject(t)
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Payments API", ProjectPath: "/tmp/sortie-test", Context: "seed"})
+		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Payments API", ProjectPath: "/tmp/sakusen-test", Context: "seed"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[CreateTrackResponse](t, msg)
@@ -63,7 +63,7 @@ func TestHandleCreateTrack(t *testing.T) {
 	t.Run("description carried into the response", func(t *testing.T) {
 		s, _ := setupServerWithProject(t)
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Payments API", ProjectPath: "/tmp/sortie-test", Description: "Owns the payments API surface"})
+		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Payments API", ProjectPath: "/tmp/sakusen-test", Description: "Owns the payments API surface"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[CreateTrackResponse](t, msg)
@@ -94,7 +94,7 @@ func TestHandleCreateTrack(t *testing.T) {
 	t.Run("missing name rejected", func(t *testing.T) {
 		s, _ := setupServerWithProject(t)
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "   ", ProjectPath: "/tmp/sortie-test"})
+		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "   ", ProjectPath: "/tmp/sakusen-test"})
 		expectError(t, readOneMessage(t, clientConn), "track name is required")
 	})
 
@@ -106,7 +106,7 @@ func TestHandleCreateTrack(t *testing.T) {
 		}
 
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "By Slug", ProjectPath: "/tmp/sortie-test", ParentTrack: "sprint"})
+		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "By Slug", ProjectPath: "/tmp/sakusen-test", ParentTrack: "sprint"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[CreateTrackResponse](t, msg)
@@ -118,7 +118,7 @@ func TestHandleCreateTrack(t *testing.T) {
 		}
 
 		clientConn2, serverConn2 := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn2, CreateTrackRequest{Name: "By ID", ProjectPath: "/tmp/sortie-test", ParentTrack: fmt.Sprintf("%d", parent.ID)})
+		go s.handleCreateTrack(serverConn2, CreateTrackRequest{Name: "By ID", ProjectPath: "/tmp/sakusen-test", ParentTrack: fmt.Sprintf("%d", parent.ID)})
 		msg2 := readOneMessage(t, clientConn2)
 		mustNotError(t, msg2)
 	})
@@ -138,10 +138,10 @@ func TestHandleCreateTrack(t *testing.T) {
 	t.Run("duplicate slug rejected with friendly message", func(t *testing.T) {
 		s, _ := setupServerWithProject(t)
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Dup", ProjectPath: "/tmp/sortie-test"})
+		go s.handleCreateTrack(serverConn, CreateTrackRequest{Name: "Dup", ProjectPath: "/tmp/sakusen-test"})
 		mustNotError(t, readOneMessage(t, clientConn))
 		clientConn2, serverConn2 := pipeForHandler(t)
-		go s.handleCreateTrack(serverConn2, CreateTrackRequest{Name: "Dup", ProjectPath: "/tmp/sortie-test"})
+		go s.handleCreateTrack(serverConn2, CreateTrackRequest{Name: "Dup", ProjectPath: "/tmp/sakusen-test"})
 		expectError(t, readOneMessage(t, clientConn2), "already exists")
 	})
 }
@@ -155,11 +155,11 @@ func TestHandleSetTrackContext(t *testing.T) {
 
 	t.Run("replace then append", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleSetTrackContext(serverConn, SetTrackContextRequest{ProjectPath: "/tmp/sortie-test", Track: "t", Context: "one"})
+		go s.handleSetTrackContext(serverConn, SetTrackContextRequest{ProjectPath: "/tmp/sakusen-test", Track: "t", Context: "one"})
 		mustNotError(t, readOneMessage(t, clientConn))
 
 		clientConn2, serverConn2 := pipeForHandler(t)
-		go s.handleSetTrackContext(serverConn2, SetTrackContextRequest{ProjectPath: "/tmp/sortie-test", Track: "t", Context: "two", Mode: "append"})
+		go s.handleSetTrackContext(serverConn2, SetTrackContextRequest{ProjectPath: "/tmp/sakusen-test", Track: "t", Context: "two", Mode: "append"})
 		mustNotError(t, readOneMessage(t, clientConn2))
 
 		got, _ := s.database.GetTrack(tr.ID)
@@ -170,13 +170,13 @@ func TestHandleSetTrackContext(t *testing.T) {
 
 	t.Run("invalid mode", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleSetTrackContext(serverConn, SetTrackContextRequest{ProjectPath: "/tmp/sortie-test", Track: "t", Context: "x", Mode: "merge"})
+		go s.handleSetTrackContext(serverConn, SetTrackContextRequest{ProjectPath: "/tmp/sakusen-test", Track: "t", Context: "x", Mode: "merge"})
 		expectError(t, readOneMessage(t, clientConn), "invalid mode")
 	})
 
 	t.Run("unknown ref", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleSetTrackContext(serverConn, SetTrackContextRequest{ProjectPath: "/tmp/sortie-test", Track: "nope", Context: "x"})
+		go s.handleSetTrackContext(serverConn, SetTrackContextRequest{ProjectPath: "/tmp/sakusen-test", Track: "nope", Context: "x"})
 		expectError(t, readOneMessage(t, clientConn), "not found")
 	})
 }
@@ -190,7 +190,7 @@ func TestHandleSetTrackDescription(t *testing.T) {
 
 	t.Run("replaces the description", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleSetTrackDescription(serverConn, SetTrackDescriptionRequest{ProjectPath: "/tmp/sortie-test", Track: "t", Description: "corrected"})
+		go s.handleSetTrackDescription(serverConn, SetTrackDescriptionRequest{ProjectPath: "/tmp/sakusen-test", Track: "t", Description: "corrected"})
 		mustNotError(t, readOneMessage(t, clientConn))
 
 		got, _ := s.database.GetTrack(tr.ID)
@@ -204,7 +204,7 @@ func TestHandleSetTrackDescription(t *testing.T) {
 
 	t.Run("unknown ref", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleSetTrackDescription(serverConn, SetTrackDescriptionRequest{ProjectPath: "/tmp/sortie-test", Track: "nope", Description: "x"})
+		go s.handleSetTrackDescription(serverConn, SetTrackDescriptionRequest{ProjectPath: "/tmp/sakusen-test", Track: "nope", Description: "x"})
 		expectError(t, readOneMessage(t, clientConn), "not found")
 	})
 }
@@ -361,7 +361,7 @@ func TestHandleListAndGetTrack(t *testing.T) {
 
 	t.Run("list clears contexts and sets previews", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sortie-test"})
+		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sakusen-test"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[ListTracksResponse](t, msg)
@@ -389,7 +389,7 @@ func TestHandleListAndGetTrack(t *testing.T) {
 			t.Fatal(err)
 		}
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sortie-test"})
+		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sakusen-test"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[ListTracksResponse](t, msg)
@@ -410,7 +410,7 @@ func TestHandleListAndGetTrack(t *testing.T) {
 
 	t.Run("get returns chain and rendered context", func(t *testing.T) {
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleGetTrack(serverConn, GetTrackRequest{ProjectPath: "/tmp/sortie-test", Track: "payments"})
+		go s.handleGetTrack(serverConn, GetTrackRequest{ProjectPath: "/tmp/sakusen-test", Track: "payments"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[GetTrackResponse](t, msg)
@@ -447,7 +447,7 @@ func TestHandleListAndGetTrack(t *testing.T) {
 			t.Fatal(err)
 		}
 		clientConn, serverConn := pipeForHandler(t)
-		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sortie-test"})
+		go s.handleListTracks(serverConn, ListTracksRequest{ProjectPath: "/tmp/sakusen-test"})
 		msg := readOneMessage(t, clientConn)
 		mustNotError(t, msg)
 		resp := decodePayload[ListTracksResponse](t, msg)
@@ -469,7 +469,7 @@ func TestHandleListAndGetTrack(t *testing.T) {
 }
 
 func TestCreateTaskFromRequest_Tracks(t *testing.T) {
-	projectPath := "/tmp/sortie-test"
+	projectPath := "/tmp/sakusen-test"
 
 	newServer := func(t *testing.T, wfs ...config.WorkflowConfig) (*Server, int64) {
 		t.Helper()
@@ -604,7 +604,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 }
 
 func TestCreateTasksAndWait_TrackInheritance(t *testing.T) {
-	projectPath := "/tmp/sortie-test"
+	projectPath := "/tmp/sakusen-test"
 	wf := config.WorkflowConfig{Name: "default", Steps: []config.StepConfig{{Name: "implementing", Prompt: "p"}}}
 	s, projID := setupServerWithPinnedWorkflow(t, projectPath, wf)
 

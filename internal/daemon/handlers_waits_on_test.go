@@ -4,12 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // projBPath is the "other project" in these tests (setupServerWithProject
-// creates the first project at /tmp/sortie-test).
-const projBPath = "/tmp/sortie-test-other"
+// creates the first project at /tmp/sakusen-test).
+const projBPath = "/tmp/sakusen-test-other"
 
 // mustOtherProject resolves (creating if needed) the second project row used
 // as the cross-project destination.

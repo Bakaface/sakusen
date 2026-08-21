@@ -37,9 +37,9 @@ workflows:
 // - stub was called 3 times for purpose=step
 func TestStepContextPropagation(t *testing.T) {
 	e := setupE2E(t, "step_context")
-	e.WriteSortieYAML(threeStepWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(threeStepWorkflowYAML(e.StubPath))
 
-	e.MustSortie("create", "--title", "plan impl review", "plan impl review task")
+	e.MustSakusen("create", "--title", "plan impl review", "plan impl review task")
 
 	e.WaitStatus(1, "completed", 15*time.Second)
 

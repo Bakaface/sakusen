@@ -39,7 +39,7 @@ func (e *Env) Eventually(d time.Duration, what string, cond func() bool) {
 	}
 }
 
-// WaitStatus polls sortie tasks <id> --json until .status == want or d elapses.
+// WaitStatus polls sakusen tasks <id> --json until .status == want or d elapses.
 func (e *Env) WaitStatus(id int64, want string, d time.Duration) {
 	e.t.Helper()
 	var last string
@@ -93,7 +93,7 @@ func (e *Env) WaitNoFile(path string, d time.Duration) {
 }
 
 // StubCall holds one parsed line from the stub log.
-// Format: timestamp \t purpose \t cwd \t step \t env-pairs(|-joined SORTIE_*=value)
+// Format: timestamp \t purpose \t cwd \t step \t env-pairs(|-joined SAKUSEN_*=value)
 type StubCall struct {
 	Timestamp time.Time
 	Purpose   string
@@ -151,11 +151,11 @@ func (e *Env) StubCalls(purpose string) []StubCall {
 	return calls
 }
 
-// DB opens and returns the sortie SQLite database for direct queries.
+// DB opens and returns the sakusen SQLite database for direct queries.
 // The caller is responsible for closing it (or rely on t.Cleanup registered here).
 func (e *Env) DB() *sql.DB {
 	e.t.Helper()
-	dbPath := filepath.Join(e.XDGDir, "sortie", "tasks.db")
+	dbPath := filepath.Join(e.XDGDir, "sakusen", "tasks.db")
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		e.t.Fatalf("open db %s: %v", dbPath, err)
@@ -198,7 +198,7 @@ func (e *Env) DBQueryInt(query string, args ...any) int64 {
 
 // AssertMergedFor asserts that the task's worktree branch was merged into main.
 // Heuristic: checks that main has at least one commit beyond the two setup
-// commits (`initial` and `add .sortie.yml`). This handles both fast-forward
+// commits (`initial` and `add .sakusen.yml`). This handles both fast-forward
 // merges (linear history, no merge commit) and `--no-ff` merges (explicit
 // merge commit).
 func (e *Env) AssertMergedFor(taskID int64) {

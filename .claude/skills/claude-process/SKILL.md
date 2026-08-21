@@ -4,7 +4,7 @@ description: >
   Agent process spawning (internal/runner), output handling, agent state
   machine, and concurrency control. Use when editing files in internal/runner/ or
   internal/agent/, working on agent command execution, the env contract
-  (SORTIE_PROMPT_FILE/SORTIE_RESULT_FILE), agent state transitions, or the
+  (SAKUSEN_PROMPT_FILE/SAKUSEN_RESULT_FILE), agent state transitions, or the
   concurrent agent manager.
 ---
 
@@ -12,9 +12,9 @@ description: >
 
 ## Process Spawning (internal/runner/)
 
-The runner is the single seam between sortie's execution engine and whatever tool actually
+The runner is the single seam between sakusen's execution engine and whatever tool actually
 runs a step. Every agent is a shell command (see `config.AgentConfig`) executed via `sh -c`
-in the task workdir with sortie's env contract exported. The runner knows nothing about any
+in the task workdir with sakusen's env contract exported. The runner knows nothing about any
 specific agent CLI — no output parsing, no session discovery, no turn-end signalling.
 
 `Process` runs one headless agent command.
@@ -35,14 +35,14 @@ Stop() error                    // SIGTERM -> 5s grace -> SIGKILL
 IsRunning() / HasExited() / IsSuccess() bool
 ExitCode() int                  // -1 while running
 PID() int
-ResultText() string             // $SORTIE_RESULT_FILE content; stdout-tail fallback (after exit)
+ResultText() string             // $SAKUSEN_RESULT_FILE content; stdout-tail fallback (after exit)
 ```
 
-- `OutputLogFileName` = `".sortie-output.log"` — per-workdir raw output capture (stdout
+- `OutputLogFileName` = `".sakusen-output.log"` — per-workdir raw output capture (stdout
   verbatim + stderr). The daemon's `noiseFiles` list references it.
 - Stdout lines are forwarded to `OutputFunc` with `[HH:MM:SS]` timestamps and retained in a
   bounded tail (`stdoutTailLines` = 50) as the crude `ResultText` fallback for pipelines that
-  never write `$SORTIE_RESULT_FILE`.
+  never write `$SAKUSEN_RESULT_FILE`.
 - `buildEnv()` filters `CLAUDECODE=` out of the child environment so claude-based agent
   commands don't refuse to launch inside a Claude Code session; harmless for other tools.
 
@@ -53,7 +53,7 @@ RunSync(ctx context.Context, command, workDir string, env map[string]string, std
 ```
 
 Synchronous `sh -c` with stdin piped, stdout returned. Used for the configured `summarizer:`
-command (chat/step/task summaries, AI titles, backfill-context — tagged via `SORTIE_PURPOSE`)
+command (chat/step/task summaries, AI titles, backfill-context — tagged via `SAKUSEN_PURPOSE`)
 and agent helper commands (`chat_log_command`). Also strips `CLAUDECODE`. On failure the
 error carries truncated stdout AND stderr (some tools print errors to stdout).
 
@@ -67,7 +67,7 @@ MergeEnv(contract, agentEnv map[string]string) map[string]string
 `BuildWrapperScript` renders the bash script run inside a tmux session: exports env (sorted
 keys — deterministic across retries/restores), runs the command, then `exec bash` so the pane
 survives for inspection. `MergeEnv` folds an agent record's `env:` into the per-spawn
-contract; the contract wins on collisions so agents cannot mask `SORTIE_*` variables.
+contract; the contract wins on collisions so agents cannot mask `SAKUSEN_*` variables.
 
 ### Tests
 
@@ -151,5 +151,5 @@ Agent command stdout -> Process.OutputFunc -> Agent.outputBuffer -> TUI via `get
 - State transitions go through Manager methods, not direct field assignment
 - `OnStateChange` is the primary integration point with daemon
 - Check `HasExited()` before reading `ExitCode()`
-- Env vars (`SORTIE_TASK_ID`, `SORTIE_PROMPT_FILE`, `SORTIE_RESULT_FILE`, etc.) set via
+- Env vars (`SAKUSEN_TASK_ID`, `SAKUSEN_PROMPT_FILE`, `SAKUSEN_RESULT_FILE`, etc.) set via
   `process.SetEnv()` before start — the engine builds the contract, the runner just exports it

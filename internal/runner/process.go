@@ -1,8 +1,8 @@
 // Package runner spawns user-configured agent commands. It is the single seam
-// between sortie's execution engine and whatever tool actually runs a step:
+// between sakusen's execution engine and whatever tool actually runs a step:
 // every agent is a shell command (see config.AgentConfig) executed via
-// `sh -c` in the task workdir with sortie's environment contract exported
-// (SORTIE_PROMPT_FILE, SORTIE_RESULT_FILE, SORTIE_TASK_ID, ...). The runner
+// `sh -c` in the task workdir with sakusen's environment contract exported
+// (SAKUSEN_PROMPT_FILE, SAKUSEN_RESULT_FILE, SAKUSEN_TASK_ID, ...). The runner
 // knows nothing about any specific agent CLI — output parsing, session
 // discovery, and turn-end signalling are the agent pipeline's job.
 package runner
@@ -24,9 +24,9 @@ import (
 const (
 	// OutputLogFileName is the per-workdir raw output capture file for
 	// headless agent spawns (stdout + stderr, verbatim). The daemon's
-	// noiseFiles list and `sortie init`'s .gitignore entry reference this
+	// noiseFiles list and `sakusen init`'s .gitignore entry reference this
 	// exact name.
-	OutputLogFileName = ".sortie-output.log"
+	OutputLogFileName = ".sakusen-output.log"
 
 	// stopPollInterval is how often to check whether a process has exited during graceful shutdown.
 	stopPollInterval = 500 * time.Millisecond
@@ -36,7 +36,7 @@ const (
 
 	// stdoutTailLines is how many trailing stdout lines are retained in memory
 	// as the crude ResultText fallback for pipelines that never write
-	// $SORTIE_RESULT_FILE.
+	// $SAKUSEN_RESULT_FILE.
 	stdoutTailLines = 50
 )
 
@@ -46,7 +46,7 @@ const (
 // into OutputFile.
 //
 // The agent's final result text is read from ResultFile after exit (the
-// command's pipeline is expected to write $SORTIE_RESULT_FILE); when the file
+// command's pipeline is expected to write $SAKUSEN_RESULT_FILE); when the file
 // is absent or empty, the tail of captured stdout is used as a crude fallback.
 type Process struct {
 	TaskID     string
@@ -67,7 +67,7 @@ type Process struct {
 }
 
 // NewProcess creates a Process that will run the given shell command in
-// workDir. resultFile is exported to the command as SORTIE_RESULT_FILE by the
+// workDir. resultFile is exported to the command as SAKUSEN_RESULT_FILE by the
 // caller (via SetEnv) and read back by ResultText.
 func NewProcess(taskID, workDir, command, resultFile string) *Process {
 	return &Process{
@@ -270,7 +270,7 @@ func (p *Process) IsSuccess() bool {
 // ResultText returns the agent's final result text. Only meaningful after the
 // process has exited. Reads ResultFile when present and non-empty; otherwise
 // falls back to the retained tail of stdout (crude — agent pipelines should
-// write $SORTIE_RESULT_FILE).
+// write $SAKUSEN_RESULT_FILE).
 func (p *Process) ResultText() string {
 	if p.ResultFile != "" {
 		if data, err := os.ReadFile(p.ResultFile); err == nil {

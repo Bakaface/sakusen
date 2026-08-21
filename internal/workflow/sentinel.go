@@ -12,11 +12,11 @@ import (
 // When a step runs inside tmux, whatever runs inside the session — a Claude
 // Code Stop hook, the agent itself as its final action, a userland
 // idle-watcher — signals "turn ended" by writing a file into the step-done
-// directory sortie exports to the agent as SORTIE_DONE_DIR, named
+// directory sakusen exports to the agent as SAKUSEN_DONE_DIR, named
 //
-//	$SORTIE_DONE_PREFIX-<nanosecond timestamp>.json
+//	$SAKUSEN_DONE_PREFIX-<nanosecond timestamp>.json
 //
-// (e.g. `"$SORTIE_DONE_DIR/$SORTIE_DONE_PREFIX-$(date +%s%N).json"`). The
+// (e.g. `"$SAKUSEN_DONE_DIR/$SAKUSEN_DONE_PREFIX-$(date +%s%N).json"`). The
 // daemon's tmuxMonitorLoop polls for these sentinels and uses them to
 // auto-advance the workflow (unless the step is marked `human: true`). Agents
 // that never write a sentinel are manual-advance: the task pauses at tmux
@@ -24,29 +24,29 @@ import (
 //
 // Storage layout (per worktree):
 //
-//	<worktree>/.sortie/step-done/<prefix>-<ts>.json
+//	<worktree>/.sakusen/step-done/<prefix>-<ts>.json
 //
 // The file content MAY be a JSON object; two optional fields are understood by
-// sortie (StepSentinel below): "session_id" — an opaque, agent-native session
+// sakusen (StepSentinel below): "session_id" — an opaque, agent-native session
 // identifier recorded in the chats table (enables `resume_command` restore and
 // `chat_log_command` lookup) — and "transcript_path" — a chat transcript file
-// passed to the agent's chat_log_command as SORTIE_TRANSCRIPT_PATH. A Claude
+// passed to the agent's chat_log_command as SAKUSEN_TRANSCRIPT_PATH. A Claude
 // Code Stop-hook payload carries both natively; other agents can write
 // whatever subset they have (or an empty file).
 
-// StepDoneDirName is the directory name (relative to a worktree's .sortie/)
+// StepDoneDirName is the directory name (relative to a worktree's .sakusen/)
 // that holds turn-end sentinel files for tmux step completion detection.
 const StepDoneDirName = "step-done"
 
 // StepDoneDir returns the absolute path to the directory holding turn-end
-// sentinel files inside a worktree. Exported to tmux agents as SORTIE_DONE_DIR.
+// sentinel files inside a worktree. Exported to tmux agents as SAKUSEN_DONE_DIR.
 func StepDoneDir(worktreePath string) string {
-	return filepath.Join(worktreePath, ".sortie", StepDoneDirName)
+	return filepath.Join(worktreePath, ".sakusen", StepDoneDirName)
 }
 
 // SentinelPrefix returns the filename prefix a sentinel for the given step
 // must use (the sanitised step name). Exported to tmux agents as
-// SORTIE_DONE_PREFIX.
+// SAKUSEN_DONE_PREFIX.
 func SentinelPrefix(stepName string) string {
 	return shellSafeStepName(stepName)
 }
@@ -79,7 +79,7 @@ func shellSafeStepName(name string) string {
 }
 
 // StepSentinel is the subset of a sentinel file's optional JSON payload that
-// sortie reads back. SessionID and TranscriptPath identify the agent session
+// sakusen reads back. SessionID and TranscriptPath identify the agent session
 // that actually ran the step, which is authoritative — the sentinel is
 // written from inside that very session.
 type StepSentinel struct {
@@ -169,7 +169,7 @@ func LatestStepSentinel(worktreePath, stepName string) (StepSentinel, bool) {
 
 // LatestStepSentinelWithPath is LatestStepSentinel plus the sentinel file's
 // path, for callers that hand the raw file to an agent command
-// (SORTIE_SENTINEL_FILE). A sentinel that exists but holds no parseable JSON
+// (SAKUSEN_SENTINEL_FILE). A sentinel that exists but holds no parseable JSON
 // still returns ok=true with a zero payload — the file's existence is the
 // turn-end signal; the payload fields are optional.
 func LatestStepSentinelWithPath(worktreePath, stepName string) (StepSentinel, string, bool) {

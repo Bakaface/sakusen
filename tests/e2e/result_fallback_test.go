@@ -11,7 +11,7 @@ import (
 )
 
 // TestResultFileStdoutFallback verifies the stdout-tail fallback of the agent
-// result contract: an agent that never writes $SORTIE_RESULT_FILE and only
+// result contract: an agent that never writes $SAKUSEN_RESULT_FILE and only
 // prints a line to stdout still yields step context — production falls back
 // to the retained tail of stdout (runner.Process.ResultText). The main stub
 // covers the opposite (result-file) path via its stdout decoy.
@@ -35,9 +35,9 @@ workflows:
         prompt: "Implement the task"
         summarization_strategy: last_message
 `, agentScript)
-	e.WriteSortieYAML(yaml)
+	e.WriteSakusenYAML(yaml)
 
-	e.MustSortie("create", "--title", "fallback task", "fallback task")
+	e.MustSakusen("create", "--title", "fallback task", "fallback task")
 
 	e.WaitStatus(1, "completed", 10*time.Second)
 	e.AssertMergedFor(1)

@@ -1,7 +1,7 @@
 ---
 name: tui
 description: >
-  Sortie's BubbleTea terminal UI architecture, component patterns, and conventions.
+  Sakusen's BubbleTea terminal UI architecture, component patterns, and conventions.
   Use when editing files in internal/tui/, working on terminal UI components, BubbleTea
   models, Lip Gloss styling, keybindings, views, or task list/detail rendering.
 ---
@@ -67,7 +67,7 @@ Model (app.go)
 
 | File | Responsibility |
 |------|----------------|
-| `sortie_animation.go` | Splash/idle animation with plane flyover and ASCII art, driven by `sortieTickMsg` |
+| `sakusen_animation.go` | Splash/idle animation with plane flyover and ASCII art, driven by `sakusenTickMsg` |
 
 ## Custom Message Types
 

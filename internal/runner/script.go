@@ -7,7 +7,7 @@ import (
 )
 
 // BuildWrapperScript renders the bash wrapper script that runs an agent
-// command inside a tmux session: it exports the sortie env contract (plus any
+// command inside a tmux session: it exports the sakusen env contract (plus any
 // agent-record env), runs the command, and drops to an interactive bash so the
 // pane survives for inspection after the agent exits.
 //
@@ -39,9 +39,9 @@ func shellQuote(s string) string {
 }
 
 // MergeEnv overlays contract onto agentEnv and returns the result (neither
-// input is mutated). Used to fold an agent record's `env:` map into sortie's
+// input is mutated). Used to fold an agent record's `env:` map into sakusen's
 // per-spawn environment contract; the contract wins on key collisions so
-// agents cannot mask SORTIE_* variables sortie relies on.
+// agents cannot mask SAKUSEN_* variables sakusen relies on.
 func MergeEnv(contract map[string]string, agentEnv map[string]string) map[string]string {
 	out := make(map[string]string, len(contract)+len(agentEnv))
 	for k, v := range agentEnv {

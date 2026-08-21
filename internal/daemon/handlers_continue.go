@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/agent"
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/agent"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 func (s *Server) handleContinueTask(conn net.Conn, req ContinueTaskRequest) {
@@ -412,7 +412,7 @@ func (s *Server) cleanupWorktreeAndBranch(pc *projectContext, t *task.Task) {
 			}
 			pc.repo.CleanupWorktrees()
 		}
-		// Only delete branches that sortie created; preserve user-provided branches
+		// Only delete branches that sakusen created; preserve user-provided branches
 		if t.Branch != "" && t.CheckoutBranch == "" {
 			if err := pc.repo.ForceDeleteBranch(t.Branch); err != nil {
 				log.Printf("%sWarning: failed to delete branch for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)

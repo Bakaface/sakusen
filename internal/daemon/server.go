@@ -17,15 +17,15 @@ import (
 
 	"path/filepath"
 
-	"github.com/Bakaface/sortie/internal/agent"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/merge"
-	"github.com/Bakaface/sortie/internal/notify"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/agent"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/merge"
+	"github.com/Bakaface/sakusen/internal/notify"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 const (
@@ -41,12 +41,12 @@ type projectContext struct {
 	engine        *workflow.Engine
 	repoRoot      string
 	repo          *gitpkg.Repo // git operations scoped to repoRoot / task worktrees
-	configModTime time.Time    // zero = no .sortie.yml at load time
+	configModTime time.Time    // zero = no .sakusen.yml at load time
 	// tracksFingerprint is a cheap freshness signal over the project's
-	// .sortie/tracks tree and the global ~/.sortie/tracks tree
+	// .sakusen/tracks tree and the global ~/.sakusen/tracks tree
 	// ("maxMtimeUnixNano:fileCount", "" when neither exists). Without it,
 	// track workflow files created at runtime would never be picked up —
-	// the config cache invalidates only on .sortie.yml mtime otherwise.
+	// the config cache invalidates only on .sakusen.yml mtime otherwise.
 	tracksFingerprint string
 }
 
@@ -84,7 +84,7 @@ type Server struct {
 	// WITHOUT this signal means the status was overwritten by a concurrent
 	// request while the agent ran, and finalization must proceed rather than
 	// stranding the task. Kept on the Server (not the Engine) because engines
-	// are reconstructed on .sortie.yml changes.
+	// are reconstructed on .sakusen.yml changes.
 	enginePaused map[int64]bool
 
 	// taskFlowLocks serializes user/daemon-driven lifecycle transitions
@@ -106,7 +106,7 @@ type Server struct {
 	// on it after wg.Wait() so process exit cannot preempt shutdown's tail:
 	// shutdown() runs on a connection (or signal) goroutine and its first act —
 	// closing the listener — unblocks the accept loop, so wg.Wait() returns
-	// while shutdown() is still mid-flight (the sortie#337 stale-pid race).
+	// while shutdown() is still mid-flight (the sakusen#337 stale-pid race).
 	shutdownDone chan struct{}
 }
 
@@ -176,12 +176,12 @@ func (s *Server) taskFlowLock(taskID int64) *sync.Mutex {
 	return mu
 }
 
-// getProjectContext lazy-loads and caches per-project config (.sortie.yml) and
+// getProjectContext lazy-loads and caches per-project config (.sakusen.yml) and
 // the workflow Engine bound to it. Callers MUST route through this function —
 // every site in internal/daemon/ does, and the only direct config.LoadForProject
 // call lives below.
 //
-// Design note (audited 2026-05, sortie#62): this is a private method, not a
+// Design note (audited 2026-05, sakusen#62): this is a private method, not a
 // ProjectContextStore module. The two direct reads of s.projects elsewhere are
 // intentional and would survive extraction — broadcast.go's taskToInfo() peeks
 // the map without triggering a load (a serializer should not issue DB queries),
@@ -191,7 +191,7 @@ func (s *Server) taskFlowLock(taskID int64) *sync.Mutex {
 // indirection without leverage. The natural cache key is projectID (carried on
 // every *task.Task), not repoRoot, so the conventional Store.Get(repoRoot)
 // shape would push an extra DB lookup into callers. Invalidation lives below
-// via .sortie.yml mod-time check; no handler needs an Invalidate() API.
+// via .sakusen.yml mod-time check; no handler needs an Invalidate() API.
 // Concurrent first-time loads can race, but the duplicated work is a YAML parse
 // and the loser's *projectContext is GC'd — per-repo merge locks (now owned by
 // internal/merge) are keyed independently, so merge serialization survives the
@@ -202,8 +202,8 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	if pc, ok := s.projects[projectID]; ok {
 		s.projectsMu.RUnlock()
 
-		// Check if .sortie.yml has changed since we cached
-		configPath := filepath.Join(pc.repoRoot, ".sortie.yml")
+		// Check if .sakusen.yml has changed since we cached
+		configPath := filepath.Join(pc.repoRoot, ".sakusen.yml")
 		info, statErr := os.Stat(configPath)
 		fresh := false
 		switch {
@@ -242,7 +242,7 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 
 	// Stat config file for future invalidation checks
 	var modTime time.Time
-	configPath := filepath.Join(proj.Path, ".sortie.yml")
+	configPath := filepath.Join(proj.Path, ".sakusen.yml")
 	if info, err := os.Stat(configPath); err == nil {
 		modTime = info.ModTime()
 	}
@@ -271,13 +271,13 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 }
 
 // tracksFingerprint returns "maxMtimeUnixNano:fileCount" over the project's
-// .sortie/tracks tree and the global ~/.sortie/tracks tree, or "" when neither
+// .sakusen/tracks tree and the global ~/.sakusen/tracks tree, or "" when neither
 // exists / contains anything. The walk is shallow and deterministic: each
 // tracks dir, each slug-dir entry, each <slug>/workflows dir, and each
 // .yml/.yaml file inside it contribute their mtimes; only workflow files count
 // toward fileCount (so deletions are caught by the count component even when
 // max-mtime doesn't move). Used by getProjectContext as a second config-cache
-// freshness signal alongside the .sortie.yml mtime.
+// freshness signal alongside the .sakusen.yml mtime.
 func tracksFingerprint(repoRoot string) string {
 	var maxMtime int64
 	var fileCount int
@@ -326,10 +326,10 @@ func tracksFingerprint(repoRoot string) string {
 	}
 
 	if repoRoot != "" {
-		scanTracksDir(filepath.Join(repoRoot, ".sortie", "tracks"))
+		scanTracksDir(filepath.Join(repoRoot, ".sakusen", "tracks"))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		scanTracksDir(filepath.Join(home, ".sortie", "tracks"))
+		scanTracksDir(filepath.Join(home, ".sakusen", "tracks"))
 	}
 
 	if maxMtime == 0 && fileCount == 0 {
@@ -355,7 +355,7 @@ func (s *Server) getProjectDataDir(t *task.Task) string {
 	if err != nil {
 		return config.GetGlobalDataDir()
 	}
-	return filepath.Join(pc.repoRoot, ".sortie")
+	return filepath.Join(pc.repoRoot, ".sakusen")
 }
 
 func (s *Server) getProjectRepoRoot(t *task.Task) string {
@@ -471,7 +471,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 
 	// Connection-lifecycle logging — without this, broken-pipe symptoms are
-	// impossible to root-cause from post-hoc state (see sortie-102).
+	// impossible to root-cause from post-hoc state (see sakusen-102).
 	if err := scanner.Err(); err != nil {
 		log.Printf("daemon: connection closed with scanner error (conn=%p): %v", conn, err)
 	} else {

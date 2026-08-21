@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	gitpkg "github.com/Bakaface/sortie/internal/git"
-	"github.com/Bakaface/sortie/internal/task"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // initFastTrackTestRepo creates a throwaway git repo with a single initial

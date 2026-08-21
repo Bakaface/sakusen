@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func TestGetAllTasks_SortedDescending(t *testing.T) {
@@ -475,7 +475,7 @@ func TestResetTaskForRetryPreservesWorktree(t *testing.T) {
 	if err := database.UpdateTaskWorktreePath(created.ID, "/tmp/worktree/tmux-task"); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.FinalizeTaskIdentity(created.ID, "Tmux task", "tmux-task", "sortie/tmux-task"); err != nil {
+	if err := database.FinalizeTaskIdentity(created.ID, "Tmux task", "tmux-task", "sakusen/tmux-task"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -499,7 +499,7 @@ func TestResetTaskForRetryPreservesWorktree(t *testing.T) {
 	if updated.WorktreePath != "/tmp/worktree/tmux-task" {
 		t.Errorf("expected worktree_path to be preserved, got %q", updated.WorktreePath)
 	}
-	if updated.Branch != "sortie/tmux-task" {
+	if updated.Branch != "sakusen/tmux-task" {
 		t.Errorf("expected branch to be preserved, got %q", updated.Branch)
 	}
 }

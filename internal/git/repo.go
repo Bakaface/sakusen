@@ -29,13 +29,13 @@ func NewRepo(root string) *Repo {
 // Root returns the repository root path this Repo was constructed with.
 func (r *Repo) Root() string { return r.root }
 
-// worktreePath returns the on-disk path sortie uses for a worktree checking
+// worktreePath returns the on-disk path sakusen uses for a worktree checking
 // out branchName. This is the single place the worktree layout convention
-// (<repoRoot>/.sortie/worktrees/<dir>) and the branch-name-to-directory-name
+// (<repoRoot>/.sakusen/worktrees/<dir>) and the branch-name-to-directory-name
 // sanitization (slashes aren't valid path segments) are defined — both
 // CreateWorktree and CheckoutWorktree resolve through it so the convention
 // cannot drift between them.
 func (r *Repo) worktreePath(branchName string) string {
 	dirName := strings.ReplaceAll(branchName, "/", "-")
-	return filepath.Join(r.root, ".sortie", "worktrees", dirName)
+	return filepath.Join(r.root, ".sakusen", "worktrees", dirName)
 }

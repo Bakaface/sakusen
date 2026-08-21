@@ -1,9 +1,9 @@
 ---
 name: config
 description: >
-  Sortie's configuration system: .sortie.yml parsing, loading hierarchy, workflow
+  Sakusen's configuration system: .sakusen.yml parsing, loading hierarchy, workflow
   definitions, step/loop config, project type detection, and branch template resolution.
-  Use when editing files in internal/config/, working on .sortie.yml parsing,
+  Use when editing files in internal/config/, working on .sakusen.yml parsing,
   workflow definitions, project detection, or configuration loading.
 ---
 
@@ -12,9 +12,9 @@ description: >
 ## Loading Hierarchy (highest priority last)
 
 1. Built-in defaults
-2. `~/.config/sortie/config.yaml` (global daemon — `GlobalConfig`)
-3. `~/.sortie.yml` (global workflow defaults)
-4. `./.sortie.yml` (project-specific, wins)
+2. `~/.config/sakusen/config.yaml` (global daemon — `GlobalConfig`)
+3. `~/.sakusen.yml` (global workflow defaults)
+4. `./.sakusen.yml` (project-specific, wins)
 
 ```go
 Load() (*Config, error)                    // From current directory
@@ -23,7 +23,7 @@ LoadForProject(projectDir string) (*Config, error)  // From specific path
 
 ## Key Types
 
-### ProjectConfig (.sortie.yml)
+### ProjectConfig (.sakusen.yml)
 
 ```go
 type ProjectConfig struct {
@@ -50,7 +50,7 @@ type ProjectConfig struct {
 Removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`) are hard
 load-time migration errors surfaced by `checkRemovedProjectKeys` (agents.go) on the raw YAML.
 
-`WorkflowEntry` is a single item in the flat `workflows:` list — exactly one of `Ref` (string) or `Inline` (`*WorkflowConfig`) is set. String entries resolve to `.sortie/workflows/<name>.yml` (local first, then global pool).
+`WorkflowEntry` is a single item in the flat `workflows:` list — exactly one of `Ref` (string) or `Inline` (`*WorkflowConfig`) is set. String entries resolve to `.sakusen/workflows/<name>.yml` (local first, then global pool).
 
 ### OptionsConfig
 
@@ -59,7 +59,7 @@ type OptionsConfig struct {
     Number    *bool            // show line numbers
     Branch    *bool            // show branch column
     Target    *bool            // show target branch column
-    Animation *AnimationConfig // sortie animation on task submit
+    Animation *AnimationConfig // sakusen animation on task submit
 }
 
 type AnimationConfig struct {
@@ -96,8 +96,8 @@ type WorkflowConfig struct {
     TmuxSetupCommand      string                  // Per-workflow tmux setup command (override project-level)
 
     // Populated by the loader, not from YAML:
-    Hidden                bool                    // file-based workflow not referenced from .sortie.yml
-    Source                string                  // "inline" or path under .sortie/workflows/
+    Hidden                bool                    // file-based workflow not referenced from .sakusen.yml
+    Source                string                  // "inline" or path under .sakusen/workflows/
     FromGlobal            bool                    // definition adopted from the global scope
 }
 ```
@@ -106,7 +106,7 @@ Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + ta
 
 The removed `tmux:` and `print:` fields are rejected at parse time (workflow and step level) with migration errors — execution mode now comes from the resolved agent record's `mode` (see the Agents section below).
 
-### GlobalConfig (~/.config/sortie/config.yaml)
+### GlobalConfig (~/.config/sakusen/config.yaml)
 
 ```go
 type GlobalConfig struct {
@@ -131,13 +131,13 @@ the merged `Agents` registry, `DefaultAgent`, `Summarizer`, and the resolved `Wo
 type AgentConfig struct {
     Mode           string            // "headless" (default when empty) or "tmux"
     Command        string            // required; run via `sh -c` in the task workdir
-    ResumeCommand  string            // tmux-only: resume with SORTIE_SESSION_ID after daemon restart
+    ResumeCommand  string            // tmux-only: resume with SAKUSEN_SESSION_ID after daemon restart
     ChatLogCommand string            // tmux-only: prints the chat log on stdout for summarize_chat
     Env            map[string]string // extra env for every spawn of this agent
 }
 
 type SummarizerConfig struct {
-    Command        string // prompt on stdin, response on stdout; SORTIE_PURPOSE tags the call site
+    Command        string // prompt on stdin, response on stdout; SAKUSEN_PURPOSE tags the call site
     MaxPromptBytes int    // >0 → map-reduce chunking ceiling; 0 disables chunking
 }
 ```
@@ -166,17 +166,17 @@ type VerificationConfig struct {
 
 ## Workflow List
 
-`workflows:` is a flat YAML sequence. Each item is either a string ref (resolves to `.sortie/workflows/<name>.yml`) or an inline mapping:
+`workflows:` is a flat YAML sequence. Each item is either a string ref (resolves to `.sakusen/workflows/<name>.yml`) or an inline mapping:
 
 ```yaml
 workflows:
   - name: fast                   # no pins → always prompts New Task screen
     steps: [...]
-  - update-changelog             # string ref → .sortie/workflows/update-changelog.yml
+  - update-changelog             # string ref → .sakusen/workflows/update-changelog.yml
   - name: housekeeping           # all fields pinned → skips New Task screen
     description: "Run standard maintenance"
     worktree: true
-    branch: sortie/housekeeping-{{task.id}}
+    branch: sakusen/housekeeping-{{task.id}}
     target: main
     steps: [...]
 ```
@@ -185,7 +185,7 @@ workflows:
 
 ### Track Workflows
 
-Per-track workflow files live under `.sortie/tracks/<slug>/workflows/*.yml` (project tier) and `~/.sortie/tracks/<slug>/workflows/*.yml` (global tier). `appendTrackWorkflows` (called from `Load()`/`LoadForProject()` AFTER project-level resolution — never inside `loadProjectConfig`) registers them as `Hidden: true` workflows named `<slug>:<name>`; project shadows global on identical namespaced names. They follow the same file rules as `.sortie/workflows/` (flat, kebab-case, no `name:` field) and go through the same pin/loop/step validation. See `internal/config/CLAUDE.md` for the full invariant.
+Per-track workflow files live under `.sakusen/tracks/<slug>/workflows/*.yml` (project tier) and `~/.sakusen/tracks/<slug>/workflows/*.yml` (global tier). `appendTrackWorkflows` (called from `Load()`/`LoadForProject()` AFTER project-level resolution — never inside `loadProjectConfig`) registers them as `Hidden: true` workflows named `<slug>:<name>`; project shadows global on identical namespaced names. They follow the same file rules as `.sakusen/workflows/` (flat, kebab-case, no `name:` field) and go through the same pin/loop/step validation. See `internal/config/CLAUDE.md` for the full invariant.
 
 ## StepConfig
 
@@ -205,7 +205,7 @@ type StepConfig struct {
 
 **Summarization strategies**: `summarize_chat` (default when unset) runs the configured `summarizer:` command over the full chat log; `last_message` keeps the headless agent's result text — cheaper but often misleading and unusable for tmux steps (which have no result text). The default is resolved via `StepConfig.EffectiveSummarizationStrategy()` and lives in `DefaultSummarizationStrategy`. Validated at config load via `ValidateSteps()`.
 
-**Summarizer command**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles, backfill-context) runs the single top-level `summarizer:` command via `runner.RunSync` — prompt on stdin, response on stdout, `SORTIE_PURPOSE` tagging the call site. `SummarizerConfig.MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; there is no model selection in sortie — pick the model inside the command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
+**Summarizer command**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles, backfill-context) runs the single top-level `summarizer:` command via `runner.RunSync` — prompt on stdin, response on stdout, `SAKUSEN_PURPOSE` tagging the call site. `SummarizerConfig.MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; there is no model selection in sakusen — pick the model inside the command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 
@@ -240,7 +240,7 @@ Returns workflow-level paths if set, otherwise project-level `WorktreeSyncPaths`
 
 ## Branch Templates
 
-Default: `"sortie/{{task_id}}-{{task_slug}}"`
+Default: `"sakusen/{{task_id}}-{{task_slug}}"`
 
 Variables: `{{task_id}}`, `{{task_slug}}`, `{{task.title}}`, `{{task.id}}`, `{{task.slug}}`
 
@@ -262,7 +262,7 @@ WriteProjectConfig(path string, proj *ProjectConfig) error  // Package-level fun
 ## Exported Utilities
 
 ```go
-GetGlobalDataDir() string                           // ~/.config/sortie/ (respects XDG_CONFIG_HOME)
+GetGlobalDataDir() string                           // ~/.config/sakusen/ (respects XDG_CONFIG_HOME)
 SanitizeProjectName(name string) string             // Replaces dots with underscores
 ```
 
@@ -275,7 +275,7 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 | `agents.go` | `AgentConfig`/`SummarizerConfig`, the step→workflow→default_agent→"claude" cascade (`StepAgent` etc.), `validateAgents`, `mergeAgents`, `checkRemovedProjectKeys` (removed-key migration errors) |
 | `accessors.go` | Workflow accessors, branch templates, save (`GetWorkflow()`, `ListWorkflowNames()`, `ResolveBranchTemplate()`, `Save()`) |
 | `detect.go` | Project type detection (`DetectProject()`) |
-| `validate.go` | Single-file validation for `sortie validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |
+| `validate.go` | Single-file validation for `sakusen validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |
 
 ## Project Detection (detect.go)
 

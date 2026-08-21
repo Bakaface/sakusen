@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // TestDecideInitialStepContext_Precedence is a table-driven test for the pure
@@ -400,7 +400,7 @@ func TestCaptureHeadlessStepContextNoSummarizerDegrades(t *testing.T) {
 // above): with a configured summarizer command, the summary it produces
 // REPLACES the initially-captured last_message context via
 // UpdateTaskStepContext, and the summarizer is invoked with
-// SORTIE_PURPOSE=summarize_chat.
+// SAKUSEN_PURPOSE=summarize_chat.
 func TestCaptureHeadlessStepContextSummarizeChatOverwrites(t *testing.T) {
 	wf := config.WorkflowConfig{
 		Name: "default",
@@ -414,10 +414,10 @@ func TestCaptureHeadlessStepContextSummarizeChatOverwrites(t *testing.T) {
 
 	// Configure a summarizer post-construction via the engineConfig snapshot
 	// (same-package seam; the helper's config has none). The stub records its
-	// SORTIE_PURPOSE and emits a fixed summary.
+	// SAKUSEN_PURPOSE and emits a fixed summary.
 	purposeLog := filepath.Join(t.TempDir(), "purpose.log")
 	engine.cfg.Summarizer = config.SummarizerConfig{
-		Command: fmt.Sprintf(`cat > /dev/null; echo "$SORTIE_PURPOSE" >> %q; echo chat-summary`, purposeLog),
+		Command: fmt.Sprintf(`cat > /dev/null; echo "$SAKUSEN_PURPOSE" >> %q; echo chat-summary`, purposeLog),
 	}
 
 	// A unified task log with a step region larger than smallChatBytes so
@@ -450,6 +450,6 @@ func TestCaptureHeadlessStepContextSummarizeChatOverwrites(t *testing.T) {
 		t.Fatalf("summarizer stub never ran: %v", err)
 	}
 	if strings.TrimSpace(string(purposes)) != "summarize_chat" {
-		t.Errorf("SORTIE_PURPOSE log = %q, want a single %q invocation", string(purposes), "summarize_chat")
+		t.Errorf("SAKUSEN_PURPOSE log = %q, want a single %q invocation", string(purposes), "summarize_chat")
 	}
 }

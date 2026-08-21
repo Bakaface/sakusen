@@ -10,7 +10,7 @@ import (
 )
 
 // mixedAgentsYAML defines two headless agent records that both point at the
-// generic stub but are distinguishable via the SORTIE_AGENT env var (logged by
+// generic stub but are distinguishable via the SAKUSEN_AGENT env var (logged by
 // the stub) and a per-record env marker. The workflow default is agent-one;
 // the second step overrides with agent: agent-two.
 func mixedAgentsYAML(stubPath string) string {
@@ -44,13 +44,13 @@ workflows:
 // TestMixedAgentsPerStep verifies the agent abstraction end-to-end: two agent
 // records, selected per step via the cascade (workflow default vs step-level
 // override), both executing through the generic env contract
-// (SORTIE_PROMPT_FILE / SORTIE_RESULT_FILE), with step context flowing from
+// (SAKUSEN_PROMPT_FILE / SAKUSEN_RESULT_FILE), with step context flowing from
 // one agent's step to the other's prompt.
 func TestMixedAgentsPerStep(t *testing.T) {
 	e := setupE2E(t, "mixed_agents")
-	e.WriteSortieYAML(mixedAgentsYAML(e.StubPath))
+	e.WriteSakusenYAML(mixedAgentsYAML(e.StubPath))
 
-	e.MustSortie("create", "--title", "mixed agents", "mixed agents task")
+	e.MustSakusen("create", "--title", "mixed agents", "mixed agents task")
 
 	e.WaitStatus(1, "completed", 15*time.Second)
 	e.AssertMergedFor(1)
@@ -63,15 +63,15 @@ func TestMixedAgentsPerStep(t *testing.T) {
 	for _, c := range calls {
 		byStep[c.Step] = c
 	}
-	if got := byStep["first"].Env["SORTIE_AGENT"]; got != "agent-one" {
+	if got := byStep["first"].Env["SAKUSEN_AGENT"]; got != "agent-one" {
 		t.Errorf("step first ran under agent %q, want agent-one", got)
 	}
-	if got := byStep["second"].Env["SORTIE_AGENT"]; got != "agent-two" {
+	if got := byStep["second"].Env["SAKUSEN_AGENT"]; got != "agent-two" {
 		t.Errorf("step second ran under agent %q, want agent-two", got)
 	}
 
 	// The per-record env: map must reach the spawned command — the stub logs
-	// SORTIE_* and E2E_* vars into the TSV, so assert the marker directly.
+	// SAKUSEN_* and E2E_* vars into the TSV, so assert the marker directly.
 	if got := byStep["first"].Env["E2E_AGENT_MARKER"]; got != "one" {
 		t.Errorf("step first E2E_AGENT_MARKER = %q, want %q", got, "one")
 	}
@@ -132,9 +132,9 @@ workflows:
 // step names first/second).
 func TestWorkflowLevelAgent(t *testing.T) {
 	e := setupE2E(t, "mixed_agents")
-	e.WriteSortieYAML(workflowAgentYAML(e.StubPath))
+	e.WriteSakusenYAML(workflowAgentYAML(e.StubPath))
 
-	e.MustSortie("create", "--title", "workflow agent", "workflow agent task")
+	e.MustSakusen("create", "--title", "workflow agent", "workflow agent task")
 
 	e.WaitStatus(1, "completed", 15*time.Second)
 	e.AssertMergedFor(1)
@@ -147,13 +147,13 @@ func TestWorkflowLevelAgent(t *testing.T) {
 	for _, c := range calls {
 		byStep[c.Step] = c
 	}
-	if got := byStep["first"].Env["SORTIE_AGENT"]; got != "agent-two" {
+	if got := byStep["first"].Env["SAKUSEN_AGENT"]; got != "agent-two" {
 		t.Errorf("step first ran under agent %q, want workflow-level agent-two", got)
 	}
 	if got := byStep["first"].Env["E2E_AGENT_MARKER"]; got != "two" {
 		t.Errorf("step first E2E_AGENT_MARKER = %q, want %q", got, "two")
 	}
-	if got := byStep["second"].Env["SORTIE_AGENT"]; got != "agent-three" {
+	if got := byStep["second"].Env["SAKUSEN_AGENT"]; got != "agent-three" {
 		t.Errorf("step second ran under agent %q, want step-level agent-three", got)
 	}
 	if got := byStep["second"].Env["E2E_AGENT_MARKER"]; got != "three" {

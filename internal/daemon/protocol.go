@@ -289,7 +289,7 @@ type WorkflowSummary struct {
 	FullySpec       bool                  `json:"fully_spec"`                   // every New Task field pinned → screen can be skipped
 	Agent           string                `json:"agent,omitempty"`              // workflow-level explicit agent slug (steps may override)
 	FirstStepIsTmux bool                  `json:"first_step_is_tmux,omitempty"` // derived; useful for picking interactive workflows
-	Hidden          bool                  `json:"hidden,omitempty"`             // file-based workflow not referenced from .sortie.yml
+	Hidden          bool                  `json:"hidden,omitempty"`             // file-based workflow not referenced from .sakusen.yml
 	Source          string                `json:"source,omitempty"`             // "inline" or path to defining file
 	Steps           []WorkflowStepSummary `json:"steps,omitempty"`
 }
@@ -444,7 +444,7 @@ type ListTracksResponse struct {
 }
 
 // SetTrackContextRequest is the CLI-facing arbitrary-track context write
-// (sortie tracks set-context). The MCP path uses UpdateTaskTrackContextRequest
+// (sakusen tracks set-context). The MCP path uses UpdateTaskTrackContextRequest
 // instead — same split as MsgUpdateStepContext vs MsgUpdateActiveStepContext.
 type SetTrackContextRequest struct {
 	ProjectPath string `json:"project_path,omitempty"`
@@ -464,7 +464,7 @@ type UpdateTaskTrackContextRequest struct {
 }
 
 // SetTrackDescriptionRequest is the CLI-facing arbitrary-track description
-// write (sortie tracks set-description). Replace-only — there is no append
+// write (sakusen tracks set-description). Replace-only — there is no append
 // mode, that concept belongs to the context accumulator.
 type SetTrackDescriptionRequest struct {
 	ProjectPath string `json:"project_path,omitempty"`

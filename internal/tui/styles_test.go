@@ -7,15 +7,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func TestAppTitleContainsAirplane(t *testing.T) {
-	if !strings.Contains(AppTitle, "✈") {
-		t.Errorf("AppTitle should contain airplane (✈), got %q", AppTitle)
-	}
-}
-
-func TestAppTitleContainsSortie(t *testing.T) {
-	if !strings.Contains(AppTitle, "Sortie") {
-		t.Errorf("AppTitle should contain 'Sortie', got %q", AppTitle)
+func TestAppTitleIsJapaneseSakusen(t *testing.T) {
+	if !strings.Contains(AppTitle, "作戦") {
+		t.Errorf("AppTitle should contain 作戦, got %q", AppTitle)
 	}
 }
 

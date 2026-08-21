@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/client"
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -21,7 +21,7 @@ type CreateTaskArgs struct {
 	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every task except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch tasks still run their workflow steps, so the requirement applies to them too. A workflow may pin fields like input/worktree/branch/target; explicit arguments here override those pins."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent. Defaults to the project's configured priority."`
 	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'. Supports {{task.id}}, {{task.title}}, {{task.slug}}."`
-	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override (defaults to git.base_branch from .sortie.yml)."`
+	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override (defaults to git.base_branch from .sakusen.yml)."`
 	CheckoutBranch string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one. Mutually exclusive with branch_name."`
 	Worktree       *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree. Defaults to the project's preference (usually true)."`
 	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
@@ -39,7 +39,7 @@ const readyTimeout = 45 * time.Second
 func registerCreateTask(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"create_task",
-		mcp.WithDescription("Create a new sortie task. The task is queued; the daemon will assign an agent when capacity allows. Returns the created TaskInfo as JSON. The workflow argument is required — call list_workflows first to choose one. Only tmux_direct tasks may omit it (they skip the workflow entirely); checkout_branch tasks still run their workflow, so it stays required for them."),
+		mcp.WithDescription("Create a new sakusen task. The task is queued; the daemon will assign an agent when capacity allows. Returns the created TaskInfo as JSON. The workflow argument is required — call list_workflows first to choose one. Only tmux_direct tasks may omit it (they skip the workflow entirely); checkout_branch tasks still run their workflow, so it stays required for them."),
 		mcp.WithInputSchema[CreateTaskArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args CreateTaskArgs) (*mcp.CallToolResult, error) {

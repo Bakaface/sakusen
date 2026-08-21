@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/agent"
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/agent"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // These tests cover the fixes for the 2026-07-13 task #220 incident: two
@@ -23,29 +23,29 @@ import (
 // pause and skipped finalization, stranding the task.
 
 // newAdvanceTestServer builds a Server against a real git repo carrying the
-// given .sortie.yml (getProjectContext loads project config from disk, so an
+// given .sakusen.yml (getProjectContext loads project config from disk, so an
 // in-memory config would not be honored). The repo's HEAD is an empty commit
 // so HasMeaningfulChanges is false and finalization fast-tracks to completed
 // without spawning merge/summarizer subprocesses.
-func newAdvanceTestServer(t *testing.T, sortieYML string) (*Server, *db.DB, int64) {
+func newAdvanceTestServer(t *testing.T, sakusenYML string) (*Server, *db.DB, int64) {
 	t.Helper()
 
 	// Isolate config loading from the developer's real global config
-	// (~/.sortie.yml and ~/.config/sortie/config.yaml): the workflows these
-	// tests rely on must come from the project .sortie.yml written below.
+	// (~/.sakusen.yml and ~/.config/sakusen/config.yaml): the workflows these
+	// tests rely on must come from the project .sakusen.yml written below.
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	repoDir := initRecoveryTestRepo(t)
 
-	if err := os.WriteFile(filepath.Join(repoDir, ".sortie.yml"), []byte(sortieYML), 0644); err != nil {
-		t.Fatalf("failed to write .sortie.yml: %v", err)
+	if err := os.WriteFile(filepath.Join(repoDir, ".sakusen.yml"), []byte(sakusenYML), 0644); err != nil {
+		t.Fatalf("failed to write .sakusen.yml: %v", err)
 	}
 	for _, args := range [][]string{
-		// -f: the user's global excludes may ignore .sortie.yml; the repo must
+		// -f: the user's global excludes may ignore .sakusen.yml; the repo must
 		// end up clean with the config tracked so fast-track sees no changes.
-		{"git", "add", "-f", "--", ".sortie.yml"},
-		{"git", "commit", "-q", "-m", "add sortie config"},
+		{"git", "add", "-f", "--", ".sakusen.yml"},
+		{"git", "commit", "-q", "-m", "add sakusen config"},
 		{"git", "commit", "-q", "--allow-empty", "-m", "empty"},
 	} {
 		cmd := exec.Command(args[0], args[1:]...)

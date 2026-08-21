@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/client"
+	"github.com/Bakaface/sakusen/internal/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -18,7 +18,7 @@ type UpdateTaskInputArgs struct {
 func registerUpdateTaskInput(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"update_task_input",
-		mcp.WithDescription("Replace a sortie task's input (the text that seeds {{task.input}} in step prompts). The daemon validates any {{tasks.<id>.<field>}} references against the new value before applying it (a bad reference leaves the input untouched) and auto-adds newly referenced tasks as blockers. Returns the updated TaskInfo as JSON."),
+		mcp.WithDescription("Replace a sakusen task's input (the text that seeds {{task.input}} in step prompts). The daemon validates any {{tasks.<id>.<field>}} references against the new value before applying it (a bad reference leaves the input untouched) and auto-adds newly referenced tasks as blockers. Returns the updated TaskInfo as JSON."),
 		mcp.WithInputSchema[UpdateTaskInputArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args UpdateTaskInputArgs) (*mcp.CallToolResult, error) {

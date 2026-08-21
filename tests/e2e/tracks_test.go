@@ -33,16 +33,16 @@ workflows:
 
 // TestTracks_ContextInterpolationAndAccumulation drives the full sprint loop:
 // a global parent track + project child track, a task whose prompt renders the
-// root-first chain, SORTIE_TRACK_ID in the step env, then a live context
+// root-first chain, SAKUSEN_TRACK_ID in the step env, then a live context
 // append followed by a second task that sees the accumulated context.
 func TestTracks_ContextInterpolationAndAccumulation(t *testing.T) {
 	e := setupE2E(t, "tracks")
-	e.WriteSortieYAML(trackWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(trackWorkflowYAML(e.StubPath))
 
-	e.MustSortie("tracks", "create", "Sprint 12", "--global", "--context", "sprint goal")
-	e.MustSortie("tracks", "create", "Payments API", "--parent", "sprint-12", "--context", "seed")
+	e.MustSakusen("tracks", "create", "Sprint 12", "--global", "--context", "sprint goal")
+	e.MustSakusen("tracks", "create", "Payments API", "--parent", "sprint-12", "--context", "seed")
 
-	e.MustSortie("create", "--track", "payments-api", "--title", "task one", "task one")
+	e.MustSakusen("create", "--track", "payments-api", "--title", "task one", "task one")
 	e.WaitStatus(1, "completed", 10*time.Second)
 
 	// The task row must carry the track id.
@@ -77,19 +77,19 @@ func TestTracks_ContextInterpolationAndAccumulation(t *testing.T) {
 		t.Errorf("own_context must be leaf-only, got:\n%s", ownSection)
 	}
 
-	// SORTIE_TRACK_ID must be exported to the step agent.
+	// SAKUSEN_TRACK_ID must be exported to the step agent.
 	steps := e.StubCalls("step")
 	if len(steps) == 0 {
 		t.Fatal("no step stub calls recorded")
 	}
-	if got := steps[0].Env["SORTIE_TRACK_ID"]; got != fmt.Sprintf("%d", trackID) {
-		t.Errorf("SORTIE_TRACK_ID = %q, want %d", got, trackID)
+	if got := steps[0].Env["SAKUSEN_TRACK_ID"]; got != fmt.Sprintf("%d", trackID) {
+		t.Errorf("SAKUSEN_TRACK_ID = %q, want %d", got, trackID)
 	}
 
 	// Live accumulation: append context, then a second task must see both the
 	// original seed and the new fragment.
-	e.MustSortie("tracks", "set-context", "payments-api", "--append", "endpoint A done")
-	e.MustSortie("create", "--track", "payments-api", "--title", "task two", "task two")
+	e.MustSakusen("tracks", "set-context", "payments-api", "--append", "endpoint A done")
+	e.MustSakusen("create", "--track", "payments-api", "--title", "task two", "task two")
 	e.WaitStatus(2, "completed", 10*time.Second)
 
 	prompt2 := e.CapturedPrompt(2, "implementing")
@@ -104,15 +104,15 @@ func TestTracks_ContextInterpolationAndAccumulation(t *testing.T) {
 // selected for a task created without an explicit workflow.
 func TestTracks_TrackWorkflowSelected(t *testing.T) {
 	e := setupE2E(t, "tracks")
-	e.WriteSortieYAML(trackWorkflowYAML(e.StubPath))
+	e.WriteSakusenYAML(trackWorkflowYAML(e.StubPath))
 
 	// Warm the daemon's config cache for this project first: creating a task
 	// routes through getProjectContext, which caches the resolved config.
-	e.MustSortie("create", "--title", "warmup", "warmup task")
+	e.MustSakusen("create", "--title", "warmup", "warmup task")
 	e.WaitStatus(1, "completed", 10*time.Second)
 
 	// Now drop a track workflow on disk — the fingerprint check must pick it up.
-	wfDir := filepath.Join(e.ProjectDir, ".sortie", "tracks", "payments-api", "workflows")
+	wfDir := filepath.Join(e.ProjectDir, ".sakusen", "tracks", "payments-api", "workflows")
 	if err := os.MkdirAll(wfDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestTracks_TrackWorkflowSelected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e.MustSortie("tracks", "create", "Payments API", "--workflow", "payments-api:impl")
-	e.MustSortie("create", "--track", "payments-api", "--title", "track wf task", "task using track workflow")
+	e.MustSakusen("tracks", "create", "Payments API", "--workflow", "payments-api:impl")
+	e.MustSakusen("create", "--track", "payments-api", "--title", "track wf task", "task using track workflow")
 
 	e.WaitStatus(2, "completed", 10*time.Second)
 

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func TestResolveTemplateTrackVars(t *testing.T) {
@@ -131,7 +131,7 @@ func newTrackedFakeRunnerTestEngine(t *testing.T, wf config.WorkflowConfig) (*En
 // TestRunTaskTrackContextInterpolatedAndEnvSet drives a real engine (fake
 // agent runner, in-memory DB) over a tracked task: the step's resolved prompt
 // must contain the root-first formatted chain and the leaf-only own context,
-// and the step env must carry SORTIE_TRACK_ID.
+// and the step env must carry SAKUSEN_TRACK_ID.
 func TestRunTaskTrackContextInterpolatedAndEnvSet(t *testing.T) {
 	wf := config.WorkflowConfig{
 		Name: "default",
@@ -166,13 +166,13 @@ func TestRunTaskTrackContextInterpolatedAndEnvSet(t *testing.T) {
 		t.Errorf("expected leaf name, got:\n%s", prompt)
 	}
 
-	if got, want := calls[0].env["SORTIE_TRACK_ID"], strconv.FormatInt(leaf.ID, 10); got != want {
-		t.Errorf("SORTIE_TRACK_ID = %q, want %q", got, want)
+	if got, want := calls[0].env["SAKUSEN_TRACK_ID"], strconv.FormatInt(leaf.ID, 10); got != want {
+		t.Errorf("SAKUSEN_TRACK_ID = %q, want %q", got, want)
 	}
 }
 
 // TestRunTaskTracklessEnvOmitsTrackID: trackless tasks must not export
-// SORTIE_TRACK_ID at all.
+// SAKUSEN_TRACK_ID at all.
 func TestRunTaskTracklessEnvOmitsTrackID(t *testing.T) {
 	wf := config.WorkflowConfig{
 		Name:  "default",
@@ -188,8 +188,8 @@ func TestRunTaskTracklessEnvOmitsTrackID(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(calls))
 	}
-	if _, ok := calls[0].env["SORTIE_TRACK_ID"]; ok {
-		t.Error("trackless task must not export SORTIE_TRACK_ID")
+	if _, ok := calls[0].env["SAKUSEN_TRACK_ID"]; ok {
+		t.Error("trackless task must not export SAKUSEN_TRACK_ID")
 	}
 }
 

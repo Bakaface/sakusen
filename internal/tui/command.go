@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/action"
-	"github.com/Bakaface/sortie/internal/config"
+	"github.com/Bakaface/sakusen/internal/action"
+	"github.com/Bakaface/sakusen/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

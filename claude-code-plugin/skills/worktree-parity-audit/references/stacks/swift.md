@@ -14,4 +14,4 @@ Marker file: `Package.swift`.
 
 ## Gotchas
 
-- **macOS-only stack.** Sortie on Linux won't help; flag and stop.
+- **macOS-only stack.** Sakusen on Linux won't help; flag and stop.

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
-	"github.com/Bakaface/sortie/internal/workflow"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // restoreYMLResumable defines a tmux-mode default agent WITH a resume_command,
@@ -45,29 +45,29 @@ workflows:
         prompt: do it
 `
 
-// setupRestoreProject creates a project dir holding the given .sortie.yml, a
+// setupRestoreProject creates a project dir holding the given .sakusen.yml, a
 // server, and a StatusTmux task running in the project root (no worktree, so
 // restoreTmuxSession falls back to the repo root as the workdir). The tmux
 // session a restore creates is killed on cleanup.
-func setupRestoreProject(t *testing.T, sortieYML string) (*Server, string, *task.Task) {
+func setupRestoreProject(t *testing.T, sakusenYML string) (*Server, string, *task.Task) {
 	t.Helper()
 	if !tmux.IsAvailable() {
 		t.Skip("tmux is not installed")
 	}
 
 	// Isolate config loading from the developer's real global config
-	// (~/.sortie.yml and ~/.config/sortie/config.yaml): agent resolution in
-	// these tests must come from the project .sortie.yml alone.
+	// (~/.sakusen.yml and ~/.config/sakusen/config.yaml): agent resolution in
+	// these tests must come from the project .sakusen.yml alone.
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	// Unique basename: it becomes the project name and thus the tmux session
 	// prefix, so parallel test runs can't collide on session names.
-	projectDir := filepath.Join(t.TempDir(), fmt.Sprintf("sortie-restore-%d", time.Now().UnixNano()))
+	projectDir := filepath.Join(t.TempDir(), fmt.Sprintf("sakusen-restore-%d", time.Now().UnixNano()))
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte(sortieYML), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(sakusenYML), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,7 +102,7 @@ func setupRestoreProject(t *testing.T, sortieYML string) (*Server, string, *task
 // label and checks it is syntactically valid bash.
 func readRestoreScript(t *testing.T, projectDir, label string) string {
 	t.Helper()
-	scriptPath := filepath.Join(projectDir, ".sortie", fmt.Sprintf("run-%s.sh", label))
+	scriptPath := filepath.Join(projectDir, ".sakusen", fmt.Sprintf("run-%s.sh", label))
 	data, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatalf("failed to read wrapper script %s: %v", scriptPath, err)
@@ -114,7 +114,7 @@ func readRestoreScript(t *testing.T, projectDir, label string) string {
 }
 
 // A recorded chats row + an agent with resume_command must auto-resume: the
-// wrapper script runs the resume command with SORTIE_SESSION_ID exported.
+// wrapper script runs the resume command with SAKUSEN_SESSION_ID exported.
 func TestRestoreTmuxSession_ResumesRecordedSession(t *testing.T) {
 	s, projectDir, tk := setupRestoreProject(t, restoreYMLResumable)
 
@@ -135,7 +135,7 @@ func TestRestoreTmuxSession_ResumesRecordedSession(t *testing.T) {
 	if !strings.Contains(got, "echo resume-session-cmd") {
 		t.Errorf("expected script to run the agent's resume_command\nscript:\n%s", got)
 	}
-	if !strings.Contains(got, `export SORTIE_SESSION_ID='sess-123'`) {
+	if !strings.Contains(got, `export SAKUSEN_SESSION_ID='sess-123'`) {
 		t.Errorf("expected script to export the recorded session id\nscript:\n%s", got)
 	}
 	if !strings.Contains(got, "exec bash") {
@@ -160,8 +160,8 @@ func TestRestoreTmuxSession_StartsFreshWithoutChatRow(t *testing.T) {
 	if !strings.Contains(got, "echo fresh-session-cmd") {
 		t.Errorf("expected script to run the agent's normal command\nscript:\n%s", got)
 	}
-	if strings.Contains(got, "SORTIE_SESSION_ID") {
-		t.Errorf("expected no SORTIE_SESSION_ID export for a fresh session\nscript:\n%s", got)
+	if strings.Contains(got, "SAKUSEN_SESSION_ID") {
+		t.Errorf("expected no SAKUSEN_SESSION_ID export for a fresh session\nscript:\n%s", got)
 	}
 }
 
@@ -186,8 +186,8 @@ func TestRestoreTmuxSession_StartsFreshWithoutResumeCommand(t *testing.T) {
 	if !strings.Contains(got, "echo fresh-session-cmd") {
 		t.Errorf("expected script to run the agent's normal command\nscript:\n%s", got)
 	}
-	if strings.Contains(got, "SORTIE_SESSION_ID") {
-		t.Errorf("expected no SORTIE_SESSION_ID export without resume_command\nscript:\n%s", got)
+	if strings.Contains(got, "SAKUSEN_SESSION_ID") {
+		t.Errorf("expected no SAKUSEN_SESSION_ID export without resume_command\nscript:\n%s", got)
 	}
 }
 
@@ -223,11 +223,11 @@ workflows:
 	tk.StepIndex = 2
 
 	// The step prompt the engine left on disk before the daemon died.
-	sortieDir := filepath.Join(projectDir, ".sortie")
-	if err := os.MkdirAll(sortieDir, 0755); err != nil {
+	sakusenDir := filepath.Join(projectDir, ".sakusen")
+	if err := os.MkdirAll(sakusenDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sortieDir, "step-prompt-review.txt"), []byte("review instructions"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(sakusenDir, "step-prompt-review.txt"), []byte("review instructions"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -246,11 +246,11 @@ workflows:
 	if strings.Contains(got, "echo interactive-cmd") {
 		t.Errorf("interactive fallback agent must not be used for a step restore\nscript:\n%s", got)
 	}
-	if !strings.Contains(got, `export SORTIE_STEP='review'`) {
-		t.Errorf("expected SORTIE_STEP export for the paused step\nscript:\n%s", got)
+	if !strings.Contains(got, `export SAKUSEN_STEP='review'`) {
+		t.Errorf("expected SAKUSEN_STEP export for the paused step\nscript:\n%s", got)
 	}
 
-	prompt, err := os.ReadFile(filepath.Join(sortieDir, "session-prompt-review.txt"))
+	prompt, err := os.ReadFile(filepath.Join(sakusenDir, "session-prompt-review.txt"))
 	if err != nil {
 		t.Fatalf("failed to read session prompt: %v", err)
 	}
@@ -293,10 +293,10 @@ workflows:
 }
 
 // TestSpawnInteractiveSession_ExportsEnvContract verifies the wrapper script
-// an interactive spawn writes carries sortie's full env contract, folds in the
+// an interactive spawn writes carries sakusen's full env contract, folds in the
 // agent record's `env:` map, and lets the contract win on key collisions
-// (runner.MergeEnv semantics: an agent env entry cannot mask a SORTIE_*
-// variable sortie relies on).
+// (runner.MergeEnv semantics: an agent env entry cannot mask a SAKUSEN_*
+// variable sakusen relies on).
 func TestSpawnInteractiveSession_ExportsEnvContract(t *testing.T) {
 	yml := `default_agent: interactive
 agents:
@@ -305,7 +305,7 @@ agents:
     command: 'echo agent-cmd'
     env:
       MY_AGENT_VAR: xyz
-      SORTIE_AGENT: masked
+      SAKUSEN_AGENT: masked
 workflows:
   - name: default
     steps:
@@ -320,11 +320,11 @@ workflows:
 
 	got := readRestoreScript(t, projectDir, "continue")
 	wantExports := []string{
-		fmt.Sprintf("export SORTIE_DONE_DIR='%s'", filepath.Join(projectDir, ".sortie", "step-done")),
-		`export SORTIE_DONE_PREFIX='continue'`,
-		`export SORTIE_AGENT='interactive'`,
-		fmt.Sprintf("export SORTIE_PROJECT_PATH='%s'", projectDir),
-		`export SORTIE_PURPOSE='step'`,
+		fmt.Sprintf("export SAKUSEN_DONE_DIR='%s'", filepath.Join(projectDir, ".sakusen", "step-done")),
+		`export SAKUSEN_DONE_PREFIX='continue'`,
+		`export SAKUSEN_AGENT='interactive'`,
+		fmt.Sprintf("export SAKUSEN_PROJECT_PATH='%s'", projectDir),
+		`export SAKUSEN_PURPOSE='step'`,
 		`export MY_AGENT_VAR='xyz'`,
 	}
 	for _, want := range wantExports {
@@ -333,7 +333,7 @@ workflows:
 		}
 	}
 	if strings.Contains(got, "masked") {
-		t.Errorf("agent env must not mask the SORTIE_AGENT contract value\nscript:\n%s", got)
+		t.Errorf("agent env must not mask the SAKUSEN_AGENT contract value\nscript:\n%s", got)
 	}
 }
 
@@ -358,7 +358,7 @@ func TestRestoreTmuxSession_SkipsWhenSessionExists(t *testing.T) {
 		t.Error("expected resumed=false when the session already exists")
 	}
 
-	scriptPath := filepath.Join(projectDir, ".sortie", "run-continue.sh")
+	scriptPath := filepath.Join(projectDir, ".sakusen", "run-continue.sh")
 	if _, statErr := os.Stat(scriptPath); !os.IsNotExist(statErr) {
 		t.Errorf("expected no wrapper script when the session already exists (stat: %v)", statErr)
 	}
@@ -398,7 +398,7 @@ workflows:
 	}
 
 	for _, label := range []string{"continue", "implement"} {
-		scriptPath := filepath.Join(projectDir, ".sortie", fmt.Sprintf("run-%s.sh", label))
+		scriptPath := filepath.Join(projectDir, ".sakusen", fmt.Sprintf("run-%s.sh", label))
 		if _, statErr := os.Stat(scriptPath); !os.IsNotExist(statErr) {
 			t.Errorf("expected no wrapper script %s on a failed restore (stat: %v)", scriptPath, statErr)
 		}

@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// setupGlobalAndProject writes a global ~/.sortie.yml and an optional
-// ~/.sortie/workflows/<name>.yml tree under an isolated HOME, plus a
-// project .sortie.yml (with optional .sortie/workflows files) under a separate
+// setupGlobalAndProject writes a global ~/.sakusen.yml and an optional
+// ~/.sakusen/workflows/<name>.yml tree under an isolated HOME, plus a
+// project .sakusen.yml (with optional .sakusen/workflows files) under a separate
 // project directory. Returns the project directory.
 //
 // The test's HOME and XDG_CONFIG_HOME are pointed at a temp dir so that
@@ -26,14 +26,14 @@ func setupGlobalAndProject(
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	// Force XDG_CONFIG_HOME to a fresh empty dir to silence config.yaml lookup
-	// and avoid the user's real ~/.config/sortie/ leaking in.
+	// and avoid the user's real ~/.config/sakusen/ leaking in.
 	xdgDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
 
 	if globalYml != "" {
-		globalPath := filepath.Join(homeDir, ".sortie.yml")
+		globalPath := filepath.Join(homeDir, ".sakusen.yml")
 		if err := os.WriteFile(globalPath, []byte(globalYml), 0644); err != nil {
-			t.Fatalf("write global .sortie.yml: %v", err)
+			t.Fatalf("write global .sakusen.yml: %v", err)
 		}
 	}
 	for rel, content := range globalFiles {
@@ -47,9 +47,9 @@ func setupGlobalAndProject(
 	}
 
 	projectDir := t.TempDir()
-	projectPath := filepath.Join(projectDir, ".sortie.yml")
+	projectPath := filepath.Join(projectDir, ".sakusen.yml")
 	if err := os.WriteFile(projectPath, []byte(projectYml), 0644); err != nil {
-		t.Fatalf("write project .sortie.yml: %v", err)
+		t.Fatalf("write project .sakusen.yml: %v", err)
 	}
 	for rel, content := range projectFiles {
 		full := filepath.Join(projectDir, rel)
@@ -65,7 +65,7 @@ func setupGlobalAndProject(
 }
 
 // Example 1: global defines an *inline* workflow, project references it via
-// string ref just as it would reference a workflow file under .sortie/workflows/.
+// string ref just as it would reference a workflow file under .sakusen/workflows/.
 func TestGlobalWorkflows_ProjectReferencesGlobalInline(t *testing.T) {
 	projectDir := setupGlobalAndProject(t,
 		`workflows:
@@ -105,16 +105,16 @@ func TestGlobalWorkflows_ProjectReferencesGlobalInline(t *testing.T) {
 	}
 }
 
-// Example 2: global defines a file workflow under ~/.sortie/workflows/, project
+// Example 2: global defines a file workflow under ~/.sakusen/workflows/, project
 // references it via string ref just as it would reference a project-local file.
 func TestGlobalWorkflows_ProjectReferencesGlobalFile(t *testing.T) {
 	projectDir := setupGlobalAndProject(t,
-		// Global .sortie.yml is empty so its file-pool workflow becomes
+		// Global .sakusen.yml is empty so its file-pool workflow becomes
 		// "hidden" globally — but project can still reference it by name.
 		`# global file pool workflow exists but isn't listed; project can still reference it.
 `,
 		map[string]string{
-			".sortie/workflows/global-file-impl.yml": `
+			".sakusen/workflows/global-file-impl.yml": `
 description: Globally-defined file workflow
 steps:
   - name: do
@@ -191,7 +191,7 @@ func TestGlobalWorkflows_ProjectOverridesGlobalInlineWithInline(t *testing.T) {
 }
 
 // Example 3b: global defines a workflow (inline), project overrides it via a
-// project-local file under .sortie/workflows/ + a string ref to that name.
+// project-local file under .sakusen/workflows/ + a string ref to that name.
 func TestGlobalWorkflows_ProjectOverridesGlobalInlineWithLocalFile(t *testing.T) {
 	projectDir := setupGlobalAndProject(t,
 		`workflows:
@@ -205,7 +205,7 @@ func TestGlobalWorkflows_ProjectOverridesGlobalInlineWithLocalFile(t *testing.T)
   - shared-impl
 `,
 		map[string]string{
-			".sortie/workflows/shared-impl.yml": `
+			".sakusen/workflows/shared-impl.yml": `
 steps:
   - name: do
     prompt: "project file override"
@@ -224,23 +224,23 @@ steps:
 	if got.Steps[0].Prompt != "project file override" {
 		t.Errorf("want project file override prompt, got %q", got.Steps[0].Prompt)
 	}
-	if !strings.HasSuffix(got.Source, "shared-impl.yml") || strings.Contains(got.Source, "/.sortie.yml") {
+	if !strings.HasSuffix(got.Source, "shared-impl.yml") || strings.Contains(got.Source, "/.sakusen.yml") {
 		t.Errorf("want project file source, got %q", got.Source)
 	}
-	if strings.HasPrefix(got.Source, os.Getenv("HOME")+"/.sortie/") {
+	if strings.HasPrefix(got.Source, os.Getenv("HOME")+"/.sakusen/") {
 		t.Errorf("source should be the project-local file, got global path %q", got.Source)
 	}
 }
 
 // Example 3c: global defines a workflow in its file pool (under
-// ~/.sortie/workflows/), project overrides it inline.
+// ~/.sakusen/workflows/), project overrides it inline.
 func TestGlobalWorkflows_ProjectOverridesGlobalFileWithInline(t *testing.T) {
 	projectDir := setupGlobalAndProject(t,
 		`workflows:
   - shared-impl
 `,
 		map[string]string{
-			".sortie/workflows/shared-impl.yml": `
+			".sakusen/workflows/shared-impl.yml": `
 steps:
   - name: do
     prompt: "global file version"
@@ -287,7 +287,7 @@ func TestGlobalWorkflows_MixedGlobalAndLocalRefs(t *testing.T) {
   - from-local
 `,
 		map[string]string{
-			".sortie/workflows/from-local.yml": `
+			".sakusen/workflows/from-local.yml": `
 steps:
   - name: do
     prompt: "from local"
@@ -579,13 +579,13 @@ func TestStepRefs_NoBaseWorkflowErrors(t *testing.T) {
 }
 
 // Step refs also resolve against a global workflow defined in a file under
-// ~/.sortie/workflows/ (not just inline global workflows).
+// ~/.sakusen/workflows/ (not just inline global workflows).
 func TestStepRefs_ReferenceGlobalFileWorkflowSteps(t *testing.T) {
 	projectDir := setupGlobalAndProject(t,
 		`# global file-pool workflow exists but isn't listed; project references it.
 `,
 		map[string]string{
-			".sortie/workflows/the-work.yml": `
+			".sakusen/workflows/the-work.yml": `
 steps:
   - name: planning
     prompt: "global file planning"
@@ -737,7 +737,7 @@ func TestDiagnose_ResolvesGlobalRefs(t *testing.T) {
 		nil,
 	)
 
-	diags, err := Diagnose(filepath.Join(projectDir, ".sortie.yml"))
+	diags, err := Diagnose(filepath.Join(projectDir, ".sakusen.yml"))
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestDiagnose_StepRefs(t *testing.T) {
 		nil,
 	)
 
-	if err := ValidateFile(filepath.Join(projectDir, ".sortie.yml")); err != nil {
+	if err := ValidateFile(filepath.Join(projectDir, ".sakusen.yml")); err != nil {
 		t.Fatalf("ValidateFile on valid step refs: %v", err)
 	}
 
@@ -781,10 +781,10 @@ func TestDiagnose_StepRefs(t *testing.T) {
       - planning
       - bogus
 `
-	if err := os.WriteFile(filepath.Join(projectDir, ".sortie.yml"), []byte(bad), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(bad), 0644); err != nil {
 		t.Fatalf("rewrite project config: %v", err)
 	}
-	if err := ValidateFile(filepath.Join(projectDir, ".sortie.yml")); err == nil || !strings.Contains(err.Error(), "bogus") {
+	if err := ValidateFile(filepath.Join(projectDir, ".sakusen.yml")); err == nil || !strings.Contains(err.Error(), "bogus") {
 		t.Fatalf("want error naming unresolvable step %q, got %v", "bogus", err)
 	}
 }

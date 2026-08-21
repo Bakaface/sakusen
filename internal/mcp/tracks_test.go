@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 

@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
-	"github.com/Bakaface/sortie/internal/tmux"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
 )
 
 // newTmuxStepEngine wires a real DB-backed Engine whose workflow's single step
@@ -57,8 +57,8 @@ func newTmuxStepEngine(t *testing.T, tmuxSetupCommand string) (*Engine, *task.Ta
 				Mode:    "tmux",
 				Command: "echo agent-here",
 				Env: map[string]string{
-					"MY_AGENT_VAR": "xyz",
-					"SORTIE_AGENT": "masked", // must lose to the contract
+					"MY_AGENT_VAR":  "xyz",
+					"SAKUSEN_AGENT": "masked", // must lose to the contract
 				},
 			},
 		},
@@ -87,7 +87,7 @@ func newTmuxStepEngine(t *testing.T, tmuxSetupCommand string) (*Engine, *task.Ta
 // whose agent record is tmux-mode routes through runStepTmux (fire-and-forget
 // pause) instead of the headless runner, and the spawn leaves the full generic
 // contract on disk — wrapper script with agent command + env exports
-// (SORTIE_PROMPT_FILE, SORTIE_DONE_DIR, SORTIE_DONE_PREFIX, agent `env:`,
+// (SAKUSEN_PROMPT_FILE, SAKUSEN_DONE_DIR, SAKUSEN_DONE_PREFIX, agent `env:`,
 // contract-wins masking), the prompt file, and a cleared stale sentinel.
 func TestRunTaskTmuxAgentDispatch(t *testing.T) {
 	engine, tk, dir := newTmuxStepEngine(t, "")
@@ -120,7 +120,7 @@ func TestRunTaskTmuxAgentDispatch(t *testing.T) {
 		t.Errorf("prompt file = %q, want the resolved step prompt", string(prompt))
 	}
 
-	scriptFile := filepath.Join(dir, ".sortie", "run-step-implement.sh")
+	scriptFile := filepath.Join(dir, ".sakusen", "run-step-implement.sh")
 	scriptBytes, err := os.ReadFile(scriptFile)
 	if err != nil {
 		t.Fatalf("wrapper script not written: %v", err)
@@ -129,12 +129,12 @@ func TestRunTaskTmuxAgentDispatch(t *testing.T) {
 
 	wantFragments := []string{
 		"echo agent-here", // the agent record's command, not any claude default
-		fmt.Sprintf("export SORTIE_PROMPT_FILE='%s'", StepPromptFile(dir, "implement")),
-		fmt.Sprintf("export SORTIE_DONE_DIR='%s'", doneDir),
-		fmt.Sprintf("export SORTIE_DONE_PREFIX='%s'", SentinelPrefix("implement")),
+		fmt.Sprintf("export SAKUSEN_PROMPT_FILE='%s'", StepPromptFile(dir, "implement")),
+		fmt.Sprintf("export SAKUSEN_DONE_DIR='%s'", doneDir),
+		fmt.Sprintf("export SAKUSEN_DONE_PREFIX='%s'", SentinelPrefix("implement")),
 		"export MY_AGENT_VAR='xyz'",
-		"export SORTIE_AGENT='pair'",
-		"export SORTIE_PURPOSE='step'",
+		"export SAKUSEN_AGENT='pair'",
+		"export SAKUSEN_PURPOSE='step'",
 	}
 	for _, want := range wantFragments {
 		if !strings.Contains(script, want) {
@@ -142,7 +142,7 @@ func TestRunTaskTmuxAgentDispatch(t *testing.T) {
 		}
 	}
 	if strings.Contains(script, "masked") {
-		t.Errorf("agent env must not mask the SORTIE_AGENT contract value\nscript:\n%s", script)
+		t.Errorf("agent env must not mask the SAKUSEN_AGENT contract value\nscript:\n%s", script)
 	}
 
 	// Fire-and-forget: the step must NOT have produced a completed context —
@@ -174,7 +174,7 @@ func TestRunStepTmuxSetupCommandControlsAgent(t *testing.T) {
 	}
 
 	exitCode, outputTail, spawnErr := engine.runStepTmux(context.Background(), tk, step, agentCfg,
-		"prompt body", map[string]string{"SORTIE_AGENT": "pair"}, nil)
+		"prompt body", map[string]string{"SAKUSEN_AGENT": "pair"}, nil)
 	if spawnErr != nil {
 		t.Fatalf("runStepTmux: %v", spawnErr)
 	}
@@ -193,7 +193,7 @@ func TestRunStepTmuxSetupCommandControlsAgent(t *testing.T) {
 	if lines[0] != "echo agent-here" {
 		t.Errorf("{{agent_command}} = %q, want the agent record's command %q", lines[0], "echo agent-here")
 	}
-	if want := filepath.Join(dir, ".sortie", "run-step-implement.sh"); lines[1] != want {
+	if want := filepath.Join(dir, ".sakusen", "run-step-implement.sh"); lines[1] != want {
 		t.Errorf("{{run_agent}} = %q, want the wrapper script path %q", lines[1], want)
 	}
 }

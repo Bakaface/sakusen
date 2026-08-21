@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bakaface/sortie/internal/config"
-	"github.com/Bakaface/sortie/internal/db"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 func TestGetStepContextsFromDB(t *testing.T) {
@@ -241,12 +241,12 @@ func TestTemplateTaskImages(t *testing.T) {
 			ID:     1,
 			Title:  "Test task",
 			Input:  "A test",
-			Images: []string{".sortie/images/screenshot.png", ".sortie/images/diagram.jpg"},
+			Images: []string{".sakusen/images/screenshot.png", ".sakusen/images/diagram.jpg"},
 		},
 	}
 
 	result := ResolveTemplate("Images:\n{{task.images}}", ctx)
-	expected := "Images:\n.sortie/images/screenshot.png\n.sortie/images/diagram.jpg"
+	expected := "Images:\n.sakusen/images/screenshot.png\n.sakusen/images/diagram.jpg"
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
 	}
@@ -270,7 +270,7 @@ func TestWriteTmuxLogMessage(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "step.log")
 
-	lines := writeTmuxLogMessage(logPath, 42, "implement", "sortie-42", "42")
+	lines := writeTmuxLogMessage(logPath, 42, "implement", "sakusen-42", "42")
 
 	// Verify returned lines
 	if len(lines) != 3 {
@@ -279,10 +279,10 @@ func TestWriteTmuxLogMessage(t *testing.T) {
 	if !strings.Contains(lines[0], "=== Step: implement (task #42) ===") {
 		t.Errorf("expected step header in line 0, got: %s", lines[0])
 	}
-	if !strings.Contains(lines[1], `Tmux session "sortie-42" initiated`) {
+	if !strings.Contains(lines[1], `Tmux session "sakusen-42" initiated`) {
 		t.Errorf("expected tmux session initiated message in line 1, got: %s", lines[1])
 	}
-	if !strings.Contains(lines[2], "Attach with: sortie attach 42") {
+	if !strings.Contains(lines[2], "Attach with: sakusen attach 42") {
 		t.Errorf("expected attach instructions in line 2, got: %s", lines[2])
 	}
 
@@ -298,7 +298,7 @@ func TestWriteTmuxLogMessage(t *testing.T) {
 	if !strings.Contains(logContent, "Tmux session") {
 		t.Error("log file missing tmux session message")
 	}
-	if !strings.Contains(logContent, "sortie attach 42") {
+	if !strings.Contains(logContent, "sakusen attach 42") {
 		t.Error("log file missing attach instructions")
 	}
 }
@@ -312,7 +312,7 @@ func TestWriteTmuxLogMessageCallsOutputFn(t *testing.T) {
 		captured = append(captured, lines...)
 	}
 
-	lines := writeTmuxLogMessage(logPath, 7, "review", "sortie-7", "7")
+	lines := writeTmuxLogMessage(logPath, 7, "review", "sakusen-7", "7")
 	outputFn(lines)
 
 	if len(captured) != 3 {
@@ -488,8 +488,8 @@ func TestSummarizerLogFnCalledWithArtifacts(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a real SQLite database for the test
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0755)
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
+	os.MkdirAll(filepath.Join(dir, ".sakusen"), 0755)
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
@@ -554,10 +554,10 @@ func TestSummarizerLogFnCalledWithArtifacts(t *testing.T) {
 func TestSummarizerLogFnCalledWithNilLogFn(t *testing.T) {
 	// Verify runSummarizer doesn't panic when logFn is nil
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0755)
+	os.MkdirAll(filepath.Join(dir, ".sakusen"), 0755)
 
 	// Create a real SQLite database for the test
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
@@ -656,7 +656,7 @@ func TestCleanupMergedWorktreeLogsMessages(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a real database so ClearWorktreePath doesn't panic
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	os.MkdirAll(filepath.Dir(dbPath), 0755)
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -697,7 +697,7 @@ func TestCleanupMergedWorktreePreservesCheckoutBranch(t *testing.T) {
 	// When CheckoutBranch is set (user-provided branch), the branch should NOT be deleted.
 	dir := t.TempDir()
 
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	os.MkdirAll(filepath.Dir(dbPath), 0755)
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -738,7 +738,7 @@ func TestRunTaskDoesNotSetSummarizingStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -763,8 +763,8 @@ func TestRunTaskDoesNotSetSummarizingStatus(t *testing.T) {
 
 	cfg := &config.Config{
 		// A real headless agent command that writes its result text through
-		// the SORTIE_RESULT_FILE contract.
-		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SORTIE_RESULT_FILE"`}},
+		// the SAKUSEN_RESULT_FILE contract.
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SAKUSEN_RESULT_FILE"`}},
 		OnComplete: "merge",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -805,7 +805,7 @@ func TestRunTaskDoesNotCallExecuteOnComplete(t *testing.T) {
 	// and the task remains in its running state (no status change to summarizing/completed).
 	dir := t.TempDir()
 
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +830,7 @@ func TestRunTaskDoesNotCallExecuteOnComplete(t *testing.T) {
 	tk.WorktreePath = dir
 
 	cfg := &config.Config{
-		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SORTIE_RESULT_FILE"`}},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf done > "$SAKUSEN_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -864,7 +864,7 @@ func TestRunTaskSummarizationStrategyNoneSkipsContext(t *testing.T) {
 	// any step context — later steps see empty context for that step.
 	dir := t.TempDir()
 
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -889,7 +889,7 @@ func TestRunTaskSummarizationStrategyNoneSkipsContext(t *testing.T) {
 	cfg := &config.Config{
 		// The agent emits a non-empty result so a normal step would otherwise
 		// capture a non-empty context.
-		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf 'last message body' > "$SORTIE_RESULT_FILE"`}},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `printf 'last message body' > "$SAKUSEN_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -927,7 +927,7 @@ func TestRunTaskSummarizationStrategyNoneSkipsContext(t *testing.T) {
 func TestRunTaskManualContextOverridesLastMessage(t *testing.T) {
 	dir := t.TempDir()
 
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -954,7 +954,7 @@ func TestRunTaskManualContextOverridesLastMessage(t *testing.T) {
 		// context while the step row is still 'running', then emits a non-empty
 		// result that would otherwise be captured as the step context. The
 		// headless (synchronous) path blocks RunTask on the agent command.
-		Agents:     map[string]config.AgentConfig{"claude": {Command: `sleep 2; printf 'agent last message' > "$SORTIE_RESULT_FILE"`}},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: `sleep 2; printf 'agent last message' > "$SAKUSEN_RESULT_FILE"`}},
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{
 			{
@@ -1012,7 +1012,7 @@ func TestMarkSummarizingStepSingleStepUsesSummarizing(t *testing.T) {
 	// For a single-step workflow the step summary IS the task summary, so
 	// markSummarizingStep should surface `summarizing` (not `summarizing_step`).
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1057,7 +1057,7 @@ func TestMarkSummarizingStepMultiStepUsesSummarizingStep(t *testing.T) {
 	// the cross-step summarizer, so the transient `summarizing_step` status
 	// must still be used to disambiguate them in the TUI.
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1091,7 +1091,7 @@ func TestMarkSummarizingStepMultiStepUsesSummarizingStep(t *testing.T) {
 
 func TestPromoteSingleStepContextToTask(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1138,7 +1138,7 @@ func TestPromoteSingleStepContextToTask(t *testing.T) {
 
 func TestPromoteSingleStepContextToTaskNoOpForMultiStep(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1181,7 +1181,7 @@ func TestPromoteSingleStepContextToTaskNoOpForEmptyStepContext(t *testing.T) {
 	// promotion should be a no-op so the caller falls through to runSummarizer
 	// which can still produce a task summary from the git diff fallback.
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, ".sortie", "test.db")
+	dbPath := filepath.Join(dir, ".sakusen", "test.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1371,7 +1371,7 @@ func TestSummarizePreviousTmuxStepSkipsManualContext(t *testing.T) {
 }
 
 // newResultCaptureEngine wires a real (in-memory) DB-backed Engine around a
-// REAL headless agent command (no fake runner) so the SORTIE_RESULT_FILE →
+// REAL headless agent command (no fake runner) so the SAKUSEN_RESULT_FILE →
 // step-context capture path runs end to end through runner.Process. The single
 // step uses the last_message strategy, so whatever ResultText the process
 // yields is exactly what lands as the step's context.
@@ -1412,10 +1412,10 @@ func newResultCaptureEngine(t *testing.T, agentCommand string) (*Engine, *task.T
 }
 
 // TestRunTaskResultFileBecomesStepContext proves the headless result contract
-// at the workflow level: an agent command that writes $SORTIE_RESULT_FILE has
+// at the workflow level: an agent command that writes $SAKUSEN_RESULT_FILE has
 // that exact text captured as the step's context after RunTask.
 func TestRunTaskResultFileBecomesStepContext(t *testing.T) {
-	engine, tk, database := newResultCaptureEngine(t, `printf ctx-from-result-file > "$SORTIE_RESULT_FILE"`)
+	engine, tk, database := newResultCaptureEngine(t, `printf ctx-from-result-file > "$SAKUSEN_RESULT_FILE"`)
 
 	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
 		t.Fatalf("RunTask failed: %v", err)
@@ -1432,7 +1432,7 @@ func TestRunTaskResultFileBecomesStepContext(t *testing.T) {
 
 // TestRunTaskStdoutTailFallbackBecomesStepContext proves the crude fallback
 // half of the result contract: an agent command that never writes
-// $SORTIE_RESULT_FILE and only prints to stdout still yields a step context
+// $SAKUSEN_RESULT_FILE and only prints to stdout still yields a step context
 // (the retained stdout tail), keeping the step clear of the
 // no-output/diff-required failure branch in applyStepResult.
 func TestRunTaskStdoutTailFallbackBecomesStepContext(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Bakaface/sortie/internal/daemon"
-	"github.com/Bakaface/sortie/internal/task"
+	"github.com/Bakaface/sakusen/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
@@ -129,7 +129,7 @@ func (d *detailView) SetSize(width, height int) {
 }
 
 func (d *detailView) headerLines() int {
-	// "Sortie" title bar + blank line + gap before viewport = 3 lines
+	// "Sakusen" title bar + blank line + gap before viewport = 3 lines
 	base := 3
 	if d.task != nil && d.width > 0 {
 		taskTitle := d.task.Title
