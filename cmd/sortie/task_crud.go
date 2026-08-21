@@ -43,6 +43,7 @@ The daemon must be running.`,
 		branch, _ := cmd.Flags().GetString("branch")
 		workflow, _ := cmd.Flags().GetString("workflow")
 		title, _ := cmd.Flags().GetString("title")
+		slug, _ := cmd.Flags().GetString("slug")
 		noWorktree, _ := cmd.Flags().GetBool("no-worktree")
 		// Only treat the worktree as an explicit choice when --no-worktree was
 		// actually passed. Otherwise leave it unset (nil) so a workflow's worktree
@@ -70,6 +71,7 @@ The daemon must be running.`,
 
 		createArgs := action.CreateArgs{
 			Title:       title,
+			Slug:        slug,
 			Input:       input,
 			Priority:    priority,
 			Branch:      branch,

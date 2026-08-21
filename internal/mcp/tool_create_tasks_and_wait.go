@@ -19,6 +19,7 @@ type ChildTaskSpec struct {
 	Input          string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
 	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sortie.yml and workflows."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
+	Slug           string   `json:"slug,omitempty" jsonschema:"Skip AI slug generation and use this slug (short kebab-case, e.g. 'fix-login-redirect'). Normalized to lowercase letters, digits and dashes and capped at 24 characters."`
 	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every child except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch children still run their workflow steps, so the requirement applies to them too."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent."`
 	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'."`
@@ -124,6 +125,7 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 		}
 		reqs[i] = daemon.CreateTaskRequest{
 			Title:          t.Title,
+			Slug:           t.Slug,
 			Input:          t.Input,
 			Workflow:       t.Workflow,
 			Priority:       t.Priority,

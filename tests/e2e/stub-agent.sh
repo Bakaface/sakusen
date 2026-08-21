@@ -6,7 +6,7 @@
 #
 #   $SORTIE_PURPOSE      routing key: "step" or "merge_conflict" (agent spawns,
 #                        routed via the $SORTIE_RESULT_FILE contract) or a
-#                        summarizer purpose (title, summarize, summarize_chat,
+#                        summarizer purpose (title, slug, summarize, summarize_chat,
 #                        summarize_chat_chunk, backfill_context).
 #   $SORTIE_STEP         step name for step spawns.
 #   $SORTIE_PROMPT_FILE  resolved step prompt (step spawns).

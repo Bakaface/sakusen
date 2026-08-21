@@ -204,7 +204,7 @@ func (m Model) addTaskDependency(taskID, blockedByID int64) tea.Cmd {
 	})
 }
 
-func (m Model) createTaskWithPrompt(title, input, branchName string, worktree bool, images []string, targetBranch, checkoutBranch string) tea.Cmd {
+func (m Model) createTaskWithPrompt(title, slug, input, branchName string, worktree bool, images []string, targetBranch, checkoutBranch string) tea.Cmd {
 	return func() tea.Msg {
 		if m.client == nil {
 			return nil
@@ -216,6 +216,7 @@ func (m Model) createTaskWithPrompt(title, input, branchName string, worktree bo
 		worktreeChoice := worktree
 		args := action.CreateArgs{
 			Title:       title,
+			Slug:        slug,
 			Input:       input,
 			Workflow:    m.selectedWorkflow,
 			Branch:      branchName,

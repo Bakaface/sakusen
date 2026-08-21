@@ -138,6 +138,7 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	title := m.prompt.TitleValue()
+	slug := m.prompt.SlugValue()
 	images := m.prompt.Images()
 	branchName := m.prompt.BranchName()
 	targetBranch := m.prompt.TargetBranch()
@@ -149,7 +150,7 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 	m.defaultWorkflow = m.selectedWorkflow
 	m.prompt.defaultWorkflow = m.defaultWorkflow
 
-	deferred := m.createTaskWithPrompt(title, description, branchName, worktree, images, targetBranch, checkoutBranch)
+	deferred := m.createTaskWithPrompt(title, slug, description, branchName, worktree, images, targetBranch, checkoutBranch)
 	if m.animationEnabled() {
 		positions := m.planePositions(description)
 		m.sortie = newSortieAnimation(positions, m.width, m.height, m.animationDuration())
@@ -202,12 +203,13 @@ func (m Model) animationDuration() int {
 
 // planePositions returns the screen coordinates of each ✈ prompt prefix
 // in the prompt view, so the animation can keep planes in their exact spots.
-// Layout: title(1) + blank(1) + "Title: " input(1) + blank(1) = row 4 is the first textarea line.
+// Layout: title(1) + blank(1) + "Title: " input(1) + blank(1) + "Slug: " input(1) + blank(1)
+// = row 6 is the first textarea line.
 // Each textarea line's ✈ sits at column 4 (2 padding + prompt char position).
 // Soft-wrapped continuation lines also get a plane.
 func (m Model) planePositions(description string) [][2]int {
 	const (
-		textareaStartRow = 4 // rows above the textarea in prompt view
+		textareaStartRow = 6 // rows above the textarea in prompt view
 		planeCol         = 2 // left padding where ✈ renders
 		maxPlanes        = 12
 	)

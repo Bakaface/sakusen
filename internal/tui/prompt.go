@@ -28,6 +28,7 @@ type promptField int
 
 const (
 	promptFieldTitle promptField = iota
+	promptFieldSlug
 	promptFieldInput
 	promptFieldBranch
 	promptFieldCheckout
@@ -73,6 +74,7 @@ type promptSaved struct {
 type promptView struct {
 	textarea          textarea.Model
 	titleInput        textinput.Model
+	slugInput         textinput.Model
 	branchInput       textinput.Model
 	checkoutInput     textinput.Model
 	targetBranchInput textinput.Model
@@ -125,6 +127,10 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 	titleIn.Placeholder = "auto-generated if left blank"
 	titleIn.CharLimit = 200
 
+	slugIn := textinput.New()
+	slugIn.Placeholder = "auto-generated if left blank"
+	slugIn.CharLimit = 200
+
 	bi := textinput.New()
 	bi.Placeholder = "sortie/{{task_id}}-{{task_slug}}"
 	bi.CharLimit = 200
@@ -143,6 +149,7 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 	return promptView{
 		textarea:          ta,
 		titleInput:        titleIn,
+		slugInput:         slugIn,
 		branchInput:       bi,
 		checkoutInput:     ci,
 		targetBranchInput: ti,
@@ -161,6 +168,7 @@ func (p *promptView) SetSize(width, height int) {
 	// Account for "▸ " / "  " prefix (2 chars) before the label
 	prefix := 2
 	p.titleInput.Width = width - 4 - prefix - lipgloss.Width("Title: ") - lipgloss.Width(p.titleInput.Prompt) - 1
+	p.slugInput.Width = width - 4 - prefix - lipgloss.Width("Slug: ") - lipgloss.Width(p.slugInput.Prompt) - 1
 	// Git inputs are inside a frame: border(2) + paddingLeft(1) = 3 chars overhead.
 	// textinput.View() renders at Width + promptWidth + 1 (cursor), so subtract that too.
 	frameOuterWidth := width - 1 // matches innerWidth in View()
@@ -179,11 +187,11 @@ func (p *promptView) SetSize(width, height int) {
 // maxHeight returns the maximum textarea height available within the terminal.
 func (p *promptView) maxHeight() int {
 	// Reserve lines for non-textarea content:
-	// title bar(1) + blank(1) + titleInput(1) + blank(1) +
+	// title bar(1) + blank(1) + titleInput(1) + blank(1) + slugInput(1) + blank(1) +
 	// [textarea goes here] + blank(1) +
 	// git frame top(1) + padding(1) + worktree(1) + mode(1) + blank(1) + branch(1) + target(1) + git frame bottom(1) +
 	// blank(1) + help(1)
-	reserved := 14
+	reserved := 16
 	if !p.worktree {
 		reserved -= 4 // no mode/blank/branch/target lines
 	}
@@ -241,6 +249,7 @@ func (p *promptView) visualLineCount() int {
 func (p *promptView) Reset() {
 	p.textarea.Reset()
 	p.titleInput.Reset()
+	p.slugInput.Reset()
 	p.branchInput.Reset()
 	p.checkoutInput.Reset()
 	p.targetBranchInput.Reset()
@@ -362,6 +371,11 @@ func (p *promptView) TitleValue() string {
 	return strings.TrimSpace(p.titleInput.Value())
 }
 
+// SlugValue returns the typed slug; empty means "generate one".
+func (p *promptView) SlugValue() string {
+	return strings.TrimSpace(p.slugInput.Value())
+}
+
 func (p *promptView) BranchName() string {
 	return strings.TrimSpace(p.branchInput.Value())
 }
@@ -386,6 +400,7 @@ func (p *promptView) Worktree() bool {
 func (p *promptView) blurAll() {
 	p.textarea.Blur()
 	p.titleInput.Blur()
+	p.slugInput.Blur()
 	p.branchInput.Blur()
 	p.checkoutInput.Blur()
 	p.targetBranchInput.Blur()
@@ -399,6 +414,8 @@ func (p *promptView) focusInput(field promptField) {
 	switch field {
 	case promptFieldTitle:
 		p.titleInput.Focus()
+	case promptFieldSlug:
+		p.slugInput.Focus()
 	case promptFieldInput:
 		p.textarea.Focus()
 	case promptFieldBranch:
@@ -413,7 +430,7 @@ func (p *promptView) focusInput(field promptField) {
 // visibleFields returns the ordered list of tab-cyclable fields
 // based on the current worktree and branch mode state.
 func (p *promptView) visibleFields() []promptField {
-	fields := []promptField{promptFieldTitle}
+	fields := []promptField{promptFieldTitle, promptFieldSlug}
 	if !p.pins.input {
 		fields = append(fields, promptFieldInput)
 	}
@@ -439,7 +456,7 @@ func (p *promptView) ToggleWorktree() {
 		return
 	}
 	p.worktree = !p.worktree
-	if !p.worktree && p.focusField != promptFieldInput && p.focusField != promptFieldTitle {
+	if !p.worktree && p.focusField != promptFieldInput && p.focusField != promptFieldTitle && p.focusField != promptFieldSlug {
 		p.focusFirstVisible()
 	}
 }
@@ -475,6 +492,8 @@ func (p *promptView) Update(msg tea.Msg) tea.Cmd {
 	switch p.focusField {
 	case promptFieldTitle:
 		p.titleInput, cmd = p.titleInput.Update(msg)
+	case promptFieldSlug:
+		p.slugInput, cmd = p.slugInput.Update(msg)
 	case promptFieldInput:
 		// Pre-expand textarea to max height so the internal viewport doesn't
 		// scroll when content grows beyond the current height.
@@ -599,7 +618,7 @@ func (p *promptView) hasVisibleGitField() bool {
 // forward=true goes main→git→workflow; forward=false reverses.
 func (p *promptView) CyclePane(forward bool) {
 	isMainField := p.activePane == paneTask &&
-		(p.focusField == promptFieldTitle || p.focusField == promptFieldInput)
+		(p.focusField == promptFieldTitle || p.focusField == promptFieldSlug || p.focusField == promptFieldInput)
 	isGitField := p.activePane == paneTask &&
 		(p.focusField == promptFieldBranch || p.focusField == promptFieldCheckout || p.focusField == promptFieldTargetBranch)
 	hasGit := p.hasVisibleGitField()
@@ -814,6 +833,11 @@ func (p *promptView) View() string {
 	// Title input
 	b.WriteString(fieldLabel("Title: ", promptFieldTitle, true))
 	b.WriteString(p.titleInput.View())
+	b.WriteString("\n\n")
+
+	// Slug input — no mnemonic (no direct-focus key binding)
+	b.WriteString(fieldLabel("Slug: ", promptFieldSlug, false))
+	b.WriteString(p.slugInput.View())
 	b.WriteString("\n\n")
 
 	// Input textarea — skipped entirely when the workflow pins the input

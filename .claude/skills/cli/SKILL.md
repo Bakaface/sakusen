@@ -53,7 +53,7 @@ All subcommands registered in `init()`:
 | `attach` | — | Attach to tmux session |
 | `detach` | — | Detach worktree branch so it can be checked out elsewhere |
 | `attach-branch` | — | Reattach branch to worktree after detach |
-| `create` | `--priority/-p`, `--branch/-b`, `--workflow/-w`, `--title`, `--no-worktree`, `--target`, `--checkout`, `--track` | Create task |
+| `create` | `--priority/-p`, `--branch/-b`, `--workflow/-w`, `--title`, `--slug`, `--no-worktree`, `--target`, `--checkout`, `--track` | Create task |
 | `edit` | `--title/-t`, `--description/-d`, `--context/-c`, `--priority/-p` | Edit task fields |
 | `delete` | `--yes/-y` | Delete task |
 | `depends-on add <task_id> <blocked_by_id>` | — | Add dependency edge |

@@ -335,6 +335,7 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 			Name: "create_task",
 			Arguments: map[string]any{
 				"input":         "Implement the login page",
+				"slug":          "login-page",
 				"project_path":  "/tmp/proj",
 				"workflow":      "implement",
 				"priority":      "high",
@@ -357,6 +358,9 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 	}
 	if captured.ProjectPath != "/tmp/proj" {
 		t.Errorf("ProjectPath: %q", captured.ProjectPath)
+	}
+	if captured.Slug != "login-page" {
+		t.Errorf("Slug: %q", captured.Slug)
 	}
 	if captured.Workflow != "implement" {
 		t.Errorf("Workflow: %q", captured.Workflow)
@@ -1241,4 +1245,52 @@ func textOf(res *mcp.CallToolResult) string {
 		}
 	}
 	return sb.String()
+}
+
+// TestMCP_CreateTasksAndWait_PassesSlugThrough verifies the optional per-child
+// slug reaches the daemon request untouched (normalization happens daemon-side).
+func TestMCP_CreateTasksAndWait_PassesSlugThrough(t *testing.T) {
+	fake := newFakeDaemon(t)
+
+	var captured daemon.CreateTasksAndWaitRequest
+	fake.handle(daemon.MsgCreateTasksAndWait, func(msg *daemon.Message) *daemon.Message {
+		_ = msg.DecodePayload(&captured)
+		resp, _ := daemon.NewMessage(daemon.MsgCreateTasksAndWait, daemon.CreateTasksAndWaitResponse{
+			ParentTaskID: captured.ParentTaskID,
+			Children:     []daemon.TaskInfo{{ID: 2}},
+		})
+		return resp
+	})
+
+	c := startMCPServer(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "create_tasks_and_wait",
+			Arguments: map[string]any{
+				"parent_task_id": 1,
+				"tasks": []map[string]any{
+					{"input": "child a", "workflow": "implement", "slug": "child-a"},
+					{"input": "child b", "workflow": "implement"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", textOf(res))
+	}
+	if len(captured.Tasks) != 2 {
+		t.Fatalf("captured %d tasks", len(captured.Tasks))
+	}
+	if captured.Tasks[0].Slug != "child-a" {
+		t.Errorf("child a slug = %q, want child-a", captured.Tasks[0].Slug)
+	}
+	if captured.Tasks[1].Slug != "" {
+		t.Errorf("child b slug = %q, want empty (auto-generated)", captured.Tasks[1].Slug)
+	}
 }
