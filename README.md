@@ -9,6 +9,8 @@ You decide what runs, how many run at once, where the human gates go, and how fi
 ```mermaid
 flowchart LR
     tui["sakusen tui<br/>(control)"] <--> daemon["sakusen daemon<br/>(orchestrator)"]
+    cli["sakusen CLI<br/>(task CRUD)"] <--> daemon
+    mcp["sakusen MCP<br/>(agent tools)"] <--> daemon
     daemon <--> agents["coding agents<br/>(your commands)<br/>in git worktrees"]
     daemon --> db[("SQLite<br/>tasks.db")]
 ```
