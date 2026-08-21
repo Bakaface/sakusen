@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/tmux"
 )
 
 // TestShutdownCompletesBeforeStartReturns covers the sakusen#337 race: the
@@ -93,5 +95,44 @@ func TestShutdownCompletesBeforeStartReturns(t *testing.T) {
 	}
 	if _, err := os.Stat(cfg.SocketPath); !os.IsNotExist(err) {
 		t.Errorf("socket file still present after Start returned (stat err: %v)", err)
+	}
+}
+
+// TestKillTaskSessionsSparesForeignSessions covers sakusen#357: the shutdown
+// sweep used to kill every tmux session matching the bare "<project>-" prefix,
+// so a project named "nexus" took unrelated user sessions like "nexus-em" down
+// with it on every daemon restart. Only sessions whose suffix is a numeric
+// task ID may be killed.
+func TestKillTaskSessionsSparesForeignSessions(t *testing.T) {
+	if !tmux.IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	s, _, projID := newAdvanceTestServer(t, oneStepConfigYML)
+
+	// Give the project a name unlikely to collide with the developer's own
+	// tmux sessions, since these tests talk to the real tmux server.
+	projectName := fmt.Sprintf("sakusen357test%d", os.Getpid())
+	s.projectsMu.Lock()
+	s.projects[projID].cfg.Project.Name = projectName
+	s.projectsMu.Unlock()
+
+	workDir := t.TempDir()
+	taskSession := tmux.NewSession(projectName, "42", workDir)
+	foreignSession := &tmux.Session{Name: projectName + "-em", WorkDir: workDir}
+	for _, sess := range []*tmux.Session{taskSession, foreignSession} {
+		if err := sess.Create("sleep", "300"); err != nil {
+			t.Fatalf("failed to create tmux session %s: %v", sess.Name, err)
+		}
+		t.Cleanup(func() { _ = sess.Kill() })
+	}
+
+	s.killTaskSessions()
+
+	if taskSession.Exists() {
+		t.Errorf("task session %s must be killed on shutdown", taskSession.Name)
+	}
+	if !foreignSession.Exists() {
+		t.Errorf("session %s is not a sakusen task session and must survive shutdown", foreignSession.Name)
 	}
 }

@@ -809,15 +809,7 @@ func (s *Server) shutdown() {
 
 	s.manager.Shutdown(agentShutdownGracePeriod)
 
-	s.projectsMu.RLock()
-	for _, pc := range s.projects {
-		if sessions, err := tmux.ListSessions(tmux.SessionPrefix(pc.cfg.Project.Name)); err == nil {
-			for _, sess := range sessions {
-				sess.Kill()
-			}
-		}
-	}
-	s.projectsMu.RUnlock()
+	s.killTaskSessions()
 
 	s.cancel()
 
@@ -839,6 +831,26 @@ func (s *Server) shutdown() {
 	// Must be the last statement: Start() blocks on this channel so the
 	// process cannot exit before the cleanup above has completed.
 	close(s.shutdownDone)
+}
+
+// killTaskSessions tears down the tmux sessions of every registered project's
+// tasks on shutdown. It must gate on tmux.ListTaskSessions rather than on the
+// bare "<project>-" prefix: a project named "nexus" shares that prefix with
+// unrelated user sessions such as "nexus-em", and a prefix-only sweep killed
+// them on every daemon restart (sakusen#357).
+func (s *Server) killTaskSessions() {
+	s.projectsMu.RLock()
+	defer s.projectsMu.RUnlock()
+
+	for _, pc := range s.projects {
+		sessions, err := tmux.ListTaskSessions(pc.cfg.Project.Name)
+		if err != nil {
+			continue
+		}
+		for _, sess := range sessions {
+			sess.Kill()
+		}
+	}
 }
 
 func (s *Server) writePidFile() error {

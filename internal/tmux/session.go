@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -218,6 +219,43 @@ func ListSessions(prefix string) ([]*Session, error) {
 	}
 
 	return sessions, nil
+}
+
+// TaskIDFromSessionName reports whether sessionName is one of projectName's
+// Sakusen task sessions, returning the task ID it encodes.
+//
+// The bare "<project>-" prefix is not enough on its own: a project named
+// "nexus" shares it with any unrelated user session called "nexus-em",
+// "nexus-notes", ... Only a numeric suffix identifies a session we created,
+// so callers that act destructively (killing sessions) must gate on this
+// rather than on SessionPrefix alone.
+func TaskIDFromSessionName(projectName, sessionName string) (int64, bool) {
+	if !strings.HasPrefix(sessionName, SessionPrefix(projectName)) {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(ExtractTaskID(projectName, sessionName), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+// ListTaskSessions returns the live tmux sessions belonging to projectName's
+// Sakusen tasks, keyed by task ID. Sessions that merely share the project's
+// name prefix are excluded (see TaskIDFromSessionName).
+func ListTaskSessions(projectName string) (map[int64]*Session, error) {
+	sessions, err := ListSessions(SessionPrefix(projectName))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64]*Session, len(sessions))
+	for _, s := range sessions {
+		if taskID, ok := TaskIDFromSessionName(projectName, s.Name); ok {
+			result[taskID] = s
+		}
+	}
+	return result, nil
 }
 
 // ExtractTaskID extracts the task ID from a session name.

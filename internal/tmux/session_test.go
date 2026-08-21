@@ -151,6 +151,38 @@ func TestRunSetupCommand_SubstitutesVars(t *testing.T) {
 	})
 }
 
+// TestTaskIDFromSessionName pins the guard that keeps destructive sweeps off
+// unrelated sessions: sharing a project's "<name>-" prefix is not enough, the
+// suffix must parse as a numeric task ID (sakusen#357).
+func TestTaskIDFromSessionName(t *testing.T) {
+	tests := []struct {
+		name        string
+		projectName string
+		sessionName string
+		wantID      int64
+		wantOK      bool
+	}{
+		{"task session", "nexus", "nexus-42", 42, true},
+		{"legacy suffixed task session", "nexus", "nexus-42-implement", 42, true},
+		{"unrelated session sharing prefix", "nexus", "nexus-em", 0, false},
+		{"unrelated multi-segment session", "nexus", "nexus-personal-notes", 0, false},
+		{"different project", "nexus", "other-42", 0, false},
+		{"prefix only", "nexus", "nexus-", 0, false},
+		{"bare project name", "nexus", "nexus", 0, false},
+		{"dot-prefixed project", ".docs", "_docs-7", 7, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotOK := TaskIDFromSessionName(tt.projectName, tt.sessionName)
+			if gotID != tt.wantID || gotOK != tt.wantOK {
+				t.Errorf("TaskIDFromSessionName(%q, %q) = (%d, %t), want (%d, %t)",
+					tt.projectName, tt.sessionName, gotID, gotOK, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestExtractTaskID(t *testing.T) {
 	tests := []struct {
 		name        string

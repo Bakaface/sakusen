@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -506,16 +505,13 @@ func (m Model) checkTmuxSessions() tea.Cmd {
 		projectName = m.cfg.Project.Name
 	}
 	return func() tea.Msg {
-		sessions, err := tmux.ListSessions(tmux.SessionPrefix(projectName))
+		sessions, err := tmux.ListTaskSessions(projectName)
 		if err != nil {
 			return nil
 		}
-		result := make(map[int64]bool)
-		for _, s := range sessions {
-			taskIDStr := tmux.ExtractTaskID(projectName, s.Name)
-			if taskID, err := strconv.ParseInt(taskIDStr, 10, 64); err == nil {
-				result[taskID] = true
-			}
+		result := make(map[int64]bool, len(sessions))
+		for taskID := range sessions {
+			result[taskID] = true
 		}
 		return tmuxSessionsMsg(result)
 	}
