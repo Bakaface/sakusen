@@ -7,11 +7,12 @@ You decide what runs, how many run at once, where the human gates go, and how fi
 > ⚠️ **Early days — breaking changes expected.** Sakusen is under active development. Config formats, CLI flags, and the database schema may change without notice between releases. Pin to a tagged version if you need stability.
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryTextColor": "#000000", "primaryBorderColor": "#000000", "lineColor": "#000000"}}}%%
 flowchart LR
-    tui["sakusen tui<br/>(control)"] <--> daemon["sakusen daemon<br/>(orchestrator)"]
-    cli["sakusen CLI<br/>(task CRUD)"] <--> daemon
-    mcp["sakusen MCP<br/>(agent tools)"] <--> daemon
-    daemon <--> agents["coding agents<br/>(your commands)<br/>in git worktrees"]
+    tui["Sakusen TUI<br/>control"] <--> daemon["Sakusen daemon<br/>(orchestrator)"]
+    cli["Sakusen CLI<br/>task CRUD"] <--> daemon
+    mcp["Sakusen MCP<br/>agent tools"] <--> daemon
+    daemon <--> agents["Coding agents<br/>(your commands)<br/>in git worktrees"]
     daemon --> db[("SQLite<br/>tasks.db")]
 ```
 
