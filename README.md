@@ -1,4 +1,4 @@
-# ✈ Sakusen
+# 作戦
 
 Sakusen is a daemon that orchestrates coding agents through long-lived, multi-step workflows. An agent is just a shell command you declare in config — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), opencode, aider, a raw model CLI, anything — and Sakusen talks to it through a small environment-variable contract. Each task runs in its own git worktree on its own branch, advances through whatever steps you define in config — anything from a single "implement" step to a full plan/implement/review/approve/merge chain with loops and human gates — and reports back to a terminal UI where you stay in the driver's seat.
 
@@ -6,17 +6,11 @@ You decide what runs, how many run at once, where the human gates go, and how fi
 
 > ⚠️ **Early days — breaking changes expected.** Sakusen is under active development. Config formats, CLI flags, and the database schema may change without notice between releases. Pin to a tagged version if you need stability.
 
-```
-┌─────────────┐    ┌────────────────┐    ┌─────────────────┐
-│  sakusen tui │ ←→ │ sakusen daemon  │ ←→ │ coding agents   │
-│  (control)  │    │ (orchestrator) │    │ (your commands) │
-└─────────────┘    └────────────────┘    │ in git worktrees│
-                          │              └─────────────────┘
-                          ↓
-                    ┌──────────┐
-                    │ SQLite   │
-                    │ tasks.db │
-                    └──────────┘
+```mermaid
+flowchart LR
+    tui["sakusen tui<br/>(control)"] <--> daemon["sakusen daemon<br/>(orchestrator)"]
+    daemon <--> agents["coding agents<br/>(your commands)<br/>in git worktrees"]
+    daemon --> db[("SQLite<br/>tasks.db")]
 ```
 
 ## Why
