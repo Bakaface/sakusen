@@ -748,3 +748,81 @@ agents:
 		t.Errorf("Env[SHARED] = %q, want %q", worker.Env["SHARED"], "project")
 	}
 }
+
+// TestSummarizerPromptOverridesParsed verifies that title_prompt/slug_prompt
+// parse from the project tier and that they follow the summarizer block's
+// wholesale-replacement rule across tiers (a project block that omits them
+// clears the global tier's values).
+func TestSummarizerPromptOverridesParsed(t *testing.T) {
+	t.Run("parsed from the project tier", func(t *testing.T) {
+		isolateHome(t)
+		projectDir := t.TempDir()
+		projectYml := "summarizer:\n" +
+			"  command: \"summarize\"\n" +
+			"  title_prompt: \"Title for {{input}}\"\n" +
+			"  slug_prompt: \"Slug for {{input}}\"\n"
+		if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(projectYml), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadForProject(projectDir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		if cfg.Summarizer.TitlePrompt != "Title for {{input}}" {
+			t.Errorf("TitlePrompt = %q, want %q", cfg.Summarizer.TitlePrompt, "Title for {{input}}")
+		}
+		if cfg.Summarizer.SlugPrompt != "Slug for {{input}}" {
+			t.Errorf("SlugPrompt = %q, want %q", cfg.Summarizer.SlugPrompt, "Slug for {{input}}")
+		}
+	})
+
+	t.Run("global tier prompts apply when the project sets no summarizer", func(t *testing.T) {
+		writeGlobalConfigYaml(t, `
+summarizer:
+  command: "global summarize"
+  title_prompt: "Global title for {{input}}"
+  slug_prompt: "Global slug for {{input}}"
+`)
+		projectDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte("max_workers: 2\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadForProject(projectDir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		if cfg.Summarizer.TitlePrompt != "Global title for {{input}}" {
+			t.Errorf("TitlePrompt = %q, want the global tier's", cfg.Summarizer.TitlePrompt)
+		}
+		if cfg.Summarizer.SlugPrompt != "Global slug for {{input}}" {
+			t.Errorf("SlugPrompt = %q, want the global tier's", cfg.Summarizer.SlugPrompt)
+		}
+	})
+
+	t.Run("project summarizer block replaces the global prompts", func(t *testing.T) {
+		writeGlobalConfigYaml(t, `
+summarizer:
+  command: "global summarize"
+  title_prompt: "Global title for {{input}}"
+  slug_prompt: "Global slug for {{input}}"
+`)
+		projectDir := t.TempDir()
+		projectYml := "summarizer:\n  command: \"project summarize\"\n  slug_prompt: \"Project slug for {{input}}\"\n"
+		if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(projectYml), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadForProject(projectDir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		if cfg.Summarizer.SlugPrompt != "Project slug for {{input}}" {
+			t.Errorf("SlugPrompt = %q, want the project tier's", cfg.Summarizer.SlugPrompt)
+		}
+		if cfg.Summarizer.TitlePrompt != "" {
+			t.Errorf("TitlePrompt = %q, want empty (project block replaces the global block wholesale)", cfg.Summarizer.TitlePrompt)
+		}
+	})
+}

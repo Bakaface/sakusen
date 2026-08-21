@@ -14,7 +14,10 @@ import (
 // AI-derived (or branch-derived) title when the input / checkout branch
 // makes that meaningful.
 type CreateArgs struct {
-	Title    string
+	Title string
+	// Slug, when set, is used verbatim (after normalization) instead of an
+	// AI-generated slug.
+	Slug     string
 	Input    string
 	Priority string
 	Branch   string
@@ -55,6 +58,7 @@ func RunCreate(ctx Ctx, args CreateArgs) (Result, error) {
 
 	req := daemon.CreateTaskRequest{
 		Title:          args.Title,
+		Slug:           args.Slug,
 		Input:          strings.TrimSpace(args.Input),
 		Workflow:       args.Workflow,
 		Priority:       args.Priority,

@@ -148,7 +148,10 @@ type ListTasksRequest struct {
 }
 
 type CreateTaskRequest struct {
-	Title          string   `json:"title,omitempty"`
+	Title string `json:"title,omitempty"`
+	// Slug skips AI slug generation; the value is normalized (kebab-case,
+	// length-capped) before use.
+	Slug           string   `json:"slug,omitempty"`
 	Input          string   `json:"input"`
 	Workflow       string   `json:"workflow,omitempty"`
 	Priority       string   `json:"priority,omitempty"`

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -196,7 +197,12 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		title = task.SanitizeTitle(input)
 	}
 
+	// Provisional slug: an explicit one is honoured verbatim (normalized),
+	// otherwise refineTaskTitle replaces this title-derived value.
 	slug := task.Slugify(title)
+	if explicit := task.Slugify(req.Slug); explicit != "" {
+		slug = explicit
+	}
 
 	priority := task.PriorityMedium
 	if req.Priority != "" && task.IsValidPriority(req.Priority) {
@@ -273,7 +279,7 @@ func (s *Server) kickOffPostCreate(t *task.Task, req CreateTaskRequest) {
 	if req.TmuxDirect {
 		go s.setupTmuxDirect(t.ID, t.ProjectID, title)
 	} else {
-		go s.refineTaskTitle(t.ID, t.ProjectID, t.BranchName, t.Worktree, t.CheckoutBranch, input, title, req.Title)
+		go s.refineTaskTitle(t.ID, t.ProjectID, t.BranchName, t.Worktree, t.CheckoutBranch, input, title, req.Title, req.Slug)
 	}
 }
 
@@ -727,13 +733,22 @@ func (s *Server) handleUpdateActiveStepContext(conn net.Conn, req UpdateActiveSt
 	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated (%s)", req.StepName, mode)})
 }
 
-func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, worktree bool, checkoutBranch string, input string, initialTitle string, manualTitle string) {
+// refineTaskTitle resolves a freshly-created task's final title, slug, and
+// branch, then transitions it out of StatusInit. explicitSlug is the
+// caller-supplied slug ("" = generate one).
+func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, worktree bool, checkoutBranch string, input string, initialTitle string, manualTitle string, explicitSlug string) {
 	projCfg := s.cfg
 	if pc, err := s.getProjectContext(projectID); err == nil {
 		projCfg = pc.cfg
 	}
 
 	var title string
+
+	// AI runs only with an input to describe and a summarizer to describe it
+	// with; each of title/slug additionally yields to a caller-supplied value.
+	canUseAI := input != "" && projCfg.Summarizer.Configured()
+	wantAITitle := canUseAI && manualTitle == ""
+	wantAISlug := canUseAI && strings.TrimSpace(explicitSlug) == ""
 
 	// Use manual title if provided, skipping AI generation
 	if manualTitle != "" {
@@ -748,23 +763,55 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 		if title == "" {
 			title = initialTitle
 		}
-	} else {
+	}
+
+	var aiSlug string
+	if wantAITitle || wantAISlug {
 		ctx, cancel := context.WithTimeout(s.ctx, titleGenerationTimeout)
 		defer cancel()
 
-		var err error
-		title, err = s.generateTitle(ctx, input, &projCfg.Summarizer)
-		if err != nil {
-			log.Printf("%sFailed to generate AI title for task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-			if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
-				log.Printf("%sFailed to transition task #%d to pending: %v", s.projectLogPrefix(projectID), taskID, err)
-			}
-			s.broadcastTaskUpdate(taskID)
-			return
+		// Title and slug are separate single-purpose calls; run them
+		// concurrently so a task never pays for both sequentially.
+		var wg sync.WaitGroup
+		var titleErr error
+		if wantAITitle {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				title, titleErr = s.generateTitle(ctx, input, &projCfg.Summarizer)
+			}()
+		}
+		if wantAISlug {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				generated, err := s.generateSlug(ctx, input, &projCfg.Summarizer)
+				if err != nil {
+					// A missing slug is recoverable (Slugify(title) below), so
+					// the task proceeds rather than stalling in init.
+					log.Printf("%sFailed to generate AI slug for task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
+					return
+				}
+				aiSlug = generated
+			}()
+		}
+		wg.Wait()
+
+		if titleErr != nil {
+			log.Printf("%sFailed to generate AI title for task #%d: %v", s.projectLogPrefix(projectID), taskID, titleErr)
+			// Keep the title the task was created with and carry on, so a failed
+			// title call doesn't also throw away a slug the summarizer did return.
+			title = initialTitle
 		}
 	}
 
-	slug := task.Slugify(title)
+	slug := task.Slugify(explicitSlug)
+	if slug == "" {
+		slug = aiSlug
+	}
+	if slug == "" {
+		slug = task.Slugify(title)
+	}
 
 	// Skip branch resolution for no-worktree tasks
 	var branch string
@@ -791,14 +838,31 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 	}
 
 	s.broadcastTaskUpdate(taskID)
-	log.Printf("%sAI title for task #%d: %s (branch: %s)", s.projectLogPrefix(projectID), taskID, title, branch)
+	log.Printf("%sAI title for task #%d: %s (slug: %s, branch: %s)", s.projectLogPrefix(projectID), taskID, title, slug, branch)
+}
+
+const (
+	defaultTitlePrompt = "Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task input:\n\n{{input}}"
+	defaultSlugPrompt  = "Generate a short kebab-case slug (2-4 words, max 24 characters, lowercase letters, digits and dashes only, no quotes, no prose, no prefix like 'Slug:') for the following task input:\n\n{{input}}"
+)
+
+// summarizerPrompt renders a summarizer prompt from the configured override
+// (falling back to the built-in default), substituting the task input for
+// {{input}}. An override that omits the placeholder gets the input appended,
+// so a prompt written as a bare instruction still sees the task.
+func summarizerPrompt(override, fallback, input string) string {
+	tmpl := strings.TrimSpace(override)
+	if tmpl == "" {
+		tmpl = fallback
+	}
+	if strings.Contains(tmpl, "{{input}}") {
+		return strings.ReplaceAll(tmpl, "{{input}}", input)
+	}
+	return tmpl + "\n\n" + input
 }
 
 func (s *Server) generateTitle(ctx context.Context, input string, summarizer *config.SummarizerConfig) (string, error) {
-	prompt := fmt.Sprintf(
-		"Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task input:\n\n%s",
-		input,
-	)
+	prompt := summarizerPrompt(summarizer.TitlePrompt, defaultTitlePrompt, input)
 
 	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SAKUSEN_PURPOSE": "title"}, prompt)
 	if err != nil {
@@ -811,6 +875,25 @@ func (s *Server) generateTitle(ctx context.Context, input string, summarizer *co
 	}
 
 	return title, nil
+}
+
+// generateSlug asks the summarizer for a task slug. The response is normalized
+// through task.Slugify, so a chatty or over-long answer still yields a bounded
+// kebab-case slug (an answer with nothing slug-shaped in it is an error).
+func (s *Server) generateSlug(ctx context.Context, input string, summarizer *config.SummarizerConfig) (string, error) {
+	prompt := summarizerPrompt(summarizer.SlugPrompt, defaultSlugPrompt, input)
+
+	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SAKUSEN_PURPOSE": "slug"}, prompt)
+	if err != nil {
+		return "", fmt.Errorf("slug generation failed: %w", err)
+	}
+
+	slug := task.Slugify(task.SanitizeTitle(out))
+	if slug == "" {
+		return "", fmt.Errorf("summarizer returned empty slug")
+	}
+
+	return slug, nil
 }
 
 // truncateTitleInput clips a task input's first line to a title-sized slice

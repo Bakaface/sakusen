@@ -75,11 +75,15 @@ There is no system-prompt injection: the fully-resolved step prompt is delivered
 summarizer:
   command: claude -p --output-format text --model haiku --dangerously-skip-permissions
   max_prompt_bytes: 380000     # optional; >0 enables map-reduce chunking of huge chats
+  title_prompt: "..."          # optional; overrides the built-in AI title prompt
+  slug_prompt: "..."           # optional; overrides the built-in AI slug prompt
 ```
 
-The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles, and `sakusen backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `backfill_context`).
+The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`).
 
-When the block is omitted, everything degrades gracefully: titles fall back to a truncated task input, summarize passes are skipped with a warning (or fail the task when a step sets `require_context: true`), and `backfill-context` errors out.
+`title_prompt` / `slug_prompt` replace the built-in prompts for the title and slug calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). A slug answer is always normalized to kebab-case and capped at 24 characters.
+
+When the block is omitted, everything degrades gracefully: titles fall back to a truncated task input, slugs to the slugified title, summarize passes are skipped with a warning (or fail the task when a step sets `require_context: true`), and `backfill-context` errors out.
 
 ---
 

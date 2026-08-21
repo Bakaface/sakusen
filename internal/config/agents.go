@@ -113,15 +113,17 @@ func (a *AgentConfig) IsTmux() bool {
 
 // SummarizerConfig configures the utility LLM command sakusen shells out to for
 // text-in/text-out work: chat/step summarization, the final task summarizer,
-// AI title generation, and `sakusen backfill-context`. The command is executed
-// via `sh -c` with the prompt piped on STDIN and must print the response on
-// stdout. SAKUSEN_PURPOSE identifies the call site ("summarize",
-// "summarize_chat", "summarize_chat_chunk", "title", "backfill_context").
+// AI title and slug generation, and `sakusen backfill-context`. The command is
+// executed via `sh -c` with the prompt piped on STDIN and must print the
+// response on stdout. SAKUSEN_PURPOSE identifies the call site ("summarize",
+// "summarize_chat", "summarize_chat_chunk", "title", "slug",
+// "backfill_context").
 //
 // When no summarizer is configured, everything degrades gracefully: titles
-// fall back to a truncated task input, summarize passes are skipped with a
-// warning (or fail the task when a step sets require_context: true), and
-// backfill-context errors out with an instructive message.
+// fall back to a truncated task input, slugs to a slugified title, summarize
+// passes are skipped with a warning (or fail the task when a step sets
+// require_context: true), and backfill-context errors out with an instructive
+// message.
 type SummarizerConfig struct {
 	Command string `yaml:"command"`
 
@@ -130,6 +132,16 @@ type SummarizerConfig struct {
 	// line boundaries into chunks below the ceiling, each chunk summarized,
 	// then the chunk summaries reduced). 0 disables chunking.
 	MaxPromptBytes int `yaml:"max_prompt_bytes,omitempty"`
+
+	// TitlePrompt overrides the built-in AI title prompt (SAKUSEN_PURPOSE=title).
+	// The task input is substituted for {{input}}; a prompt without the
+	// placeholder gets the input appended.
+	TitlePrompt string `yaml:"title_prompt,omitempty"`
+
+	// SlugPrompt overrides the built-in AI slug prompt (SAKUSEN_PURPOSE=slug),
+	// following the same {{input}} rule as TitlePrompt. Whatever the command
+	// returns is still normalized through task.Slugify.
+	SlugPrompt string `yaml:"slug_prompt,omitempty"`
 }
 
 // Configured reports whether a summarizer command is set.

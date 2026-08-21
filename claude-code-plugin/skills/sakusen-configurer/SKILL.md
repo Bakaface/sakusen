@@ -61,7 +61,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `poll_interval` | string | `"5s"` | Daemon task-polling cadence (Go duration string). Rarely overridden per-project. |
 | `agents` | map | — | **Agent registry** — slug → agent record (`mode`, `command`, `resume_command`, `chat_log_command`, `env`). See [Agents](#agents). |
 | `default_agent` | string | `"claude"` | Agent slug steps fall back to when neither the step nor the workflow sets `agent:`. |
-| `summarizer` | object | — | Utility LLM command for summaries and AI titles (`command`, `max_prompt_bytes`). See [Summarizer](#summarizer). |
+| `summarizer` | object | — | Utility LLM command for summaries and AI titles/slugs (`command`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`). See [Summarizer](#summarizer). |
 | `verification` | object | — | Summarizer verification settings (`max_retries`, `verify_summarizer`) |
 | `git` | object | — | Branch naming, base branch |
 | `on_complete` | string | `"commit"` | Finalization action (`commit`/`merge`/`none`); per-workflow overridable |
@@ -94,7 +94,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 Top-level field names mix two casing styles — **don't guess, copy exactly**:
 
 - **kebab-case:** `worktree-sync-paths`, `worktree-setup-command`, `worktree-setup-commands`, `tmux-setup-command`
-- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `base_branch`, `branch_template`, `on_complete`, `max_prompt_bytes`, `resume_command`, `chat_log_command`
+- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `base_branch`, `branch_template`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `resume_command`, `chat_log_command`
 
 If you author an unrecognized variant (`worktree_sync_paths`, `tmux_setup_command`, etc.), Sakusen will silently ignore it.
 
@@ -216,9 +216,13 @@ Tmux mode additionally (inside the session wrapper script):
 summarizer:
   command: claude -p --output-format text --model haiku --dangerously-skip-permissions
   max_prompt_bytes: 380000
+  title_prompt: "..."       # optional; overrides the built-in AI title prompt
+  slug_prompt: "..."        # optional; overrides the built-in AI slug prompt
 ```
 
-The utility LLM command Sakusen shells out to for text-in/text-out work: chat/step summaries (`summarize_chat`), the final task summary, AI task titles, and `sakusen backfill-context`. The prompt arrives on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `backfill_context`).
+The utility LLM command Sakusen shells out to for text-in/text-out work: chat/step summaries (`summarize_chat`), the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt arrives on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`).
+
+`title_prompt` / `slug_prompt` (optional) replace the built-in prompts for those two calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended).
 
 `max_prompt_bytes` (optional, > 0) bounds a single invocation: larger chat logs are summarized map-reduce style (chunked on line boundaries, each chunk summarized, then reduced). `0`/omitted disables chunking. Omit the whole block to disable summarization (everything degrades gracefully — see v1 limitations).
 

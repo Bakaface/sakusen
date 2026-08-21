@@ -18,6 +18,7 @@ type CreateTaskArgs struct {
 	Input          string   `json:"input,omitempty" jsonschema:"The task input — what the agent should do. Seeds {{task.input}} in step prompts. Required unless checkout_branch is set or the chosen workflow's first step is tmux."`
 	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the git toplevel of the MCP process's cwd."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
+	Slug           string   `json:"slug,omitempty" jsonschema:"Skip AI slug generation and use this slug (short kebab-case, e.g. 'fix-login-redirect'). It is normalized to lowercase letters, digits and dashes and capped at 24 characters. Feeds {{task.slug}} in branch templates and the worktree directory name."`
 	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every task except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch tasks still run their workflow steps, so the requirement applies to them too. A workflow may pin fields like input/worktree/branch/target; explicit arguments here override those pins."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent. Defaults to the project's configured priority."`
 	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'. Supports {{task.id}}, {{task.title}}, {{task.slug}}."`
@@ -62,6 +63,7 @@ func handleCreateTask(ctx context.Context, c *client.Client, args CreateTaskArgs
 
 	req := daemon.CreateTaskRequest{
 		Title:          args.Title,
+		Slug:           args.Slug,
 		Input:          args.Input,
 		Workflow:       args.Workflow,
 		Priority:       args.Priority,

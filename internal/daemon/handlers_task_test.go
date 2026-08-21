@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,10 +16,21 @@ import (
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
+// isolateGlobalConfig points HOME/XDG_CONFIG_HOME at a temp dir so config
+// loading can't pick up the developer's real ~/.sakusen.yml — a global
+// summarizer: command there would make task init shell out for real.
+func isolateGlobalConfig(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+}
+
 // setupServerWithProject creates an in-memory DB, a project, and returns the
 // Server and project ID for ref-validation tests.
 func setupServerWithProject(t *testing.T) (*Server, int64) {
 	t.Helper()
+	isolateGlobalConfig(t)
 	database, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)

@@ -111,3 +111,53 @@ func TestNoSummarizerFallsBackToTruncatedInput(t *testing.T) {
 
 	e.WaitStatus(1, "completed", 15*time.Second)
 }
+
+// TestSummarizerGeneratesSlug verifies AI slug generation end-to-end: a task
+// created without --slug triggers a separate summarizer call
+// (SAKUSEN_PURPOSE=slug), and the answer becomes the task's slug and feeds the
+// branch template. A --title task still gets the slug call — only the title
+// call is skipped.
+func TestSummarizerGeneratesSlug(t *testing.T) {
+	e := setupE2E(t, "summarizer_title")
+	e.WriteSakusenYAML(summarizerTitleYAML(e.StubPath))
+
+	e.MustSakusen("create", "--title", "Manual Title", "add a login form with client-side validation")
+
+	e.Eventually(10*time.Second, "AI-generated slug", func() bool {
+		return e.TaskField(1, "slug") == "ai-generated-slug"
+	})
+
+	if got := e.TaskField(1, "title"); got != "Manual Title" {
+		t.Errorf("title = %q, want the manual title", got)
+	}
+	if got := e.TaskField(1, "branch"); got != "sakusen/1-ai-generated-slug" {
+		t.Errorf("branch = %q, want the slug-derived branch", got)
+	}
+	// The manual title skips the title call; the slug call still happens.
+	if n := len(e.StubCalls("slug")); n != 1 {
+		t.Errorf("stub slug calls: got %d, want 1", n)
+	}
+	if n := len(e.StubCalls("title")); n != 0 {
+		t.Errorf("stub title calls: got %d, want 0 (--title was passed)", n)
+	}
+
+	e.WaitStatus(1, "completed", 15*time.Second)
+}
+
+// TestExplicitSlugSkipsSummarizer verifies that --slug wins: it is normalized
+// (lowercased, kebab-cased, length-capped) and no slug call is made.
+func TestExplicitSlugSkipsSummarizer(t *testing.T) {
+	e := setupE2E(t, "summarizer_title")
+	e.WriteSakusenYAML(summarizerTitleYAML(e.StubPath))
+
+	e.MustSakusen("create", "--title", "Manual Title", "--slug", "My Custom Slug", "add a login form")
+
+	e.Eventually(10*time.Second, "explicit slug", func() bool {
+		return e.TaskField(1, "slug") == "my-custom-slug"
+	})
+	if n := len(e.StubCalls("slug")); n != 0 {
+		t.Errorf("stub slug calls: got %d, want 0 (--slug was passed)", n)
+	}
+
+	e.WaitStatus(1, "completed", 15*time.Second)
+}

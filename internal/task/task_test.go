@@ -272,3 +272,84 @@ func TestStatusValues(t *testing.T) {
 		}
 	}
 }
+
+// TestSlugify covers the slug guardrails: kebab-case normalization, the
+// MaxSlugLength cap, and word-boundary truncation.
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "short title passes through lowercased",
+			input: "Fix Login Bug",
+			want:  "fix-login-bug",
+		},
+		{
+			name:  "symbols collapse into single dashes",
+			input: "fix(auth): 500 @ /login!!",
+			want:  "fix-auth-500-login",
+		},
+		{
+			name:  "non-ascii characters become dashes",
+			input: "Привет мир login",
+			want:  "login",
+		},
+		{
+			name:  "symbols only",
+			input: "!!! ???",
+			want:  "",
+		},
+		{
+			name:  "exactly at the cap is untouched",
+			input: "aaaa bbbb cccc dddd eeee", // 24 chars slugified
+			want:  "aaaa-bbbb-cccc-dddd-eeee",
+		},
+		{
+			name:  "mid-word cut trims back to the last dash",
+			input: "put guardrails on task slug generation",
+			want:  "put-guardrails-on-task",
+		},
+		{
+			name:  "mid-word cut leaves no trailing dash",
+			input: "fix stale daemon pid left behind",
+			want:  "fix-stale-daemon-pid",
+		},
+		{
+			name:  "cut landing exactly on a word boundary keeps the last word",
+			input: "aaaa bbbb cccc dddd eeee ffff", // dash sits at index 24
+			want:  "aaaa-bbbb-cccc-dddd-eeee",
+		},
+		{
+			name:  "single long word is hard-cut (no dash past half the cap)",
+			input: "supercalifragilisticexpialidocious",
+			want:  "supercalifragilisticexpi",
+		},
+		{
+			name:  "early dash is not a usable boundary",
+			input: "a bcdefghijklmnopqrstuvwxyz",
+			want:  "a-bcdefghijklmnopqrstuvw",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Slugify(tt.input)
+			if got != tt.want {
+				t.Errorf("Slugify(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+			if len(got) > MaxSlugLength {
+				t.Errorf("Slugify(%q) produced %d chars, want <= %d", tt.input, len(got), MaxSlugLength)
+			}
+			if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
+				t.Errorf("Slugify(%q) = %q, want no leading/trailing dash", tt.input, got)
+			}
+		})
+	}
+}

@@ -56,7 +56,7 @@ init -> pending -> running -+-> summarizing_step -> running (next step)
                             +-> failed
 ```
 
-**Title refinement**: During `init`, an async goroutine generates an AI title via the configured `summarizer:` command (`SAKUSEN_PURPOSE=title`, 30s timeout; with no summarizer, a sanitized truncated input is used). On success, `FinalizeTaskIdentity()` updates title/slug/branch before transitioning to `pending`. On failure, the sanitized input is kept as title.
+**Title/slug refinement**: During `init`, an async goroutine generates an AI title via the configured `summarizer:` command (`SAKUSEN_PURPOSE=title`, 30s timeout; with no summarizer, a sanitized truncated input is used) and, as a separate parallel call under the same timeout, an AI slug (`SAKUSEN_PURPOSE=slug`). A caller-supplied title or slug skips the corresponding call; an empty input skips both. A failed slug call falls back to `Slugify(title)` and never stalls the task. `FinalizeTaskIdentity()` updates title/slug/branch before transitioning to `pending`; a failed title call keeps the sanitized input as title but still finalizes the generated slug.
 
 **Terminal:** `completed`, `failed`
 **Active:** `running`, `awaiting-approval`, `tmux`, `finalizing`, `summarizing`, `summarizing_step`, `merge-blocked`
@@ -88,7 +88,7 @@ func IsValidPriority(s string) bool    // Checks against valid list
 ## Title Handling
 
 - `SanitizeTitle()`: first line, collapse whitespace, strip control chars, max 80 chars (`MaxTitleLength`)
-- `Slugify()`: lowercase, non-alphanumeric -> hyphens, trim, max 40 chars
+- `Slugify()`: lowercase, non-alphanumeric -> hyphens, trim, max 24 chars (`MaxSlugLength`) with word-boundary truncation (trims back to the last dash when the cut lands mid-word and that dash is past half the cap). Every slug passes through it — AI-generated, user-supplied, and title-derived alike.
 
 ## Patterns
 
