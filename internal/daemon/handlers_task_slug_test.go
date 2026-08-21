@@ -201,10 +201,10 @@ func TestRefineTaskTitle_SlugGeneration(t *testing.T) {
 		}
 	})
 
-	t.Run("empty slug answer falls back to the slugified title", func(t *testing.T) {
+	t.Run("blank slug answer falls back to the slugified title", func(t *testing.T) {
 		logPath := filepath.Join(t.TempDir(), "calls.log")
 		cfg := &config.Config{Summarizer: config.SummarizerConfig{
-			Command: summarizerStub(logPath, map[string]string{"slug": "  !!!  "}),
+			Command: summarizerStub(logPath, map[string]string{"slug": "     "}),
 		}}
 		s, tk := setupSlugServer(t, cfg)
 
@@ -212,6 +212,84 @@ func TestRefineTaskTitle_SlugGeneration(t *testing.T) {
 
 		if got.Slug != task.Slugify("Fix The Login Form") {
 			t.Errorf("slug = %q, want the slugified title", got.Slug)
+		}
+	})
+
+	t.Run("non-slug answer falls back to the slugified title", func(t *testing.T) {
+		// A chatty or punctuation-only answer is rejected rather than reshaped:
+		// a slug is used verbatim, so it has to arrive as a usable token.
+		for _, answer := range []string{"Slug: login-form", "  !!!  ", "feature/login"} {
+			logPath := filepath.Join(t.TempDir(), "calls.log")
+			cfg := &config.Config{Summarizer: config.SummarizerConfig{
+				Command: summarizerStub(logPath, map[string]string{"slug": answer}),
+			}}
+			s, tk := setupSlugServer(t, cfg)
+
+			got := refined(t, s, tk, "add a login form", "provisional", "Fix The Login Form", "")
+
+			if got.Slug != task.Slugify("Fix The Login Form") {
+				t.Errorf("answer %q: slug = %q, want the slugified title", answer, got.Slug)
+			}
+		}
+	})
+
+	t.Run("generated slug is used verbatim, however long", func(t *testing.T) {
+		// MaxSlugLength must not reach the generated-slug path: this answer is
+		// well past the cap and lands in the task unchanged.
+		const answer = "put-guardrails-on-ai-task-slug-generation"
+		logPath := filepath.Join(t.TempDir(), "calls.log")
+		cfg := &config.Config{Summarizer: config.SummarizerConfig{
+			Command: summarizerStub(logPath, map[string]string{"slug": answer}),
+		}}
+		s, tk := setupSlugServer(t, cfg)
+
+		got := refined(t, s, tk, "add a login form", "provisional", "Manual Title", "")
+
+		if got.Slug != answer {
+			t.Errorf("slug = %q, want the generated slug untouched (%q)", got.Slug, answer)
+		}
+	})
+
+	t.Run("slug_command overrides the summarizer command", func(t *testing.T) {
+		mainLog := filepath.Join(t.TempDir(), "main.log")
+		slugLog := filepath.Join(t.TempDir(), "slug.log")
+		cfg := &config.Config{Summarizer: config.SummarizerConfig{
+			Command:     summarizerStub(mainLog, map[string]string{"title": "AI Title", "slug": "main-command-slug"}),
+			SlugCommand: summarizerStub(slugLog, map[string]string{"slug": "slug-command-slug"}),
+		}}
+		s, tk := setupSlugServer(t, cfg)
+
+		got := refined(t, s, tk, "add a login form", "provisional", "", "")
+
+		if got.Slug != "slug-command-slug" {
+			t.Errorf("slug = %q, want the slug_command's answer", got.Slug)
+		}
+		if got.Title != "AI Title" {
+			t.Errorf("title = %q, want the summarizer command's answer", got.Title)
+		}
+		if purposes := calledPurposes(summarizerCalls(t, mainLog)); len(purposes) != 1 || purposes[0] != "title" {
+			t.Errorf("summarizer command purposes = %v, want only [title]", purposes)
+		}
+		if purposes := calledPurposes(summarizerCalls(t, slugLog)); len(purposes) != 1 || purposes[0] != "slug" {
+			t.Errorf("slug command purposes = %v, want only [slug]", purposes)
+		}
+	})
+
+	t.Run("slug_command alone enables slug generation", func(t *testing.T) {
+		slugLog := filepath.Join(t.TempDir(), "slug.log")
+		cfg := &config.Config{Summarizer: config.SummarizerConfig{
+			SlugCommand: summarizerStub(slugLog, map[string]string{"slug": "slug-command-slug"}),
+		}}
+		s, tk := setupSlugServer(t, cfg)
+
+		got := refined(t, s, tk, "add a login form", "provisional", "", "")
+
+		if got.Slug != "slug-command-slug" {
+			t.Errorf("slug = %q, want the slug_command's answer", got.Slug)
+		}
+		// No summarizer command → the title still degrades to truncated input.
+		if got.Title != "add a login form" {
+			t.Errorf("title = %q, want the truncated-input fallback", got.Title)
 		}
 	})
 

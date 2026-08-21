@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -744,11 +745,11 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 
 	var title string
 
-	// AI runs only with an input to describe and a summarizer to describe it
-	// with; each of title/slug additionally yields to a caller-supplied value.
-	canUseAI := input != "" && projCfg.Summarizer.Configured()
-	wantAITitle := canUseAI && manualTitle == ""
-	wantAISlug := canUseAI && strings.TrimSpace(explicitSlug) == ""
+	// AI runs only with an input to describe and a command to describe it with;
+	// each of title/slug additionally yields to a caller-supplied value. Slugs
+	// have their own command override, so they can be enabled independently.
+	wantAITitle := input != "" && projCfg.Summarizer.Configured() && manualTitle == ""
+	wantAISlug := input != "" && projCfg.Summarizer.SlugConfigured() && strings.TrimSpace(explicitSlug) == ""
 
 	// Use manual title if provided, skipping AI generation
 	if manualTitle != "" {
@@ -843,7 +844,10 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 
 const (
 	defaultTitlePrompt = "Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task input:\n\n{{input}}"
-	defaultSlugPrompt  = "Generate a short kebab-case slug (2-4 words, max 24 characters, lowercase letters, digits and dashes only, no quotes, no prose, no prefix like 'Slug:') for the following task input:\n\n{{input}}"
+	// The format is described without naming a format the model could mistake
+	// for subject matter: an answer echoing "kebab" or "slug" back as a word
+	// ends up in the branch name.
+	defaultSlugPrompt = "Name the following task in 2-4 lowercase words joined by dashes (letters and digits only). The name must describe what the task is about, and must never contain format or meta words such as \"kebab\", \"slug\", \"case\", \"task\" or \"name\". Answer with the name alone: no quotes, no prose, no prefix like 'Slug:'.\n\n{{input}}"
 )
 
 // summarizerPrompt renders a summarizer prompt from the configured override
@@ -877,24 +881,36 @@ func (s *Server) generateTitle(ctx context.Context, input string, summarizer *co
 	return title, nil
 }
 
-// generateSlug asks the summarizer for a task slug. The response is normalized
-// through task.Slugify, so a chatty or over-long answer still yields a bounded
-// kebab-case slug (an answer with nothing slug-shaped in it is an error).
+// generateSlug asks the summarizer for a task slug and uses the answer as-is.
+// Nothing here truncates, shortens or re-shapes it — task.MaxSlugLength does
+// not apply to generated slugs — so the wording the model chose is the wording
+// that reaches the branch name. Only surrounding whitespace is stripped; an
+// answer that isn't a single path-safe token is rejected, leaving the caller's
+// title-derived fallback in place.
 func (s *Server) generateSlug(ctx context.Context, input string, summarizer *config.SummarizerConfig) (string, error) {
 	prompt := summarizerPrompt(summarizer.SlugPrompt, defaultSlugPrompt, input)
 
-	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SAKUSEN_PURPOSE": "slug"}, prompt)
+	out, err := runner.RunSync(ctx, summarizer.EffectiveSlugCommand(), "", map[string]string{"SAKUSEN_PURPOSE": "slug"}, prompt)
 	if err != nil {
 		return "", fmt.Errorf("slug generation failed: %w", err)
 	}
 
-	slug := task.Slugify(task.SanitizeTitle(out))
+	slug := strings.TrimSpace(out)
 	if slug == "" {
 		return "", fmt.Errorf("summarizer returned empty slug")
+	}
+	if !slugTokenRe.MatchString(slug) || strings.Contains(slug, "..") {
+		return "", fmt.Errorf("summarizer returned a non-slug answer: %q", slug)
 	}
 
 	return slug, nil
 }
+
+// slugTokenRe matches a generated slug that is safe to drop unchanged into a
+// branch name and worktree path: one token of letters, digits, dashes,
+// underscores or dots, opening and closing on a letter or digit. It bounds the
+// character set only — never the length.
+var slugTokenRe = regexp.MustCompile(`^[\p{L}\p{N}]([\p{L}\p{N}._-]*[\p{L}\p{N}])?$`)
 
 // truncateTitleInput clips a task input's first line to a title-sized slice
 // for the no-summarizer fallback title.

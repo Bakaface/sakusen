@@ -144,6 +144,57 @@ func TestSummarizerGeneratesSlug(t *testing.T) {
 	e.WaitStatus(1, "completed", 15*time.Second)
 }
 
+// slugCommandYAML wires the stub in as step agent and summarizer, but points
+// slug generation at a separate command that answers with a slug well past
+// task.MaxSlugLength.
+func slugCommandYAML(stubPath, slug string) string {
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
+summarizer:
+  command: "%s"
+  slug_command: "cat > /dev/null; printf '%%s\\n' '%s'"
+poll_interval: 100ms
+git:
+  base_branch: main
+on_complete: merge
+workflows:
+  - name: simple
+    steps:
+      - name: implementing
+        prompt: "Implement the task"
+`, stubPath, stubPath, slug)
+}
+
+// TestSlugCommandGeneratesUntruncatedSlug verifies both halves of the slug
+// configuration: slug_command replaces the summarizer command for the slug call
+// only, and its answer becomes the slug verbatim — no MaxSlugLength cap, no
+// word-boundary trimming — feeding the branch template as-is.
+func TestSlugCommandGeneratesUntruncatedSlug(t *testing.T) {
+	const slug = "put-guardrails-on-ai-task-slug-generation"
+
+	e := setupE2E(t, "summarizer_title")
+	e.WriteSakusenYAML(slugCommandYAML(e.StubPath, slug))
+
+	e.MustSakusen("create", "--title", "Manual Title", "add a login form with client-side validation")
+
+	e.Eventually(10*time.Second, "untruncated slug from slug_command", func() bool {
+		return e.TaskField(1, "slug") == slug
+	})
+
+	if got := e.TaskField(1, "branch"); got != "sakusen/1-"+slug {
+		t.Errorf("branch = %q, want the full slug in the branch", got)
+	}
+	// slug_command handled the slug call, so the stub never saw one.
+	if n := len(e.StubCalls("slug")); n != 0 {
+		t.Errorf("stub slug calls: got %d, want 0 (slug_command is configured)", n)
+	}
+
+	e.WaitStatus(1, "completed", 15*time.Second)
+}
+
 // TestExplicitSlugSkipsSummarizer verifies that --slug wins: it is normalized
 // (lowercased, kebab-cased, length-capped) and no slug call is made.
 func TestExplicitSlugSkipsSummarizer(t *testing.T) {

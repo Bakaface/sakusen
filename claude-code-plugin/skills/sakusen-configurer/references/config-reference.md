@@ -77,11 +77,14 @@ summarizer:
   max_prompt_bytes: 380000     # optional; >0 enables map-reduce chunking of huge chats
   title_prompt: "..."          # optional; overrides the built-in AI title prompt
   slug_prompt: "..."           # optional; overrides the built-in AI slug prompt
+  slug_command: "..."          # optional; runs the slug call instead of `command`
 ```
 
 The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`).
 
-`title_prompt` / `slug_prompt` replace the built-in prompts for the title and slug calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). A slug answer is always normalized to kebab-case and capped at 24 characters.
+`title_prompt` / `slug_prompt` replace the built-in prompts for the title and slug calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). `slug_command` runs the slug call on a different command (model or tool) than the rest of the summarizer work; it falls back to `command` when unset, and setting it alone enables AI slugs without enabling AI titles or summaries.
+
+The slug answer is used **verbatim** (surrounding whitespace aside) — it is never shortened, re-cased or re-shaped, so its full wording reaches the branch name and worktree path. An answer that isn't a single token of letters, digits, dashes, underscores or dots is rejected and the slug falls back to the slugified title.
 
 When the block is omitted, everything degrades gracefully: titles fall back to a truncated task input, slugs to the slugified title, summarize passes are skipped with a warning (or fail the task when a step sets `require_context: true`), and `backfill-context` errors out.
 

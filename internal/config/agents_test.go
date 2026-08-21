@@ -826,3 +826,56 @@ summarizer:
 		}
 	})
 }
+
+// TestSummarizerSlugCommand verifies that slug_command parses and that slug
+// generation resolves to it, falling back to the shared command when unset.
+func TestSummarizerSlugCommand(t *testing.T) {
+	t.Run("parsed from the project tier", func(t *testing.T) {
+		isolateHome(t)
+		projectDir := t.TempDir()
+		projectYml := "summarizer:\n" +
+			"  command: \"summarize\"\n" +
+			"  slug_command: \"slugify\"\n"
+		if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(projectYml), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadForProject(projectDir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		if cfg.Summarizer.SlugCommand != "slugify" {
+			t.Errorf("SlugCommand = %q, want %q", cfg.Summarizer.SlugCommand, "slugify")
+		}
+		if got := cfg.Summarizer.EffectiveSlugCommand(); got != "slugify" {
+			t.Errorf("EffectiveSlugCommand() = %q, want %q", got, "slugify")
+		}
+	})
+
+	t.Run("falls back to the shared command", func(t *testing.T) {
+		s := SummarizerConfig{Command: "summarize"}
+		if got := s.EffectiveSlugCommand(); got != "summarize" {
+			t.Errorf("EffectiveSlugCommand() = %q, want %q", got, "summarize")
+		}
+		if !s.SlugConfigured() {
+			t.Error("SlugConfigured() = false, want true")
+		}
+	})
+
+	t.Run("slug_command alone configures slugs but not the summarizer", func(t *testing.T) {
+		s := SummarizerConfig{SlugCommand: "slugify"}
+		if !s.SlugConfigured() {
+			t.Error("SlugConfigured() = false, want true")
+		}
+		if s.Configured() {
+			t.Error("Configured() = true, want false (no shared command)")
+		}
+	})
+
+	t.Run("nothing set configures nothing", func(t *testing.T) {
+		s := SummarizerConfig{}
+		if s.SlugConfigured() {
+			t.Error("SlugConfigured() = true, want false")
+		}
+	})
+}

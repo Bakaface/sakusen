@@ -114,7 +114,7 @@ type TaskInfo struct {
 ## Handler Patterns
 
 - Handlers receive `(conn, payload)`, respond via `sendMessage()` or `sendError()`
-- `handleCreateTask`: creates task + async AI title/slug refinement via the configured `summarizer:` command (`runner.RunSync`, `SAKUSEN_PURPOSE=title` and `SAKUSEN_PURPOSE=slug` run in parallel under one 30s timeout); a caller-supplied title/slug skips the matching call, and with no summarizer configured the title falls back to a sanitized truncated input and the slug to `task.Slugify(title)` (no error). For non-worktree tasks, branch resolution is skipped.
+- `handleCreateTask`: creates task + async AI title/slug refinement via the configured `summarizer:` command (`runner.RunSync`, `SAKUSEN_PURPOSE=title` and `SAKUSEN_PURPOSE=slug` run in parallel under one 30s timeout; the slug call uses `summarizer.EffectiveSlugCommand()` and its answer becomes the slug verbatim — no `Slugify`, no length cap); a caller-supplied title/slug skips the matching call, and with no summarizer configured the title falls back to a sanitized truncated input and the slug to `task.Slugify(title)` (no error). For non-worktree tasks, branch resolution is skipped.
 - `handleContinueTask`: complex — resumes approval/tmux, or creates tmux for terminal tasks. Non-worktree tasks use project root as `WorktreePath`.
 - `handleAdvanceTask`: resumes the engine when more workflow steps remain; on the last step fast-tracks if no changes (worktree only), otherwise runs async summarizer (StatusSummarizing) + on_complete. Non-worktree tasks skip the fast-track check.
 

@@ -127,6 +127,12 @@ func (a *AgentConfig) IsTmux() bool {
 type SummarizerConfig struct {
 	Command string `yaml:"command"`
 
+	// SlugCommand overrides Command for slug generation
+	// (SAKUSEN_PURPOSE=slug) only, so slugs can run on a different model or
+	// tool than the rest of the summarizer work. Falls back to Command when
+	// unset.
+	SlugCommand string `yaml:"slug_command,omitempty"`
+
 	// MaxPromptBytes, when > 0, bounds the prompt size for a single
 	// invocation: larger chat logs are summarized map-reduce style (split on
 	// line boundaries into chunks below the ceiling, each chunk summarized,
@@ -139,14 +145,28 @@ type SummarizerConfig struct {
 	TitlePrompt string `yaml:"title_prompt,omitempty"`
 
 	// SlugPrompt overrides the built-in AI slug prompt (SAKUSEN_PURPOSE=slug),
-	// following the same {{input}} rule as TitlePrompt. Whatever the command
-	// returns is still normalized through task.Slugify.
+	// following the same {{input}} rule as TitlePrompt. The command's answer
+	// becomes the slug verbatim — nothing shortens or re-shapes it.
 	SlugPrompt string `yaml:"slug_prompt,omitempty"`
 }
 
 // Configured reports whether a summarizer command is set.
 func (s *SummarizerConfig) Configured() bool {
 	return strings.TrimSpace(s.Command) != ""
+}
+
+// EffectiveSlugCommand returns the command slug generation runs: `slug_command:`
+// when set, otherwise the shared `command:`.
+func (s *SummarizerConfig) EffectiveSlugCommand() string {
+	if strings.TrimSpace(s.SlugCommand) != "" {
+		return s.SlugCommand
+	}
+	return s.Command
+}
+
+// SlugConfigured reports whether AI slug generation has a command to run.
+func (s *SummarizerConfig) SlugConfigured() bool {
+	return strings.TrimSpace(s.EffectiveSlugCommand()) != ""
 }
 
 // ResolveAgent looks up an agent record by slug in the merged registry.

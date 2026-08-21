@@ -270,6 +270,7 @@ summarizer:                 # utility LLM: chat/step/task summaries + AI task ti
   max_prompt_bytes: 380000
   # title_prompt: ...       # optional overrides of the built-in prompts;
   # slug_prompt: ...        # {{input}} is replaced with the task input
+  # slug_command: ...       # optional; runs the slug call instead of command
 ```
 
 Sakusen communicates with agents purely through environment variables: `SAKUSEN_PROMPT_FILE` (the fully-resolved step prompt), `SAKUSEN_RESULT_FILE` (headless result text), `SAKUSEN_DONE_DIR`/`SAKUSEN_DONE_PREFIX` (tmux turn-end sentinels), plus `SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH`, `SAKUSEN_AGENT`, and `SAKUSEN_PURPOSE`.

@@ -138,6 +138,7 @@ type AgentConfig struct {
 
 type SummarizerConfig struct {
     Command        string // prompt on stdin, response on stdout; SAKUSEN_PURPOSE tags the call site
+    SlugCommand    string // `slug_command:` — runs the slug call instead of Command (falls back to it)
     MaxPromptBytes int    // >0 → map-reduce chunking ceiling; 0 disables chunking
     TitlePrompt    string // `title_prompt:` — overrides the built-in AI title prompt ({{input}})
     SlugPrompt     string // `slug_prompt:`  — overrides the built-in AI slug prompt ({{input}})
@@ -207,7 +208,7 @@ type StepConfig struct {
 
 **Summarization strategies**: `summarize_chat` (default when unset) runs the configured `summarizer:` command over the full chat log; `last_message` keeps the headless agent's result text — cheaper but often misleading and unusable for tmux steps (which have no result text). The default is resolved via `StepConfig.EffectiveSummarizationStrategy()` and lives in `DefaultSummarizationStrategy`. Validated at config load via `ValidateSteps()`.
 
-**Summarizer command**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles and slugs, backfill-context) runs the single top-level `summarizer:` command via `runner.RunSync` — prompt on stdin, response on stdout, `SAKUSEN_PURPOSE` tagging the call site. `SummarizerConfig.MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; `TitlePrompt`/`SlugPrompt` override the built-in title/slug prompts (`{{input}}` = task input); there is no model selection in sakusen — pick the model inside the command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
+**Summarizer command**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles and slugs, backfill-context) runs the single top-level `summarizer:` command via `runner.RunSync` — prompt on stdin, response on stdout, `SAKUSEN_PURPOSE` tagging the call site. `SummarizerConfig.MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; `TitlePrompt`/`SlugPrompt` override the built-in title/slug prompts (`{{input}}` = task input); `SlugCommand` (`slug_command:`) runs the slug call on its own command, resolved via `EffectiveSlugCommand()` with `Command` as fallback and gated by `SlugConfigured()` (so `slug_command` alone enables AI slugs without AI titles); there is no model selection in sakusen — pick the model inside the command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 
