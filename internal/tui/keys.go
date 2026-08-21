@@ -519,6 +519,7 @@ type promptKeyMap struct {
 	Cancel          key.Binding
 	RemoveImage     key.Binding
 	FocusTitle      key.Binding
+	FocusSlug       key.Binding
 	FocusInput      key.Binding
 	FocusGit        key.Binding
 	FocusWorkflow   key.Binding
@@ -559,6 +560,10 @@ func newPromptKeyMap() promptKeyMap {
 		FocusTitle: key.NewBinding(
 			key.WithKeys("alt+t"),
 			key.WithHelp("alt+t", "title"),
+		),
+		FocusSlug: key.NewBinding(
+			key.WithKeys("alt+s"),
+			key.WithHelp("alt+s", "slug"),
 		),
 		FocusInput: key.NewBinding(
 			key.WithKeys("alt+i", "alt+enter"),
@@ -606,7 +611,7 @@ func (k promptKeyMap) ShortHelp() []key.Binding {
 func (k promptKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.Cancel, k.SwitchField, k.Newline},
-		{k.FocusTitle, k.FocusInput, k.FocusGit, k.FocusWorkflow},
+		{k.FocusTitle, k.FocusSlug, k.FocusInput, k.FocusGit, k.FocusWorkflow},
 		{k.SwitchPane, k.Worktree, k.BranchMode, k.Editor, k.RemoveImage, k.Help},
 	}
 }

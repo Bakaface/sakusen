@@ -44,6 +44,10 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt.FocusOn(promptFieldTitle)
 		return m, nil
 
+	case key.Matches(msg, pk.FocusSlug):
+		m.prompt.FocusOn(promptFieldSlug)
+		return m, nil
+
 	case key.Matches(msg, pk.FocusInput):
 		m.prompt.FocusOn(promptFieldInput)
 		return m, nil

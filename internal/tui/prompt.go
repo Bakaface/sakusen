@@ -835,8 +835,8 @@ func (p *promptView) View() string {
 	b.WriteString(p.titleInput.View())
 	b.WriteString("\n\n")
 
-	// Slug input — no mnemonic (no direct-focus key binding)
-	b.WriteString(fieldLabel("Slug: ", promptFieldSlug, false))
+	// Slug input
+	b.WriteString(fieldLabel("Slug: ", promptFieldSlug, true))
 	b.WriteString(p.slugInput.View())
 	b.WriteString("\n\n")
 
