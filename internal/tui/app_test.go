@@ -463,7 +463,7 @@ func TestHandleListKey_CTriggersConfirmForCompletedTask(t *testing.T) {
 		client: &client.Client{},
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewList,
 	}
 	m.list.SetTasks([]daemon.TaskInfo{
@@ -497,7 +497,7 @@ func TestHandleListKey_CTriggersConfirmForFailedTask(t *testing.T) {
 		client: &client.Client{},
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewList,
 	}
 	m.list.SetTasks([]daemon.TaskInfo{
@@ -1009,7 +1009,7 @@ func TestHandlePromptKey_CtrlGOpensEditor(t *testing.T) {
 	m := Model{
 		keys:        newKeyMap(),
 		client:      &client.Client{},
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewPrompt,
 		projectPath: "/tmp/test",
 	}
@@ -1027,7 +1027,7 @@ func TestHandlePromptKey_EnterSubmitsTask(t *testing.T) {
 	m := Model{
 		keys:        newKeyMap(),
 		client:      &client.Client{},
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewPrompt,
 		projectPath: "/tmp/test",
 	}
@@ -1050,7 +1050,7 @@ func TestHandlePromptKey_EnterEmptyDoesNothing(t *testing.T) {
 	m := Model{
 		keys:   newKeyMap(),
 		client: &client.Client{},
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.SetSize(80, 24)
@@ -1070,7 +1070,7 @@ func TestHandlePromptKey_EnterEmptyDoesNothing(t *testing.T) {
 func TestHandlePromptKey_EscCancels(t *testing.T) {
 	m := Model{
 		keys:   newKeyMap(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 
@@ -1089,7 +1089,7 @@ func TestHandlePromptKey_EscCancels(t *testing.T) {
 func TestEditorPromptFinishedMsg_SetsTextareaValue(t *testing.T) {
 	m := Model{
 		keys:   newKeyMap(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.SetSize(80, 24)
@@ -1114,7 +1114,7 @@ func TestEditorPromptFinishedMsg_SetsTextareaValue(t *testing.T) {
 func TestEditorPromptFinishedMsg_EmptyFilePreservesTextarea(t *testing.T) {
 	m := Model{
 		keys:   newKeyMap(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.SetSize(80, 24)
@@ -1142,7 +1142,7 @@ func TestPromptView_HelpShowsEditorShortcutInFullHelp(t *testing.T) {
 		keys:   newKeyMap(),
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 
@@ -1157,7 +1157,7 @@ func TestPromptView_HelpShowsEditorShortcutInFullHelp(t *testing.T) {
 }
 
 func TestPromptView_HelpShowsEnterAndCtrlJ(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(100, 24)
 
 	output := p.View()
@@ -1182,7 +1182,7 @@ func TestPromptView_HelpShowsEnterAndCtrlJ(t *testing.T) {
 func TestHandlePromptKey_CtrlJInsertsNewline(t *testing.T) {
 	m := Model{
 		keys:   newKeyMap(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.SetSize(80, 24)
@@ -1203,7 +1203,7 @@ func TestHandlePromptKey_CtrlJInsertsNewline(t *testing.T) {
 }
 
 func TestPromptView_WordJumpKeybindings(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.textarea.SetValue("hello world foo")
 
@@ -2766,7 +2766,7 @@ func TestHandleListKey_NWithNoSearchCreatesNewTask(t *testing.T) {
 		keys:        newKeyMap(),
 		list:        newListView(false, ""),
 		detail:      newDetailView(),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		client:      &client.Client{},
 		projectPath: "/some/path",
@@ -3480,7 +3480,7 @@ func TestExecRunTask_PreselectsWorkflow(t *testing.T) {
 		client:      &client.Client{},
 		list:        newListView(false, ""),
 		detail:      newDetailView(),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		projectPath: "/tmp/test-project",
 		cfg: &config.Config{
@@ -3593,7 +3593,7 @@ func TestExecRunTask_FullyPinned(t *testing.T) {
 		client:      &client.Client{},
 		list:        newListView(false, ""),
 		detail:      newDetailView(),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		projectPath: "/tmp/test-project",
 		cfg: &config.Config{
@@ -3647,7 +3647,7 @@ func TestHandleListKey_NFullyPinnedSkipsScreen(t *testing.T) {
 		keys:        newKeyMap(),
 		list:        newListView(false, ""),
 		detail:      newDetailView(),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		client:      &client.Client{},
 		projectPath: "/some/path",
@@ -3671,7 +3671,7 @@ func TestHandleListKey_NFullyPinnedSkipsScreen(t *testing.T) {
 func TestHandleListKey_ShiftNFullyPinnedSkipsScreen(t *testing.T) {
 	m := newTestModelWithTasks(3)
 	m.cfg = fullyPinnedConfig()
-	m.prompt = newPromptView(true, branchModeNew, "")
+	m.prompt = newPromptView(true, branchModeNew, "", "")
 	m.client = &client.Client{}
 	m.projectPath = "/some/path"
 	m.list.table.SetCursor(1) // select task #2
@@ -3817,7 +3817,7 @@ func TestCommandMode_RunTaskIntegration(t *testing.T) {
 		client:      &client.Client{},
 		list:        newListView(false, ""),
 		detail:      newDetailView(),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		projectPath: "/tmp/test-project",
 		cfg: &config.Config{
@@ -3872,7 +3872,7 @@ func TestLaunchWorkflow_FullyPinned(t *testing.T) {
 		keys:        newKeyMap(),
 		client:      &client.Client{},
 		list:        newListView(false, ""),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		projectPath: "/tmp/test-project",
 		cfg: &config.Config{
@@ -3908,7 +3908,7 @@ func TestLaunchWorkflow_PartiallyPinned(t *testing.T) {
 		keys:        newKeyMap(),
 		client:      &client.Client{},
 		list:        newListView(false, ""),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		projectPath: "/tmp/test-project",
 		cfg: &config.Config{
@@ -3949,7 +3949,7 @@ func TestLaunchWorkflow_Unpinned(t *testing.T) {
 		keys:        newKeyMap(),
 		client:      &client.Client{},
 		list:        newListView(false, ""),
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		view:        viewList,
 		projectPath: "/tmp/test-project",
 		cfg: &config.Config{
@@ -4019,7 +4019,7 @@ func TestPromptHelpToggle(t *testing.T) {
 		keys:   newKeyMap(),
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 
@@ -4052,7 +4052,7 @@ func TestPromptHelpCloseWithEsc(t *testing.T) {
 		keys:   newKeyMap(),
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.showHelp = true
@@ -4074,7 +4074,7 @@ func TestPromptHelpConsumesKeys(t *testing.T) {
 		keys:   newKeyMap(),
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.showHelp = true
@@ -4097,7 +4097,7 @@ func TestViewRendersPromptHelpOverlay(t *testing.T) {
 		keys:   newKeyMap(),
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 	m.prompt.showHelp = true
@@ -4207,7 +4207,7 @@ func TestPromptHelpOverlayIsSeparateFromListHelp(t *testing.T) {
 		keys:   newKeyMap(),
 		list:   newListView(false, ""),
 		detail: newDetailView(),
-		prompt: newPromptView(true, branchModeNew, ""),
+		prompt: newPromptView(true, branchModeNew, "", ""),
 		view:   viewPrompt,
 	}
 

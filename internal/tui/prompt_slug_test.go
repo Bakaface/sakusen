@@ -12,7 +12,7 @@ import (
 // the New Task screen, sits directly under Title, and shows the
 // auto-generation placeholder while empty.
 func TestPromptView_SlugFieldRendered(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "main")
+	p := newPromptView(true, branchModeNew, "main", "")
 	p.SetSize(80, 30)
 
 	lines := strings.Split(p.View(), "\n")
@@ -45,7 +45,7 @@ func TestPromptView_SlugFieldRendered(t *testing.T) {
 // TestPromptView_SlugFieldShowsTypedValue verifies typed text replaces the
 // placeholder and is returned by SlugValue (trimmed).
 func TestPromptView_SlugFieldShowsTypedValue(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "main")
+	p := newPromptView(true, branchModeNew, "main", "")
 	p.SetSize(80, 30)
 	p.focusInput(promptFieldSlug)
 	p.slugInput.SetValue("  my-slug  ")
@@ -61,7 +61,7 @@ func TestPromptView_SlugFieldShowsTypedValue(t *testing.T) {
 // TestPromptView_ResetClearsSlug verifies the slug doesn't leak into the next
 // task created in the same session.
 func TestPromptView_ResetClearsSlug(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "main")
+	p := newPromptView(true, branchModeNew, "main", "")
 	p.SetSize(80, 30)
 	p.slugInput.SetValue("stale-slug")
 	p.Reset()
@@ -100,7 +100,7 @@ func TestPromptSubmit_SlugReachesCreateRequest(t *testing.T) {
 				detail:      newDetailView(),
 				view:        viewPrompt,
 				projectPath: "/tmp/proj",
-				prompt:      newPromptView(true, branchModeNew, "main"),
+				prompt:      newPromptView(true, branchModeNew, "main", ""),
 			}
 			m.prompt.SetSize(80, 30)
 			m.prompt.textarea.SetValue("do the thing")

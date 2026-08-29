@@ -166,7 +166,7 @@ func NewModel(cfg *config.Config, projectID int64, projectPath, projectName stri
 		list:              list,
 		detail:            newDetailView(),
 		taskInfo:          newTaskInfoView(),
-		prompt:            newPromptView(defaultWorktree, branchMode(defaultBranchMode), cfgBaseBranch(cfg)),
+		prompt:            newPromptView(defaultWorktree, branchMode(defaultBranchMode), cfgBaseBranch(cfg), cfgBranchTemplate(cfg)),
 		view:              viewList,
 		projectID:         projectID,
 		projectPath:       projectPath,
@@ -791,6 +791,13 @@ func cfgBaseBranch(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.Git.BaseBranch
+}
+
+func cfgBranchTemplate(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Git.BranchTemplate
 }
 
 func capitalize(s string) string {

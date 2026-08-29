@@ -110,7 +110,7 @@ type promptView struct {
 	preselectedWorkflow string
 }
 
-func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBaseBranch string) promptView {
+func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBaseBranch, branchTemplate string) promptView {
 	ta := textarea.New()
 	ta.Prompt = PromptPrefix
 	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(promptColor)
@@ -132,7 +132,10 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 	slugIn.CharLimit = 200
 
 	bi := textinput.New()
-	bi.Placeholder = "sakusen/{{task_id}}-{{task_slug}}"
+	bi.Placeholder = branchTemplate
+	if bi.Placeholder == "" {
+		bi.Placeholder = "sakusen/{{task_id}}-{{task_slug}}"
+	}
 	bi.CharLimit = 200
 
 	ci := textinput.New()

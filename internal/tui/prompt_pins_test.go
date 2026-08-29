@@ -15,7 +15,7 @@ import (
 // runs first). Here the user typed nothing before the pins, so undoing the
 // pins restores every input to empty.
 func TestApplyPins_CycleClearsStaleValues(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Workflow A pins description + a new-branch template.
@@ -57,7 +57,7 @@ func TestApplyPins_CycleClearsStaleValues(t *testing.T) {
 // Only pin-supplied values are replaced; typed input survives the switch.
 func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 	t.Run("unpinned fields survive a switch", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 
 		// User fills in the form.
@@ -85,7 +85,7 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 	})
 
 	t.Run("pin displaces then restores typed value", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 
 		p.textarea.SetValue("my prompt text")
@@ -122,7 +122,7 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 	})
 
 	t.Run("typed value survives a chain of pinning workflows", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 
 		p.textarea.SetValue("my prompt text")
@@ -139,7 +139,7 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 	})
 
 	t.Run("worktree and branch mode restore after pin lifts", func(t *testing.T) {
-		p := newPromptView(true, branchModeExisting, "")
+		p := newPromptView(true, branchModeExisting, "", "")
 		p.SetSize(80, 24)
 		p.checkoutInput.SetValue("my-existing")
 
@@ -162,7 +162,7 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 	})
 
 	t.Run("focus stays on the focused field when still visible", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 		p.focusInput(promptFieldTitle)
 
@@ -185,7 +185,7 @@ func TestApplyPins_PreservesUserTypedValues(t *testing.T) {
 // CyclePane(forward) from the main fields must skip the empty git section and
 // land on the workflow pane rather than getting stuck on the main fields.
 func TestCyclePane_ReachesWorkflowWhenGitFullyPinned(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "") // worktree on
+	p := newPromptView(true, branchModeNew, "", "") // worktree on
 	p.SetSize(80, 24)
 	p.workflows = []string{"a", "b"}
 	// Pin every git field (and the worktree toggle) — visibleFields() then
@@ -237,7 +237,7 @@ func assertUniformFrameWidths(t *testing.T, label, view string) {
 func TestPromptView_PinnedGitLayoutRenders(t *testing.T) {
 	// Case 1: every git row pinned away → Git frame omitted, only Workflow pane.
 	t.Run("git frame omitted", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 		p.workflows = []string{"a", "b"}
 		p.pins.worktree = true
@@ -260,7 +260,7 @@ func TestPromptView_PinnedGitLayoutRenders(t *testing.T) {
 	// baseline). Here we assert the pinned row is hidden, both frames render, and
 	// the spanning top border is the full inner width.
 	t.Run("git and workflow side by side", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 		p.workflows = []string{"a", "b"}
 		p.pins.target = true // hides only the Target row
@@ -288,7 +288,7 @@ func TestPromptView_PinnedGitLayoutRenders(t *testing.T) {
 
 	// Case 3: description pinned → textarea omitted from the main section.
 	t.Run("description textarea omitted", func(t *testing.T) {
-		p := newPromptView(true, branchModeNew, "")
+		p := newPromptView(true, branchModeNew, "", "")
 		p.SetSize(80, 24)
 		p.applyPins(&config.WorkflowConfig{Name: "a", Input: "pinned body"})
 

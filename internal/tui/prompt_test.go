@@ -13,7 +13,7 @@ import (
 )
 
 func TestPromptView_HasAirplanePrompt(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	if p.textarea.Prompt != PromptPrefix {
 		t.Errorf("expected textarea prompt to be %q, got %q", PromptPrefix, p.textarea.Prompt)
 	}
@@ -75,7 +75,7 @@ func TestPromptView_DetectImages(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := newPromptView(true, branchModeNew, "")
+			p := newPromptView(true, branchModeNew, "", "")
 			p.SetSize(80, 24)
 
 			// Set the textarea value
@@ -107,7 +107,7 @@ func TestPromptView_RemoveLastImage(t *testing.T) {
 	os.WriteFile(img1, []byte("fake"), 0644)
 	os.WriteFile(img2, []byte("fake"), 0644)
 
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Add two images
@@ -135,7 +135,7 @@ func TestPromptView_Update(t *testing.T) {
 	testImage := filepath.Join(tmpDir, "test.png")
 	os.WriteFile(testImage, []byte("fake"), 0644)
 
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Simulate typing a path
@@ -154,7 +154,7 @@ func TestPromptView_Update(t *testing.T) {
 }
 
 func TestPromptView_VisualLineCount(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 40)
 
 	// Empty textarea should show 1 visual line
@@ -170,7 +170,7 @@ func TestPromptView_VisualLineCount(t *testing.T) {
 }
 
 func TestPromptView_AutoGrow(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 40)
 
 	// Empty: view shows 1 line of textarea content
@@ -206,7 +206,7 @@ func TestPromptView_AutoGrow(t *testing.T) {
 }
 
 func TestPromptView_AutoGrowWrapping(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	// Set narrow width: content width = 30 - 4 - promptWidth
 	p.SetSize(30, 40)
 
@@ -232,7 +232,7 @@ func countTextareaLines(view string) int {
 }
 
 func TestVisualLineCount(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 40)
 
 	tests := []struct {
@@ -259,7 +259,7 @@ func TestVisualLineCount(t *testing.T) {
 }
 
 func TestPromptView_NewlinePreservesFirstLine(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 40)
 
 	// Type "hello" one character at a time via Update, calling View after each
@@ -323,7 +323,7 @@ func TestPromptView_NewlineViaParentModel(t *testing.T) {
 func TestPromptView_NewlinePreservesFirstLine_SmallTerminal(t *testing.T) {
 	for _, termHeight := range []int{8, 10, 12, 20, 40} {
 		t.Run(fmt.Sprintf("height=%d", termHeight), func(t *testing.T) {
-			p := newPromptView(true, branchModeNew, "")
+			p := newPromptView(true, branchModeNew, "", "")
 			p.SetSize(80, termHeight)
 
 			for _, ch := range "hello world" {
@@ -382,7 +382,7 @@ func TestPromptView_NewlineWithInterleaved(t *testing.T) {
 }
 
 func TestPromptView_NewlineAfterLongLine(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(40, 20) // Narrow terminal to force wrapping
 
 	// Type a long line that will wrap
@@ -407,7 +407,7 @@ func TestPromptView_NewlineAfterLongLine(t *testing.T) {
 }
 
 func TestPromptView_MultipleNewlines(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 40)
 
 	// Type first line
@@ -439,7 +439,7 @@ func TestPromptView_MultipleNewlines(t *testing.T) {
 }
 
 func TestPromptView_ViewPadding(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	view := p.View()
@@ -451,14 +451,14 @@ func TestPromptView_ViewPadding(t *testing.T) {
 }
 
 func TestPromptView_DefaultWorktreeTrue(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	if !p.Worktree() {
 		t.Error("expected worktree to be true when initialized with true")
 	}
 }
 
 func TestPromptView_DefaultWorktreeFalse(t *testing.T) {
-	p := newPromptView(false, branchModeNew, "")
+	p := newPromptView(false, branchModeNew, "", "")
 	if p.Worktree() {
 		t.Error("expected worktree to be false when initialized with false")
 	}
@@ -466,7 +466,7 @@ func TestPromptView_DefaultWorktreeFalse(t *testing.T) {
 
 func TestPromptView_ResetPreservesWorktreeState(t *testing.T) {
 	// Start with worktree on, toggle off, then reset — should stay off
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.ToggleWorktree()
 	if p.Worktree() {
@@ -486,7 +486,7 @@ func TestPromptView_ResetPreservesWorktreeState(t *testing.T) {
 
 func TestPromptView_ResetPreservesWorktreeOn(t *testing.T) {
 	// Start with worktree off, toggle on, then reset — should stay on
-	p := newPromptView(false, branchModeNew, "")
+	p := newPromptView(false, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.ToggleWorktree()
 	if !p.Worktree() {
@@ -501,7 +501,7 @@ func TestPromptView_ResetPreservesWorktreeOn(t *testing.T) {
 }
 
 func TestPromptView_WorkflowPaneShownForMultiple(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.workflowName = "deploy"
 	p.workflows = []string{"deploy", "review", "test"}
@@ -518,7 +518,7 @@ func TestPromptView_WorkflowPaneShownForMultiple(t *testing.T) {
 }
 
 func TestPromptView_WorkflowPaneHiddenForSingle(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.workflowName = "default"
 	p.workflows = []string{"default"}
@@ -531,7 +531,7 @@ func TestPromptView_WorkflowPaneHiddenForSingle(t *testing.T) {
 }
 
 func TestPromptView_NoWorkflowIndicatorInTitleBar(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.workflowName = "review"
 
@@ -576,7 +576,7 @@ func TestIsImagePath(t *testing.T) {
 }
 
 func TestPromptView_TitleInput(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Title input should start empty
@@ -592,7 +592,7 @@ func TestPromptView_TitleInput(t *testing.T) {
 }
 
 func TestPromptView_TitleInputPlaceholder(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 
 	if p.titleInput.Placeholder != "auto-generated if left blank" {
 		t.Errorf("expected placeholder %q, got %q", "auto-generated if left blank", p.titleInput.Placeholder)
@@ -600,7 +600,7 @@ func TestPromptView_TitleInputPlaceholder(t *testing.T) {
 }
 
 func TestPromptView_TitleInputInView(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	view := p.View()
@@ -610,7 +610,7 @@ func TestPromptView_TitleInputInView(t *testing.T) {
 }
 
 func TestPromptView_ResetClearsTitleInput(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	p.titleInput.SetValue("some title")
@@ -664,7 +664,7 @@ func TestUnderlineIInPlaceholder(t *testing.T) {
 }
 
 func TestPromptView_PlaceholderIIsUnderlined(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Default focus is input, value is empty — placeholder is showing.
@@ -678,7 +678,7 @@ func TestPromptView_PlaceholderIIsUnderlined(t *testing.T) {
 }
 
 func TestPromptView_PlaceholderUnderlineOnlyWhenEmpty(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Type an "I" — placeholder is hidden, no underline injection should happen.
@@ -691,7 +691,7 @@ func TestPromptView_PlaceholderUnderlineOnlyWhenEmpty(t *testing.T) {
 }
 
 func TestPromptView_PlaceholderUnderlineOnlyWhenInputFocused(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Move focus to the title field — placeholder is still showing on the
@@ -705,7 +705,7 @@ func TestPromptView_PlaceholderUnderlineOnlyWhenInputFocused(t *testing.T) {
 }
 
 func TestPromptView_DefaultFocusIsDescription(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 
 	if p.focusField != promptFieldInput {
 		t.Errorf("expected default focus to be promptFieldInput, got %v", p.focusField)
@@ -714,7 +714,7 @@ func TestPromptView_DefaultFocusIsDescription(t *testing.T) {
 
 func TestPromptView_SwitchFocusForward(t *testing.T) {
 	// Without worktree: title → slug → description → title
-	p := newPromptView(false, branchModeNew, "")
+	p := newPromptView(false, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Start on description (default)
@@ -740,7 +740,7 @@ func TestPromptView_SwitchFocusForward(t *testing.T) {
 
 func TestPromptView_SwitchFocusForwardWithWorktree(t *testing.T) {
 	// With worktree and branchModeNew: title → slug → description → branch → targetBranch → title
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Start on description
@@ -772,7 +772,7 @@ func TestPromptView_SwitchFocusForwardWithWorktree(t *testing.T) {
 
 func TestPromptView_SwitchFocusBackward(t *testing.T) {
 	// Without worktree: backward from description → slug → title → description
-	p := newPromptView(false, branchModeNew, "")
+	p := newPromptView(false, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Start on description
@@ -794,7 +794,7 @@ func TestPromptView_SwitchFocusBackward(t *testing.T) {
 
 func TestPromptView_SwitchFocusBackwardWithWorktree(t *testing.T) {
 	// With worktree: backward from description → slug → title → targetBranch → branch → description
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Start on description, go backward
@@ -876,7 +876,7 @@ func TestModel_SelectedWorkflowAllowsEmptyDescription(t *testing.T) {
 // --- applyPins tests ---
 
 func TestApplyPins_NilWorkflow_NoPins(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	p.applyPins(nil)
 
@@ -887,7 +887,7 @@ func TestApplyPins_NilWorkflow_NoPins(t *testing.T) {
 }
 
 func TestApplyPins_DescriptionPinned(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:  "desc-wf",
@@ -913,7 +913,7 @@ func TestApplyPins_DescriptionPinned(t *testing.T) {
 
 func TestApplyPins_WorktreePinned(t *testing.T) {
 	worktreeFalse := false
-	p := newPromptView(true, branchModeNew, "") // default worktree=true
+	p := newPromptView(true, branchModeNew, "", "") // default worktree=true
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:     "wt-wf",
@@ -936,7 +936,7 @@ func TestApplyPins_WorktreePinned(t *testing.T) {
 }
 
 func TestApplyPins_BranchPinned(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:   "branch-wf",
@@ -967,7 +967,7 @@ func TestApplyPins_BranchPinned(t *testing.T) {
 }
 
 func TestApplyPins_CheckoutPinned(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:     "checkout-wf",
@@ -993,7 +993,7 @@ func TestApplyPins_CheckoutPinned(t *testing.T) {
 }
 
 func TestApplyPins_TargetPinned(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:   "target-wf",
@@ -1015,7 +1015,7 @@ func TestApplyPins_TargetPinned(t *testing.T) {
 		Worktree: &worktreeTrue,
 		Target:   "release",
 	}
-	p2 := newPromptView(true, branchModeNew, "")
+	p2 := newPromptView(true, branchModeNew, "", "")
 	p2.SetSize(80, 24)
 	p2.applyPins(wf2)
 	fields := p2.visibleFields()
@@ -1028,7 +1028,7 @@ func TestApplyPins_TargetPinned(t *testing.T) {
 
 func TestApplyPins_ToggleWorktreeNoOpWhenPinned(t *testing.T) {
 	worktreeTrue := true
-	p := newPromptView(false, branchModeNew, "") // starts false
+	p := newPromptView(false, branchModeNew, "", "") // starts false
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:     "wt-pin",
@@ -1049,7 +1049,7 @@ func TestApplyPins_ToggleWorktreeNoOpWhenPinned(t *testing.T) {
 }
 
 func TestApplyPins_ToggleBranchModeNoOpWhenCheckoutPinned(t *testing.T) {
-	p := newPromptView(true, branchModeNew, "")
+	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 	wf := &config.WorkflowConfig{
 		Name:     "co-pin",
@@ -1139,7 +1139,7 @@ func TestPromptView_RenderVerification(t *testing.T) {
 	for _, tc := range cases {
 		for _, width := range []int{80, 120} {
 			t.Run(fmt.Sprintf("%s/width=%d", tc.name, width), func(t *testing.T) {
-				p := newPromptView(true, branchModeNew, "")
+				p := newPromptView(true, branchModeNew, "", "")
 				p.SetSize(width, 40)
 				if tc.wf != nil {
 					p.applyPins(tc.wf)

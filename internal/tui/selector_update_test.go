@@ -107,7 +107,7 @@ func TestHandleWorkflowSelectKey_EnterOpensPromptOrCreates(t *testing.T) {
 			items:  []string{"implement"},
 		},
 		projectPath: "/tmp/test",
-		prompt:      newPromptView(true, branchModeNew, ""),
+		prompt:      newPromptView(true, branchModeNew, "", ""),
 		cfg: &config.Config{
 			Workflows: []config.WorkflowConfig{
 				{Name: "implement", Description: ""},
