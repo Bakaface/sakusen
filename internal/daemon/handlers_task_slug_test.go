@@ -250,6 +250,37 @@ func TestRefineTaskTitle_SlugGeneration(t *testing.T) {
 		}
 	})
 
+	t.Run("title and slug calls run in the project directory", func(t *testing.T) {
+		// The summarizer must be anchored in the task's project, not the
+		// daemon's cwd: context-loading commands (e.g. `claude -p` reading the
+		// cwd's CLAUDE.md) would otherwise describe the wrong project.
+		logPath := filepath.Join(t.TempDir(), "calls.log")
+		cmd := `cat >/dev/null; printf '%s\t%s\n' "$SAKUSEN_PURPOSE" "$(pwd -P)" >> ` + shellQuote(logPath) +
+			`; case "$SAKUSEN_PURPOSE" in title) echo 'AI Title';; slug) echo 'ai-slug';; *) exit 1;; esac`
+		cfg := &config.Config{Summarizer: config.SummarizerConfig{Command: cmd}}
+		s, tk := setupSlugServer(t, cfg)
+
+		s.projectsMu.RLock()
+		repoRoot := s.projects[tk.ProjectID].repoRoot
+		s.projectsMu.RUnlock()
+		wantDir, err := filepath.EvalSymlinks(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		refined(t, s, tk, "add a login form with validation", "provisional", "", "")
+
+		calls := summarizerCalls(t, logPath)
+		if len(calls) != 2 {
+			t.Fatalf("summarizer calls = %v, want a title and a slug call", calls)
+		}
+		for _, call := range calls {
+			if call[1] != wantDir {
+				t.Errorf("%s call ran in %q, want the project dir %q", call[0], call[1], wantDir)
+			}
+		}
+	})
+
 	t.Run("slug_command overrides the summarizer command", func(t *testing.T) {
 		mainLog := filepath.Join(t.TempDir(), "main.log")
 		slugLog := filepath.Join(t.TempDir(), "slug.log")

@@ -80,7 +80,7 @@ summarizer:
   slug_command: "..."          # optional; runs the slug call instead of `command`
 ```
 
-The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`).
+The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`). Title and slug calls run with the task's project root as working directory (summarize calls use the task's worktree), so context-loading commands like `claude -p` pick up that project's instructions rather than the daemon's cwd.
 
 `title_prompt` / `slug_prompt` replace the built-in prompts for the title and slug calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). `slug_command` runs the slug call on a different command (model or tool) than the rest of the summarizer work; it falls back to `command` when unset, and setting it alone enables AI slugs without enabling AI titles or summaries.
 

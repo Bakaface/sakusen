@@ -739,8 +739,10 @@ func (s *Server) handleUpdateActiveStepContext(conn net.Conn, req UpdateActiveSt
 // caller-supplied slug ("" = generate one).
 func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, worktree bool, checkoutBranch string, input string, initialTitle string, manualTitle string, explicitSlug string) {
 	projCfg := s.cfg
+	var projectDir string
 	if pc, err := s.getProjectContext(projectID); err == nil {
 		projCfg = pc.cfg
+		projectDir = pc.repoRoot
 	}
 
 	var title string
@@ -779,14 +781,14 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				title, titleErr = s.generateTitle(ctx, input, &projCfg.Summarizer)
+				title, titleErr = s.generateTitle(ctx, input, &projCfg.Summarizer, projectDir)
 			}()
 		}
 		if wantAISlug {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				generated, err := s.generateSlug(ctx, input, &projCfg.Summarizer)
+				generated, err := s.generateSlug(ctx, input, &projCfg.Summarizer, projectDir)
 				if err != nil {
 					// A missing slug is recoverable (Slugify(title) below), so
 					// the task proceeds rather than stalling in init.
@@ -843,11 +845,15 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 }
 
 const (
-	defaultTitlePrompt = "Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the following task input:\n\n{{input}}"
+	defaultTitlePrompt = "Generate a concise task title (one short sentence, max 80 characters, no quotes, no prefix like 'Title:') for the task in <task-input>. Base the title solely on that text — ignore any project instructions or codebase context you may have been given.\n\n<task-input>\n{{input}}\n</task-input>"
 	// The format is described without naming a format the model could mistake
 	// for subject matter: an answer echoing "kebab" or "slug" back as a word
-	// ends up in the branch name.
-	defaultSlugPrompt = "Name the following task in 2-4 lowercase words joined by dashes (letters and digits only). The name must describe what the task is about, and must never contain format or meta words such as \"kebab\", \"slug\", \"case\", \"task\" or \"name\". Answer with the name alone: no quotes, no prose, no prefix like 'Slug:'.\n\n{{input}}"
+	// ends up in the branch name. The input sits in explicit <task-input>
+	// delimiters with an instruction to ignore ambient context: commands like
+	// `claude -p` inject the cwd's CLAUDE.md, and without the guard its
+	// wording bleeds into the answer (a task once got slugged after the
+	// daemon's own project description instead of the task text).
+	defaultSlugPrompt = "Name the task in <task-input> in 2-4 lowercase words joined by dashes (letters and digits only). Base the name solely on the text inside <task-input> — ignore any project instructions or codebase context you may have been given. The name must describe what the task is about, and must never contain format or meta words such as \"kebab\", \"slug\", \"case\", \"task\" or \"name\". Answer with the name alone: no quotes, no prose, no prefix like 'Slug:'.\n\n<task-input>\n{{input}}\n</task-input>"
 )
 
 // summarizerPrompt renders a summarizer prompt from the configured override
@@ -865,10 +871,14 @@ func summarizerPrompt(override, fallback, input string) string {
 	return tmpl + "\n\n" + input
 }
 
-func (s *Server) generateTitle(ctx context.Context, input string, summarizer *config.SummarizerConfig) (string, error) {
+// generateTitle asks the summarizer for a task title. workDir anchors the
+// command in the task's project so context-loading tools (e.g. `claude -p`
+// reading the cwd's CLAUDE.md) see that project rather than wherever the
+// daemon happens to run.
+func (s *Server) generateTitle(ctx context.Context, input string, summarizer *config.SummarizerConfig, workDir string) (string, error) {
 	prompt := summarizerPrompt(summarizer.TitlePrompt, defaultTitlePrompt, input)
 
-	out, err := runner.RunSync(ctx, summarizer.Command, "", map[string]string{"SAKUSEN_PURPOSE": "title"}, prompt)
+	out, err := runner.RunSync(ctx, summarizer.Command, workDir, map[string]string{"SAKUSEN_PURPOSE": "title"}, prompt)
 	if err != nil {
 		return "", fmt.Errorf("title generation failed: %w", err)
 	}
@@ -886,11 +896,12 @@ func (s *Server) generateTitle(ctx context.Context, input string, summarizer *co
 // not apply to generated slugs — so the wording the model chose is the wording
 // that reaches the branch name. Only surrounding whitespace is stripped; an
 // answer that isn't a single path-safe token is rejected, leaving the caller's
-// title-derived fallback in place.
-func (s *Server) generateSlug(ctx context.Context, input string, summarizer *config.SummarizerConfig) (string, error) {
+// title-derived fallback in place. workDir anchors the command in the task's
+// project (see generateTitle).
+func (s *Server) generateSlug(ctx context.Context, input string, summarizer *config.SummarizerConfig, workDir string) (string, error) {
 	prompt := summarizerPrompt(summarizer.SlugPrompt, defaultSlugPrompt, input)
 
-	out, err := runner.RunSync(ctx, summarizer.EffectiveSlugCommand(), "", map[string]string{"SAKUSEN_PURPOSE": "slug"}, prompt)
+	out, err := runner.RunSync(ctx, summarizer.EffectiveSlugCommand(), workDir, map[string]string{"SAKUSEN_PURPOSE": "slug"}, prompt)
 	if err != nil {
 		return "", fmt.Errorf("slug generation failed: %w", err)
 	}
