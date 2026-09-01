@@ -441,6 +441,112 @@ func TestExtractLatestStepRegion(t *testing.T) {
 	})
 }
 
+// headlessRegion renders a task-log region exactly as runHeadlessAgent writes
+// one: step header, echoed prompt block, empty terminator line, agent stdout,
+// footer. Pass no output lines to model an agent that redirects everything
+// into $SAKUSEN_RESULT_FILE and therefore streams nothing.
+func headlessRegion(stepName, prompt string, output ...string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[10:00:00] === Step: %s (task #42) ===\n", stepName)
+	b.WriteString("[10:00:00] Prompt:\n")
+	for _, line := range strings.Split(prompt, "\n") {
+		fmt.Fprintf(&b, "[10:00:00]   %s\n", line)
+	}
+	b.WriteString("\n")
+	for _, line := range output {
+		fmt.Fprintf(&b, "[10:00:01] %s\n", line)
+	}
+	fmt.Fprintf(&b, "[10:00:02] === Step %s finished (exit=0) ===\n", stepName)
+	return b.String()
+}
+
+// TestStepAgentOutput pins the fix for the failure mode that silently destroyed
+// step results: the headless {{chat}} source must yield the agent's streamed
+// output ONLY. Feeding the echoed prompt to the summarizer makes it summarize
+// sakusen's own instructions and overwrite the agent's real result text.
+func TestStepAgentOutput(t *testing.T) {
+	t.Run("returns empty when the agent streamed nothing", func(t *testing.T) {
+		// The exact shape of every prd-loop step: the agent command redirects
+		// stdout into $SAKUSEN_RESULT_FILE, so the region holds only the
+		// prompt. A long prompt must not masquerade as a long chat log.
+		content := headlessRegion("implement", strings.Repeat("work order line\n", 500))
+		if got := stepAgentOutput(content, "implement"); got != "" {
+			t.Errorf("expected empty (prompt is not chat), got %d bytes:\n%s", len(got), got)
+		}
+	})
+
+	t.Run("returns only the streamed output", func(t *testing.T) {
+		content := headlessRegion("implement", "do the thing", "thinking out loud", "done")
+		got := stepAgentOutput(content, "implement")
+		if strings.Contains(got, "do the thing") {
+			t.Errorf("prompt leaked into chat content: %q", got)
+		}
+		if strings.Contains(got, "=== Step") {
+			t.Errorf("header/footer leaked into chat content: %q", got)
+		}
+		for _, want := range []string{"thinking out loud", "done"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing output line %q in %q", want, got)
+			}
+		}
+	})
+
+	t.Run("keeps indented agent output", func(t *testing.T) {
+		// Indentation must not be used to tell prompt lines from output lines:
+		// agents legitimately print indented text.
+		content := headlessRegion("implement", "prompt body", "   indented result line")
+		got := stepAgentOutput(content, "implement")
+		if !strings.Contains(got, "indented result line") {
+			t.Errorf("indented output line was dropped: %q", got)
+		}
+		if strings.Contains(got, "prompt body") {
+			t.Errorf("prompt leaked into chat content: %q", got)
+		}
+	})
+
+	t.Run("picks the most recent run on retry", func(t *testing.T) {
+		content := headlessRegion("implement", "p", "first attempt") +
+			headlessRegion("implement", "p", "second attempt")
+		got := stepAgentOutput(content, "implement")
+		if strings.Contains(got, "first attempt") {
+			t.Errorf("expected only the most recent run, got %q", got)
+		}
+		if !strings.Contains(got, "second attempt") {
+			t.Errorf("expected the most recent run, got %q", got)
+		}
+	})
+
+	t.Run("returns empty for an unknown step", func(t *testing.T) {
+		content := headlessRegion("implement", "p", "body")
+		if got := stepAgentOutput(content, "review"); got != "" {
+			t.Errorf("expected empty for a step with no region, got %q", got)
+		}
+	})
+
+	t.Run("returns empty when the prompt block never terminated", func(t *testing.T) {
+		// The step died mid-prompt-write; there is no output to summarize.
+		content := "[10:00:00] === Step: implement (task #42) ===\n" +
+			"[10:00:00] Prompt:\n" +
+			"[10:00:00]   half a prompt\n"
+		if got := stepAgentOutput(content, "implement"); got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
+
+	t.Run("handles a region with no prompt block", func(t *testing.T) {
+		content := "[10:00:00] === Step: implement (task #42) ===\n" +
+			"[10:00:01] streamed body\n" +
+			"[10:00:02] === Step implement finished (exit=0) ===\n"
+		got := stepAgentOutput(content, "implement")
+		if !strings.Contains(got, "streamed body") {
+			t.Errorf("expected body, got %q", got)
+		}
+		if strings.Contains(got, "=== Step") {
+			t.Errorf("header/footer leaked: %q", got)
+		}
+	})
+}
+
 // TestBuildSummarizePrompt covers the user-facing summarization_prompt
 // contract: a custom prompt with a {{chat}} placeholder gets the chat spliced
 // in-place (task template vars also resolved); a custom prompt WITHOUT the

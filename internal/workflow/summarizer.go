@@ -303,8 +303,8 @@ func BuildDiffStatSummaryPrompt(taskID int64, title, input, diffStat string) str
 // loadStepChatContent returns the raw chat content for a step.
 // For tmux steps, runs the step agent's chat_log_command (which prints the
 // conversation log on stdout, typically located via the recorded session id or
-// the latest sentinel's transcript_path). For headless steps, reads the
-// per-step region of the unified task log.
+// the latest sentinel's transcript_path). For headless steps, reads the agent's
+// streamed output out of the per-step region of the unified task log.
 // Returns empty string (no error) if no content is available yet.
 func (e *Engine) loadStepChatContent(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, step config.StepConfig, useTmux bool) (string, error) {
 	if useTmux {
@@ -348,9 +348,8 @@ func (e *Engine) loadStepChatContent(ctx context.Context, t *task.Task, wf *conf
 	}
 
 	// Headless step: slice the most recent run of this step out of the unified
-	// task log. The step header and footer (written by runHeadlessAgent) act as
-	// region markers; retries leave multiple header/footer pairs in the file
-	// and we want the most recent.
+	// task log, then keep only the agent's streamed output. The echoed prompt
+	// must NOT be fed to the summarizer — see stepAgentOutput.
 	logPath := ProjectLogPath(e.dataDir, t.ID)
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -359,7 +358,14 @@ func (e *Engine) loadStepChatContent(ctx context.Context, t *task.Task, wf *conf
 		}
 		return "", fmt.Errorf("failed to read task log for step %q: %w", step.Name, err)
 	}
-	return extractLatestStepRegion(string(data), step.Name), nil
+	out := stepAgentOutput(string(data), step.Name)
+	if out == "" {
+		// Agents that redirect everything into $SAKUSEN_RESULT_FILE stream no
+		// stdout, so there is no transcript to summarize. Callers treat "" as
+		// "no chat content" and keep the result text as the step context.
+		log.Printf("Step %q of task #%d: headless agent streamed no output; no chat content available for summarize_chat", step.Name, t.ID)
+	}
+	return out, nil
 }
 
 // chatLogCommandTimeout bounds a chat_log_command invocation — it should read
@@ -392,6 +398,67 @@ func extractLatestStepRegion(content, stepName string) string {
 		end = lastFooter + 1
 	}
 	return strings.TrimSpace(strings.Join(lines[lastHeader:end], "\n"))
+}
+
+// stepAgentOutput returns only the agent's streamed output for the most recent
+// run of a headless step: the task-log region with the step header, the echoed
+// prompt block, and the step footer removed.
+//
+// runHeadlessAgent lays each region out as
+//
+//	[ts] === Step: <name> (task #N) ===
+//	[ts] Prompt:
+//	[ts]   <prompt line>
+//	[ts]   <prompt line>
+//	                                   <- one literally-empty line
+//	[ts] <agent stdout>
+//	[ts] === Step <name> finished (exit=C) ===
+//
+// That empty line is the only literally-empty line a region can contain: every
+// other line carries a timestamp prefix, and runner.Process drops blank agent
+// output before it reaches the log. So it is an unambiguous end-of-prompt
+// marker, and matching on it (rather than on the prompt's indentation) stays
+// correct for agents whose own output happens to be indented.
+//
+// Returning "" is meaningful and expected: an agent whose command redirects
+// stdout into $SAKUSEN_RESULT_FILE — the documented env contract — streams
+// nothing, so its region holds the prompt alone. Handing that to the
+// summarizer makes it summarize sakusen's own instructions and, worse,
+// overwrite the agent's real result text with the result.
+func stepAgentOutput(content, stepName string) string {
+	region := extractLatestStepRegion(content, stepName)
+	if region == "" {
+		return ""
+	}
+	lines := strings.Split(region, "\n")
+
+	// Drop the header, then the prompt block up to and including its
+	// empty-line terminator. A region with no terminator never got past the
+	// prompt, so it holds no agent output.
+	start := 1
+	if start < len(lines) && strings.HasSuffix(lines[start], "] Prompt:") {
+		terminator := -1
+		for i := start + 1; i < len(lines); i++ {
+			if lines[i] == "" {
+				terminator = i
+				break
+			}
+		}
+		if terminator < 0 {
+			return ""
+		}
+		start = terminator + 1
+	}
+
+	end := len(lines)
+	footerNeedle := fmt.Sprintf("=== Step %s finished ", stepName)
+	if end > start && strings.Contains(lines[end-1], footerNeedle) {
+		end--
+	}
+	if start >= end {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 }
 
 // smallChatBytes is the threshold below which a non-tmux step skips the

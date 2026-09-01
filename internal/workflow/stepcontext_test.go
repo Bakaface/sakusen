@@ -337,6 +337,67 @@ func TestRecordTmuxStepSentinelSession_CorrectsStaleRecordedSession(t *testing.T
 	}
 }
 
+// TestCaptureHeadlessStepContextPromptIsNotChat is the regression test for the
+// failure that silently destroyed step results in production: a headless agent
+// whose command redirects stdout into $SAKUSEN_RESULT_FILE (sakusen's own
+// documented env contract) streams nothing, so its task-log region holds only
+// the echoed prompt. That region used to be handed to the summarizer as if it
+// were a chat log, and because a long prompt clears smallChatBytes the
+// resulting summary-of-the-instructions OVERWROTE the agent's real result text.
+//
+// The step's context must survive intact, and the summarizer must not run at
+// all — asserted here by pointing it at a command that fails the test if
+// invoked.
+func TestCaptureHeadlessStepContextPromptIsNotChat(t *testing.T) {
+	wf := config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{{
+			Name:                  "implement",
+			Prompt:                "do the thing",
+			SummarizationStrategy: config.SummarizationStrategySummarizeChat,
+		}},
+	}
+	engine, tk, runner, database := newFakeRunnerTestEngine(t, wf)
+
+	// Any invocation of the summarizer records itself; the assertion below
+	// fails the test if the file exists.
+	ranMarker := filepath.Join(t.TempDir(), "summarizer-ran")
+	engine.cfg.Summarizer = config.SummarizerConfig{
+		Command: fmt.Sprintf(`cat > /dev/null; touch %q; echo summary-of-the-prompt`, ranMarker),
+	}
+
+	// A prompt-only region well past smallChatBytes — the exact shape a
+	// redirecting agent leaves behind.
+	if err := os.MkdirAll(ProjectLogsDir(engine.dataDir, tk.ID), 0755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	logContent := headlessRegion("implement", strings.Repeat("work order line\n", 500))
+	if len(logContent) < smallChatBytes {
+		t.Fatalf("test setup: region is %d bytes, need >= %d to exercise the bug", len(logContent), smallChatBytes)
+	}
+	if err := os.WriteFile(ProjectLogPath(engine.dataDir, tk.ID), []byte(logContent), 0644); err != nil {
+		t.Fatalf("write task log: %v", err)
+	}
+
+	runner.script("implement", fakeAgentResult{exitCode: 0, resultText: "the real agent report"})
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	if _, err := os.Stat(ranMarker); err == nil {
+		t.Error("summarizer ran over a prompt-only region; it must be skipped when the agent streamed no output")
+	}
+
+	got, err := database.GetTaskStepContext(tk.ID, "implement")
+	if err != nil {
+		t.Fatalf("GetTaskStepContext: %v", err)
+	}
+	if got != "the real agent report" {
+		t.Errorf("step context = %q, want the agent's result text %q preserved", got, "the real agent report")
+	}
+}
+
 // TestCaptureHeadlessStepContextNoSummarizerDegrades pins the ErrNoSummarizer
 // degradation through captureHeadlessStepContext: a headless step with the
 // summarize_chat strategy and a non-trivial chat log, but NO `summarizer:`
