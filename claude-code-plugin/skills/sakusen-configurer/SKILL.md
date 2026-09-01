@@ -4,10 +4,11 @@ description: >
   Generate and edit .sakusen.yml project configuration files for the Sakusen daemon.
   Sakusen orchestrates user-configured coding agents (Claude Code, opencode, aider, any
   CLI) working on tasks in parallel using isolated git worktrees. Use when (1) creating
-  a new .sakusen.yml config, (2) adding or modifying workflows or agents, (3) configuring
-  git, tmux, summarizer, notifications, or verification settings, (4) user mentions
-  "sakusen config", ".sakusen.yml", or asks about sakusen workflow/task/agent configuration,
-  (5) troubleshooting sakusen config issues.
+  a new .sakusen.yml config, (2) building, adding, or modifying workflows, workflow steps,
+  step prompts, loops, or agents, (3) configuring git, tmux, summarizer, notifications,
+  tracks, or verification settings, (4) user mentions "sakusen config", ".sakusen.yml",
+  or asks about sakusen workflow/task/agent/track configuration, (5) troubleshooting
+  sakusen config issues.
 ---
 
 # Sakusen Configuration Skill
@@ -17,6 +18,13 @@ Generate correct `.sakusen.yml` project configuration files for the Sakusen daem
 ## What is Sakusen?
 
 Sakusen is a daemon that orchestrates multiple user-configured coding agents working on tasks in parallel. Each task runs in an isolated git worktree. An **agent** is just a shell command declared under the top-level `agents:` map — Sakusen is agent-agnostic and talks to it through environment variables. Configuration lives in `.sakusen.yml` at the project root.
+
+## Reference Files
+
+| File | Load when |
+|---|---|
+| `references/workflow-building.md` | **Creating or editing any workflow, step, prompt, loop, or template variable.** Complete authoring reference: entry shapes, pins, file-based/hidden/global/track workflows, step references, every workflow and step field, summarization, loops, prompt wrapping, the full template-variable catalog, tracks in prompts, cross-task refs, and MCP orchestration patterns. |
+| `references/config-reference.md` | Working on non-workflow config: agents, summarizer, git, worktree sync/setup, tmux setup, notifications, options, task states/priorities, legacy formats, and a complete example config. |
 
 ## Config Loading Order (later overrides earlier)
 
@@ -184,7 +192,7 @@ Every agent spawn gets:
 | `SAKUSEN_PROJECT_PATH` | Absolute path of the project repo root |
 | `SAKUSEN_PURPOSE` | `step` (or `merge_conflict` for the conflict resolver) |
 | `SAKUSEN_AGENT` | Resolved agent slug |
-| `SAKUSEN_TRACK_ID` | Task's track id (only when the task is on a track) |
+| `SAKUSEN_TRACK_ID` | Task's track id (only when the task is on a track). A **track** is a named, hierarchical context container tasks attach to at create time — see `references/workflow-building.md` → Tracks in Workflows. |
 | `SAKUSEN_PROMPT_FILE` | File containing the fully-resolved step prompt |
 
 Headless mode additionally:
@@ -227,7 +235,7 @@ The utility LLM command Sakusen shells out to for text-in/text-out work: chat/st
 
 `max_prompt_bytes` (optional, > 0) bounds a single invocation: larger chat logs are summarized map-reduce style (chunked on line boundaries, each chunk summarized, then reduced). `0`/omitted disables chunking. Omit the whole block to disable summarization (everything degrades gracefully — see v1 limitations).
 
-### Sharing files into worktrees
+## Sharing files into worktrees
 
 `worktree-sync-paths` shape:
 
@@ -247,19 +255,21 @@ worktree-sync-paths:
 - For files you want **isolated per worktree** (build output, generated code, per-task `.env` overrides), use `copy:` not `link:`.
 - Symbolic links are **not supported** as a `worktree-sync-paths` mode. If you genuinely need symlinks, create them in `worktree-setup-command` (e.g., `ln -s ...`).
 
-## Workflow List
+## Workflows
 
-`workflows:` is a flat YAML sequence — there are no `tasks:`, `one-off:`, or `init:` sub-categories. Each item is either a string ref or an inline mapping:
+> **Read `references/workflow-building.md` before creating or editing any workflow, step, prompt, loop, or template variable.** What follows is only the shape of the block; every field, rule, and pattern lives in that reference.
+
+`workflows:` is a flat YAML sequence — there are no `tasks:`, `one-off:`, or `init:` sub-categories. Each entry is a string ref, an inline `- name: X` mapping, or the named-body sugar `- X:` with a nested body:
 
 ```yaml
 workflows:
-  - implement            # → .sakusen/workflows/implement.yml (file-based)
-  - name: quick-fix      # inline, no pins → always shows New Task screen
+  - implement            # → .sakusen/workflows/implement.yml, else the global pool
+  - name: quick-fix      # inline, no pins → always shows the New Task screen
     steps:
       - name: do
         prompt: "fix it"
-  - name: housekeeping   # all fields pinned → skips New Task screen immediately
-    description: "Run standard maintenance"   # metadata (workflow picker / MCP); NOT a pin
+  - name: housekeeping   # all fields pinned → skips the New Task screen immediately
+    description: "Run standard maintenance"   # metadata (picker / MCP); NOT a pin
     input: "Audit and clean the codebase."    # pins the task input
     worktree: true
     branch: sakusen/housekeeping-{{task.id}}
@@ -269,208 +279,11 @@ workflows:
         prompt: "Audit and clean the codebase."
 ```
 
-"Kind" is an emergent property of pinning: the `n` key (and `:RunTask`) operates over the single flat list. Workflows that have all fields pinned (`input` + `worktree` + `branch`/`checkout` + `target`) create a task immediately without showing the New Task form. Two shortcuts: when `worktree: false` is pinned, `input` alone suffices (the git fields are N/A); workflows whose **first step resolves to a tmux-mode agent** may be created without an input at all — the user drives the session interactively. (`description` is separate human-readable metadata, never a pin.)
+"Kind" is an emergent property of pinning: a workflow that pins every New Task field (`input` + `worktree` + `branch`/`checkout` + `target`) creates its task immediately instead of showing the form.
 
-### Pinnable fields
+A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`), `agent`, `on_complete`, `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop`. **Execution mode comes from the resolved agent record, never from the step.**
 
-A workflow may pin any subset of New Task screen fields:
-
-| Field | Type | Effect |
-|---|---|---|
-| `input` | string | Pins the task input; hides the input box from the form |
-| `worktree` | bool | Pins the worktree on/off toggle |
-| `branch` | string | Pins a new-branch template; forces branch-mode "new" |
-| `checkout` | string | Pins an existing branch to check out; forces branch-mode "existing" |
-| `target` | string | Pins the target/base branch |
-
-Validation: `branch` and `checkout` are mutually exclusive; `branch`/`checkout`/`target` are rejected when `worktree: false`.
-
-### Inline vs. File-Based Workflows
-
-- **String refs** → resolved against `.sakusen/workflows/<name>.yml` first, then the **global pool** — every workflow resolved from the global `~/.sakusen.yml` (inline or file-based under `~/.sakusen/workflows/`, referenced or hidden alike)
-- **Inline maps** → full workflow definition embedded directly in `.sakusen.yml`
-
-A project definition (inline or local file) with the same name as a global workflow legally **overrides** it — the inline-vs-file collision error applies only within a single config scope.
-
-A workflow file at `.sakusen/workflows/<name>.yml` contains the same fields as an inline workflow body — minus the `name:` field, which is always the filename. Use kebab-case filenames starting with a letter or digit (`[a-z0-9][a-z0-9-]*`, extension `.yml` or `.yaml`). Subdirectories are not supported.
-
-**Files not referenced from `.sakusen.yml` are loaded as hidden.** Hidden workflows are:
-
-- **Not** shown in TUI menus (the `n` shortcut)
-- **Reachable** via `:RunTask <name>` (and tab completion)
-- **Reachable** via CLI: `sakusen create -w <name>` accepts hidden workflows
-- **Returned** by the MCP `list_workflows` tool with `"hidden": true`
-
-### When to split a workflow into a file
-
-Default to inline. Split when any of the following holds:
-
-- The resulting `.sakusen.yml` would exceed ~200 lines
-- A single workflow body exceeds ~40 lines
-- There are more than five workflows
-
-Splitting trades single-file readability for per-workflow editability. For tiny projects, inline beats file-sprawl.
-
-### Hard errors at config load
-
-- String ref points to a missing file (`.sakusen/workflows/<name>.yml`) and is not in the global pool.
-- Same name is both inlined in `.sakusen.yml` and present as a file.
-- A file-based workflow sets a `name:` field (filename is authoritative).
-- A workflow file uses a non-kebab-case filename or lives in a subdirectory of `.sakusen/workflows/`.
-
-### Warnings (non-fatal — surfaced by `sakusen validate`)
-
-- File present under `.sakusen/workflows/` but not referenced in `.sakusen.yml` (it's hidden).
-
-## Workflow Structure
-
-```yaml
-- name: my-workflow          # unique name (required)
-  description: "..."         # human-readable metadata (workflow picker / MCP); NOT a pin
-  input: "..."               # optional: pins the task input (hides the New Task input box)
-  agent: claude              # optional: agent slug every step inherits unless it sets its own
-  summarizer_prompt: "..."   # custom prompt for post-completion summarizer
-  worktree-sync-paths: {...} # optional per-workflow override of the project-level value
-  steps:                     # ordered list of steps (required)
-    - name: step-name        # unique step identifier (required)
-      prompt: "..."          # template string sent to the agent (required)
-      agent: claude-tmux     # per-step agent override (omit to inherit workflow/default_agent)
-      timeout: "30m"         # Go duration string
-      human: false           # pause for human approval
-      summarization_strategy: summarize_chat   # how this step's context is captured (see below)
-      summarization_prompt: "..."              # prompt fed to the summarizer for THIS step's context
-      require_context: false   # true = fail the task if this step's summarize_chat context can't be captured
-      loop:                  # optional: jump back to earlier step
-        goto: "step-name"    # must reference an earlier step
-        max_iterations: 3    # >= 1
-        exit_condition:                     # set either form, or both (exit when either matches)
-          step_context_contains: "step-name"  # preferred: exit when that step's context contains marker
-          marker: "LOOP-EXIT"                 # required with step_context_contains; literal, case-sensitive
-          step_context_empty: "step-name"     # exit when that step's context is empty
-```
-
-**Prefer `step_context_contains` over `step_context_empty`.** Exiting on an absence cannot distinguish "the step decided the work is done" from "the step crashed, timed out, or forgot to publish" — every one of those silently ends the loop and ships whatever is on the branch. A marker makes the exit an explicit statement the step has to produce; a step that fails to run leaves it absent and the loop keeps going, bounded by `max_iterations`. Use `step_context_empty` only when an empty context is genuinely unambiguous.
-
-### Execution mode: the agent's `mode`, not the step
-
-A step's execution mode comes from the **agent record it resolves to** (cascade: step `agent:` → workflow `agent:` → `default_agent:` → `"claude"`):
-
-- **headless** — Sakusen spawns the agent command, streams its stdout, auto-advances on exit; the result text comes from `$SAKUSEN_RESULT_FILE`.
-- **tmux** — Sakusen runs the command inside a detached tmux session; the workflow pauses at `tmux` status until a turn-end sentinel lands (auto-advance) or the user advances manually.
-
-| resolved mode | `human` | Behavior |
-|---|---|---|
-| `headless` | `false` | headless spawn + auto-advance on exit |
-| `headless` | `true` | headless spawn, then pause at `awaiting-approval` |
-| `tmux` | `false` | tmux + auto-advance on turn-end sentinel (manual-advance for hookless agents) |
-| `tmux` | `true` | tmux + manual approval |
-
-> **⚠️ The `print:` and `tmux:` fields were removed and the daemon refuses to load any config containing them.** Never emit either on a workflow or step. Migration: `print: true` → an agent with `mode: headless`; `print: false` / `tmux: true` → an agent with `mode: tmux`.
-
-The `mode:` field on a **step** (e.g. `mode: "automatic"`) is vestigial — it is parsed but does not affect execution. Do not rely on it; omit it from new configs. (The meaningful `mode` lives on the agent record.)
-
-### Step summarization
-
-**The default strategy is `summarize_chat`** (when `summarization_strategy` is unset). It summarizes the step's chat via the configured `summarizer:` command using `summarization_prompt`. Inside `summarization_prompt`, the variable `{{chat}}` expands to the full chat content. This is essential for tmux/grilling steps where the meaningful output is the conversation, not a final message; it is also the default for ordinary steps. For headless steps the chat is the agent's **streamed stdout** for that step (the echoed prompt is stripped); for tmux steps it is produced by the agent's `chat_log_command` (an agent without one captures no chat context).
-
-**`summarize_chat` is a no-op for most headless agents.** The standard headless command redirects stdout into `$SAKUSEN_RESULT_FILE` (that is the env contract), so the agent streams nothing and there is no transcript to summarize — Sakusen detects this, skips the summarizer, and keeps the result text. Set `summarization_strategy: last_message` on such steps to make that explicit and skip the dead `summarization_prompt`. Only headless agents that *also* print their reasoning on stdout get a real `summarize_chat` pass.
-
-Set `summarization_strategy: last_message` to instead capture only the agent's final result text as context (cheap — no summarizer call — but often a one-liner that loses decisions; not usable for tmux steps, which have no result text).
-
-Set `summarization_strategy: none` to skip context capture entirely for the step — no result text is stored and no summarization pass is run. Useful for steps whose output is not meaningful to later steps (`{{steps.<name>.context}}` will resolve to empty).
-
-All summarization runs the single top-level `summarizer:` command — there is no model selection in Sakusen; pick the model inside that command. Oversized chats are map-reduced when `summarizer.max_prompt_bytes` is set. With no `summarizer:` configured, summarize passes are skipped with a warning.
-
-**`require_context: true`** makes a failure to capture a step's `summarize_chat` context **fail the task** instead of silently advancing with an empty context (the default is best-effort: warn and proceed). Set it on steps whose output later steps template via `{{steps.<name>.context}}` — e.g. a grilling/interview step feeding an implementing step. Only meaningful for tmux steps with `summarize_chat`; ignored otherwise.
-
-### Prompt formatting
-
-Prompt fields (`prompt`, `summarization_prompt`, `summarizer_prompt`) are LLM input, not human reading. Do not hard-wrap prose at ~80 columns — block scalars (`|`) preserve every newline as a token. Keep only the structural newlines: blank lines between paragraphs, one line per list item (continuation text stays on the item line), code fences verbatim. Reflow on contact when editing existing prompts.
-
-### Wrapping multi-line interpolations
-
-Several template variables expand to **multi-line** content at render time (a step's full output, a transcript, a task input). When inlined raw, the boundary between fixed prompt text and interpolated content vanishes — paragraphs of step context blend into the next instruction, and the receiving agent cannot tell where one ends and the other begins.
-
-**Rule: wrap every multi-line interpolation in a semantic XML-style tag named after the variable.** Place the opening tag, the variable, and the closing tag each on their own line so the captured content sits between two clean boundaries:
-
-```yaml
-prompt: |
-  Implement the following:
-  <task-input>
-  {{task.input}}
-  </task-input>
-
-  Earlier review feedback:
-  <step-context name="reviewing">
-  {{steps.reviewing.context}}
-  </step-context>
-```
-
-Canonical tag for each multi-line variable:
-
-| Variable | Wrapping tag |
-|---|---|
-| `{{task.input}}` | `<task-input>...</task-input>` |
-| `{{task.context}}` | `<task-context>...</task-context>` |
-| `{{task.images}}` | `<task-images>...</task-images>` |
-| `{{steps.<name>.context}}` | `<step-context name="<name>">...</step-context>` |
-| `{{artifacts.<name>}}` | `<step-context name="<name>">...</step-context>` (alias of the above) |
-| `{{tasks.<id>.input}}` | `<task-input id="<id>">...</task-input>` |
-| `{{tasks.<id>.context}}` | `<task-context id="<id>">...</task-context>` |
-| `{{children.summary}}` | `<children-summary>...</children-summary>` |
-| `{{children.<id>.context}}` | `<child-context id="<id>">...</child-context>` |
-| `{{chat}}` | `<chat>...</chat>` |
-
-Single-line variables (`{{task.id}}`, `{{task.title}}`, `{{task.slug}}`, `{{task.branch}}`, `{{git.base_branch}}`, `{{git.target_branch}}`, `{{git.repo_root}}`, `{{loop.iteration}}`, `{{loop.max_iterations}}`, `{{tasks.<id>.title}}`, `{{tasks.<id>.branch}}`, `{{children.<id>.status}}`, `{{children.<id>.title}}`) are inlined into surrounding prose **without** wrapping — they fit on one line and a tag would only add noise.
-
-Do **not** use triple-backtick fences for this. Interpolated content (especially `{{chat}}` and summarized step contexts) routinely contains its own code fences, which would break the outer fence. XML-style tags survive arbitrary nested content.
-
-## Template Variables
-
-**Step prompts** (`prompt:`) and **summarizer prompts** (`summarizer_prompt:`):
-
-Variables marked **multi-line** must be wrapped in a semantic tag — see [Wrapping multi-line interpolations](#wrapping-multi-line-interpolations).
-
-| Variable | Description |
-|---|---|
-| `{{task.id}}` | Numeric task ID |
-| `{{task.title}}` | Task title |
-| `{{task.input}}` | Full task input **(multi-line — wrap in `<task-input>`)** |
-| `{{task.context}}` | Task's accumulated context summary (from a prior run / continuation) **(multi-line — wrap in `<task-context>`)** |
-| `{{task.slug}}` | URL-safe slug from title |
-| `{{task.branch}}` | Resolved branch name |
-| `{{task.images}}` | Newline-joined attached image paths **(multi-line — wrap in `<task-images>`)** |
-| `{{git.base_branch}}` | Configured base branch |
-| `{{git.target_branch}}` | Task's target/merge branch |
-| `{{git.repo_root}}` | Repository root path |
-| `{{loop.iteration}}` | Current loop iteration (in loops) |
-| `{{loop.max_iterations}}` | Max loop iterations (in loops) |
-| `{{steps.<step_name>.context}}` | Context captured from a prior step's result **(multi-line — wrap in `<step-context name="<step_name>">`)** |
-| `{{artifacts.<step_name>}}` | Backward compat alias for `{{steps.<step_name>.context}}` **(multi-line — same wrapping)** |
-| `{{tasks.<id>.<field>}}` | Field of **another task** by numeric ID. Fields: `title`, `branch`, `input`, `context`. Missing task / lookup error resolves to empty. See reference: Cross-Task References. |
-| `{{children.summary}}` | Digest of all child tasks after a `create_tasks_and_wait` resume **(multi-line — wrap in `<children-summary>`)** |
-| `{{children.<id>.<field>}}` | Field of a specific child task. Fields: `id`, `title`, `status` (`completed`/`failed`), `context`. See reference: Child Task Orchestration. |
-
-**Step `summarization_prompt:`** — same variables as above, plus:
-
-| Variable | Description |
-|---|---|
-| `{{chat}}` | Full transcript of the step being summarized **(multi-line — wrap in `<chat>`)**. Only valid inside `summarization_prompt`. |
-
-**`worktree-setup-command` / `worktree-setup-commands:`** — only `{{worktree_path}}` is available. Commands run with the **project root** (not the worktree) as cwd; a non-zero exit **fails the task**.
-
-**`tmux-setup-command:`**:
-
-| Variable | Description |
-|---|---|
-| `{{session_name}}` | Tmux session name created for the task |
-| `{{worktree_path}}` | Absolute path to the task's worktree |
-| `{{run_agent}}` | Path to the wrapper script that launches the agent with the `SAKUSEN_*` env exported |
-| `{{agent_command}}` | Raw agent shell command from the agent record (prefer `{{run_agent}}` — this one lacks the env exports). The old `{{claude_command}}` name is a load error. |
-
-If the command contains `{{run_agent}}` or `{{agent_command}}`, **you control where the agent runs** — Sakusen will not auto-start it in window 0. Omit both and Sakusen launches the agent itself after your layout command runs.
-
-**Environment variables** — every step's agent process (and anything it spawns) gets the contract described in [Agents → Environment contract](#environment-contract): `SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH` (repo root, not the worktree), `SAKUSEN_PURPOSE=step`, `SAKUSEN_AGENT`, `SAKUSEN_PROMPT_FILE`, plus `SAKUSEN_RESULT_FILE` (headless) or `SAKUSEN_DONE_DIR`/`SAKUSEN_DONE_PREFIX` (tmux). Useful in prompts that shell out or call sakusen MCP tools.
+Prompts interpolate `{{task.*}}`, `{{git.*}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`, and `{{children.*}}`. **Every multi-line variable must be wrapped in a semantic XML-style tag** (`<task-input>`, `<step-context name="...">`, `<track-context>`, `<chat>`, …) so the receiving agent can tell fixed prompt text from interpolated content. Do not hard-wrap prompt prose — see the reference for the canonical tag table, the full variable catalog, and prompt-formatting rules.
 
 ## Decision Tree
 
@@ -480,17 +293,18 @@ When the user describes what they want, follow this:
 2. **"Review before completing"** → Add a step with `human: true`
 3. **"Interactive tmux session"** → Point the step (or workflow) at a tmux-mode agent, e.g. `agent: claude-tmux`. Headless steps just use a headless agent (the scaffolded default).
 4. **"Multi-step pipeline"** → Multiple steps with step context passing results between steps
-5. **"Iterative review loop"** → Use `loop` config on a fix step pointing back to review
+5. **"Iterative review loop"** → Use `loop` config on a fix step pointing back to review; prefer a `step_context_contains` + `marker` exit
 6. **"Predefined maintenance job (no user prompt)"** → Pin all fields (`input`, `worktree`, `branch`, `target`) so the New Task screen is skipped
 7. **"Bootstrap from PRD (run immediately)"** → Same as above — pin all fields so the task is created immediately
 8. **"Share files/dirs across worktrees"** ("symlink X into worktrees", ".env should be available", "docs/configs visible to agents") → Use `worktree-sync-paths` (`link:` for shared/synced files, `copy:` for per-worktree isolated copies). Note this is hard-link, not symlink.
 9. **"Run something after worktree creation"** (install deps, generate files, create symlinks) → Use `worktree-setup-command` (single) or `worktree-setup-commands` (multiple)
 10. **"Summarize a tmux/conversational step"** → Set `summarization_strategy: summarize_chat` and provide a `summarization_prompt` using `{{chat}}`
-11. **"Fan out subtasks / orchestrate child tasks from a step"** → Prompt the step's agent to call the sakusen MCP tool `create_tasks_and_wait` (or `wait_for_tasks` for pre-existing tasks). The step suspends at `awaiting-children` and re-runs with `{{children.summary}}` / `{{children.<id>.<field>}}` populated — see reference: Child Task Orchestration
+11. **"Fan out subtasks / orchestrate child tasks from a step"** → Prompt the step's agent to call the sakusen MCP tool `create_tasks_and_wait` (or `wait_for_tasks` for pre-existing tasks). The step suspends at `awaiting-children` and re-runs with `{{children.summary}}` / `{{children.<id>.<field>}}` populated — see `references/workflow-building.md` → MCP Orchestration Patterns
 12. **"Later steps depend on this step's output"** (grilling/planning feeding implementation) → Set `require_context: true` on the producing step so a failed context capture fails the task loudly
 13. **"Reference another task's output"** ("build on task 42", "after #17 merges") → Use `{{tasks.<id>.<field>}}` in the task input — active refs auto-block until the referenced task completes
-
-For complete field reference with validation rules and examples, read `references/config-reference.md`.
+14. **"Talk to me first, then run unattended"** (interview / plan approval / human gate) → A tmux step that publishes a decision record via `update_step_context` and self-advances via `advance_task`, followed by headless steps templating that step's context — see `references/workflow-building.md` → The human-gated step
+15. **"Carry standing context across a stream of related tasks"** (sprint/epic/feature-area context) → Interpolate `{{track.context}}` in step prompts (explicit opt-in, empty for trackless tasks) and optionally write back with `update_track_context` — see `references/workflow-building.md` → Tracks in Workflows
+16. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
 
 ## Discovering undocumented fields
 
@@ -547,7 +361,9 @@ Exit code is `0` on success and non-zero on the first error. Run it before repor
 
 When generating a `.sakusen.yml`:
 1. Ask what kind of workflows the user needs (or infer from context)
-2. Generate a complete, valid YAML file
-3. Write it to `.sakusen.yml` in the project root
-4. **Run `sakusen validate`** and fix any reported errors before finishing
-5. Explain the key choices made
+2. Load `references/workflow-building.md` before authoring the `workflows:` block
+3. Generate a complete, valid YAML file
+4. Write it to `.sakusen.yml` in the project root
+5. **Run `sakusen validate`** and fix any reported errors before finishing
+6. Explain the key choices made
+</content>

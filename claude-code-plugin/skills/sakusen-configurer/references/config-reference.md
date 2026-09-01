@@ -13,9 +13,7 @@
 - [Worktree Sync Paths](#worktree-sync-paths)
 - [Worktree Setup Commands](#worktree-setup-commands)
 - [Tmux Setup Command](#tmux-setup-command)
-- [Step Configuration Details](#step-configuration-details) — timeout, step context, summarization, require_context, human approval, execution mode, loops
-- [Cross-Task References (`{{tasks.<id>.<field>}}`)](#cross-task-references-tasksidfield)
-- [Child Task Orchestration (`{{children.*}}`)](#child-task-orchestration-children)
+- [Step Configuration, Loops, Cross-Task and Child References](#step-configuration-loops-cross-task-and-child-references) — moved to [workflow-building.md](workflow-building.md)
 - [Task States](#task-states)
 - [Task Priorities](#task-priorities)
 - [Continue Workflow](#continue-workflow)
@@ -124,9 +122,19 @@ Controls what Sakusen does after a task's workflow finishes:
 - `"merge"` — Merges the task branch into base branch
 - `"none"` — Leaves changes in the worktree branch without action
 
-It can be overridden per-workflow via a workflow-level `on_complete:` key
-(see the Workflows section). Resolution precedence: **workflow-level →
-project-level → default (`commit`)**.
+It can be overridden per-workflow via a workflow-level `on_complete:` key.
+Resolution is **locality-based** — the more locally-defined setting wins:
+
+1. A **project-scoped** workflow's `on_complete` (inline in `.sakusen.yml` or a
+   `.sakusen/workflows/` file)
+2. The project `.sakusen.yml` top-level `on_complete`, when explicitly set
+3. A **global** workflow's `on_complete` (`~/.sakusen.yml` inline or
+   `~/.sakusen/workflows/`)
+4. The inherited top-level `on_complete` (`~/.sakusen.yml` or the built-in
+   default `commit`)
+
+A global workflow's `on_complete` is a cross-project *default*, not an override:
+adopting it must not silently defeat a project's explicit choice.
 
 > Moved here from the former `git.on_complete`. The old location now errors.
 
@@ -291,179 +299,15 @@ The command runs via `sh -c` with the **worktree** as `cwd`; a non-zero exit fai
 
 ---
 
-## Step Configuration Details
+## Step Configuration, Loops, Cross-Task and Child References
 
-### Timeout Format
-
-Go duration strings: `"30m"`, `"1h"`, `"1h30m"`, `"45m"`, `"2h"`. Default: `"30m"`.
-
-### Step Context Flow
-
-After each step completes, the agent's result text (headless: read from `$SAKUSEN_RESULT_FILE`, with a stdout-tail fallback) is captured as step context and stored in the `task_steps` database table. This context is available to subsequent steps via `{{steps.<step_name>.context}}` (or the backward-compat alias `{{artifacts.<step_name>}}`).
-
-### Step Summarization
-
-By default (`summarization_strategy` unset), the step's context is produced by **`summarize_chat`** — the configured `summarizer:` command summarizes the step's chat content. `last_message` and `none` are the alternatives:
-
-```yaml
-- name: grilling
-  agent: claude-tmux           # interactive step → tmux-mode agent
-  summarization_strategy: summarize_chat
-  summarization_prompt: |
-    Extract the durable design decisions reached in this Q&A.
-
-    Format:
-    - Numbered list, each item: question + paraphrased user answer.
-    - Skip small-talk and detours.
-
-    <chat>
-    {{chat}}
-    </chat>
-  prompt: |
-    Interview the user until shared understanding is reached...
-```
-
-| Strategy | What gets captured |
-|---|---|
-| (unset) | **Defaults to `summarize_chat`** |
-| `summarize_chat` | The `summarizer:` command summarizes the step's chat content using `summarization_prompt` (the default) |
-| `last_message` | The agent's final result text only (no summarizer call; unusable for tmux steps) |
-| `none` | Nothing — no step context is captured; later `{{steps.<name>.context}}` references resolve to empty |
-
-The chat content comes from the unified task log for headless steps, and from the agent record's `chat_log_command` for tmux steps — a tmux agent without `chat_log_command` captures no chat context. `summarize_chat` is essential for tmux steps where the meaningful output is the dialogue, not a final message. The summarizer step also unlocks the `step_context_empty` loop exit pattern: instruct the summarizer to emit empty output when "no issues found", and the loop will terminate. Requires a configured `summarizer:` — without one, the pass is skipped with a warning (or fails the task under `require_context: true`).
-
-Inside `summarization_prompt`, the variable `{{chat}}` expands to the full chat content. All standard task variables (`{{task.id}}`, `{{steps.<name>.context}}`, etc.) are also available.
-
-### Require Context
-
-```yaml
-- name: grilling
-  require_context: true
-  summarization_prompt: "..."
-  prompt: "..."
-```
-
-By default, context capture is best-effort: if the chat transcript can't be loaded or summarized, Sakusen logs a warning and advances with an **empty** step context. `require_context: true` makes that failure **block the task** instead. Set it on steps whose output later steps template via `{{steps.<name>.context}}` (e.g. a grilling step feeding an implementing step) so the pipeline fails loudly rather than silently running the next step with no plan. Only meaningful for tmux steps with `summarize_chat`; ignored otherwise.
-
-Example multi-step with step context:
-
-```yaml
-steps:
-  - name: analyzing
-    prompt: |
-      Analyze the requirements:
-      <task-input>
-      {{task.input}}
-      </task-input>
-  - name: implementing
-    prompt: |
-      Implement based on the analysis:
-      <step-context name="analyzing">
-      {{steps.analyzing.context}}
-      </step-context>
-  - name: reviewing
-    prompt: |
-      Review the implementation:
-      <step-context name="implementing">
-      {{steps.implementing.context}}
-      </step-context>
-    human: true
-```
-
-### Human Approval Steps
-
-When `human: true`, the task pauses at `awaiting-approval` status. The user reviews in the TUI and approves to continue. Use for review gates.
-
-### Execution Mode: Headless vs. Tmux Agents
-
-A step's execution mode comes from the agent record it resolves to (cascade: step `agent:` → workflow `agent:` → `default_agent:` → `"claude"`). When a step resolves to a **tmux-mode** agent:
-- The agent command runs inside a detached interactive tmux session
-- User can attach to watch/interact
-- Task shows `tmux` status in TUI
-- The daemon auto-advances on the agent's turn-end sentinel (hookless agents are manual-advance; press `c` to advance/finalize)
-
-A **headless** agent is spawned as a subprocess, its stdout is streamed to the task log, and the step auto-advances on exit with the result text from `$SAKUSEN_RESULT_FILE`.
-
-> The removed `tmux:` and `print:` fields are **hard load errors** — select an agent whose `mode` matches instead. See the mode section in SKILL.md for the full mode × `human` behavior table.
-
-### Loop Configuration
-
-Loops allow iterative refinement (e.g., implement → review → fix → review again).
-
-```yaml
-steps:
-  - name: implementing
-    prompt: |
-      Implement the following:
-      <task-input>
-      {{task.input}}
-      </task-input>
-  - name: reviewing
-    prompt: |
-      Review the implementation:
-      <step-context name="implementing">
-      {{steps.implementing.context}}
-      </step-context>
-    human: true
-  - name: fixing
-    # inherits the (headless) default agent — loop steps must resolve to a headless agent
-    prompt: |
-      Fix the issues found during review:
-      <step-context name="reviewing">
-      {{steps.reviewing.context}}
-      </step-context>
-    loop:
-      goto: reviewing
-      max_iterations: 3
-      exit_condition:
-        step_context_empty: reviewing
-```
-
-**Validation rules:**
-- `goto` must reference a step that appears BEFORE the loop step
-- No self-reference
-- `max_iterations` must be >= 1
-- Loop steps cannot have `human: true`
-- Loop steps cannot resolve to a tmux-mode agent — use a headless agent on the loop step (or its workflow)
-- Loop ranges cannot overlap with other loops
-
----
-
-## Cross-Task References (`{{tasks.<id>.<field>}}`)
-
-Reference another task's fields anywhere templates resolve. Supported fields: `title`, `branch`, `input`, `context`.
-
-Two places they work, with different semantics:
-
-1. **In a task's input or context** (entered at create/edit time): the daemon validates each ref — missing task, cross-project ref, or ref to a `failed` task is a create/edit **error**. Refs to still-active tasks are **auto-added as `blocked_by` dependencies**, so the referencing task won't start until they finish. Refs are pre-resolved (single-pass, no recursive expansion) before the input/context is inlined into step prompts.
-2. **In workflow step prompts**: resolved at render time with no validation or auto-blocking — a missing task resolves to empty string with a warning log.
-
-`input` and `context` fields are multi-line — wrap them in semantic tags (see SKILL.md).
-
----
-
-## Child Task Orchestration (`{{children.*}}`)
-
-A step's agent can fan out child tasks via the sakusen MCP tools:
-
-- **`create_tasks_and_wait`** — spawn one or more child tasks and suspend the calling step until ALL reach a terminal status (`completed` or `failed`). The parent task shows `awaiting-children`.
-- **`wait_for_tasks`** — same suspension, but for pre-existing task IDs (already-terminal tasks are skipped).
-
-Both default `parent_task_id` to the `SAKUSEN_TASK_ID` env var the engine injects into every step, so agents don't need to pass it. When all children finish, **the calling step re-runs from the same step index** with these variables populated:
-
-| Variable | Description |
-|---|---|
-| `{{children.summary}}` | Formatted digest of every child (ID, status, title, context), sorted by ID — multi-line |
-| `{{children.<id>.id}}` | Child task ID |
-| `{{children.<id>.title}}` | Child task title |
-| `{{children.<id>.status}}` | Terminal status: `completed` or `failed` |
-| `{{children.<id>.context}}` | Child's final task context (its synthesized output) — multi-line |
-
-**Children may live in a different project.** Pass a per-child `project_path` to `create_tasks_and_wait` (it defaults to the parent's project), or hand `wait_for_tasks` any task ID at all — the wait relation is purely ID-based. The child runs under its own project's `.sakusen.yml` and workflows and merges into its own repo; the parent suspends and resumes identically, and `{{children.<id>.status}}` is `completed`/`failed` regardless of where the child ran. One caveat: a cross-project child does **not** inherit the parent's track (tracks are project-scoped), so pass an explicit `track` if you want one — it resolves in the child's own project.
-
-Unknown IDs and unsupported fields resolve to empty. On the first (pre-spawn) run of the step these are all empty — a typical orchestrator prompt branches: "If `<children-summary>` below is empty, break the task into subtasks and call `create_tasks_and_wait`. Otherwise, review the child results, check every `{{children.<id>.status}}` for failures, and integrate."
-
-Since the meaningful state usually lives in the conversation, orchestrator steps pair well with `summarize_chat` (the default) and `require_context: true`.
+Moved to [workflow-building.md](workflow-building.md) — the single workflow-authoring
+reference. It covers step fields (`description`, `timeout`, `human`, `require_context`,
+summarization strategies), step context flow, execution mode, loops and their validation
+rules, [cross-task references](workflow-building.md#cross-task-references)
+(`{{tasks.<id>.<field>}}`), and
+[MCP orchestration patterns](workflow-building.md#mcp-orchestration-patterns) including child
+task orchestration (`{{children.*}}`).
 
 ---
 
