@@ -343,9 +343,13 @@ Splitting trades single-file readability for per-workflow editability. For tiny 
       loop:                  # optional: jump back to earlier step
         goto: "step-name"    # must reference an earlier step
         max_iterations: 3    # >= 1
-        exit_condition:
-          step_context_empty: "step-name"  # exit early if this step's context is empty
+        exit_condition:                     # set either form, or both (exit when either matches)
+          step_context_contains: "step-name"  # preferred: exit when that step's context contains marker
+          marker: "LOOP-EXIT"                 # required with step_context_contains; literal, case-sensitive
+          step_context_empty: "step-name"     # exit when that step's context is empty
 ```
+
+**Prefer `step_context_contains` over `step_context_empty`.** Exiting on an absence cannot distinguish "the step decided the work is done" from "the step crashed, timed out, or forgot to publish" — every one of those silently ends the loop and ships whatever is on the branch. A marker makes the exit an explicit statement the step has to produce; a step that fails to run leaves it absent and the loop keeps going, bounded by `max_iterations`. Use `step_context_empty` only when an empty context is genuinely unambiguous.
 
 ### Execution mode: the agent's `mode`, not the step
 
@@ -367,7 +371,9 @@ The `mode:` field on a **step** (e.g. `mode: "automatic"`) is vestigial — it i
 
 ### Step summarization
 
-**The default strategy is `summarize_chat`** (when `summarization_strategy` is unset). It summarizes the step's chat via the configured `summarizer:` command using `summarization_prompt`. Inside `summarization_prompt`, the variable `{{chat}}` expands to the full chat content. This is essential for tmux/grilling steps where the meaningful output is the conversation, not a final message; it is also the default for ordinary steps. For headless steps the chat is the step's region of the task log; for tmux steps it is produced by the agent's `chat_log_command` (an agent without one captures no chat context).
+**The default strategy is `summarize_chat`** (when `summarization_strategy` is unset). It summarizes the step's chat via the configured `summarizer:` command using `summarization_prompt`. Inside `summarization_prompt`, the variable `{{chat}}` expands to the full chat content. This is essential for tmux/grilling steps where the meaningful output is the conversation, not a final message; it is also the default for ordinary steps. For headless steps the chat is the agent's **streamed stdout** for that step (the echoed prompt is stripped); for tmux steps it is produced by the agent's `chat_log_command` (an agent without one captures no chat context).
+
+**`summarize_chat` is a no-op for most headless agents.** The standard headless command redirects stdout into `$SAKUSEN_RESULT_FILE` (that is the env contract), so the agent streams nothing and there is no transcript to summarize — Sakusen detects this, skips the summarizer, and keeps the result text. Set `summarization_strategy: last_message` on such steps to make that explicit and skip the dead `summarization_prompt`. Only headless agents that *also* print their reasoning on stdout get a real `summarize_chat` pass.
 
 Set `summarization_strategy: last_message` to instead capture only the agent's final result text as context (cheap — no summarizer call — but often a one-liner that loses decisions; not usable for tmux steps, which have no result text).
 

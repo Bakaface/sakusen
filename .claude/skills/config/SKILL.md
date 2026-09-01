@@ -222,9 +222,17 @@ type LoopConfig struct {
 }
 
 type LoopExitCondition struct {
-    StepContextEmpty string // Step name whose context to check; exit if empty
+    StepContextEmpty    string // Step name whose context to check; exit if empty
+    StepContextContains string // Step name whose context to search for Marker
+    Marker              string // Literal substring that ends the loop (required with StepContextContains)
 }
 ```
+
+Both forms may be set; the loop exits as soon as either matches.
+
+**Prefer `StepContextContains`.** `StepContextEmpty` exits on an *absence*, so it cannot tell "the step decided the work is done" from "the step crashed, timed out, or forgot to publish" — each of those silently ends the loop and ships whatever is on the branch. A marker requires the step to make a positive statement; a step that fails to run leaves it absent and the loop keeps going, bounded by `max_iterations`.
+
+Validation: `StepContextContains` requires a non-blank `Marker`, `Marker` requires `StepContextContains`, both step references must name real steps, and an `exit_condition` block setting neither form is a load-time error.
 
 ## Worktree Sync Paths
 

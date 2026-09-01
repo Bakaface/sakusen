@@ -646,13 +646,22 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 			shouldLoop = false
 		}
 
-		// Check exit condition
+		// Check exit conditions. Both forms may be configured; the loop exits
+		// as soon as either matches.
 		if shouldLoop && step.Loop.ExitCondition != nil {
-			if step.Loop.ExitCondition.StepContextEmpty != "" {
-				content, _ := e.database.GetTaskStepContext(t.ID, step.Loop.ExitCondition.StepContextEmpty)
+			if name := step.Loop.ExitCondition.StepContextEmpty; name != "" {
+				content, _ := e.database.GetTaskStepContext(t.ID, name)
 				if strings.TrimSpace(content) == "" {
 					shouldLoop = false
-					log.Printf("Loop exit: step context %q is empty for task #%d", step.Loop.ExitCondition.StepContextEmpty, t.ID)
+					log.Printf("Loop exit: step context %q is empty for task #%d", name, t.ID)
+				}
+			}
+			if name := step.Loop.ExitCondition.StepContextContains; shouldLoop && name != "" {
+				content, _ := e.database.GetTaskStepContext(t.ID, name)
+				marker := step.Loop.ExitCondition.Marker
+				if strings.Contains(content, marker) {
+					shouldLoop = false
+					log.Printf("Loop exit: step context %q contains marker %q for task #%d", name, marker, t.ID)
 				}
 			}
 		}
@@ -670,8 +679,13 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 			return stepOutcome{kind: stepOutcomeGoto, gotoIdx: targetIdx}, nil
 		}
 
-		// Loop done, reset counter
+		// Loop done. The counter is reset so {{loop.iteration}} and the TUI's
+		// loop badge do not leak into the steps after the loop, which erases
+		// the only record of how many passes ran — so write it to the task log
+		// first, next to the per-iteration step headers it belongs with.
 		log.Printf("Task #%d loop completed after %d iterations", t.ID, t.LoopIteration)
+		e.appendTaskLog(t.ID, "=== Loop %q completed after %d iteration(s) (max %d) ===",
+			step.Name, t.LoopIteration, step.Loop.MaxIterations)
 		t.LoopIteration = 0
 		if err := e.database.UpdateTaskLoopIteration(t.ID, 0); err != nil {
 			log.Printf("Warning: failed to reset loop iteration: %v", err)

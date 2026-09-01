@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -459,9 +460,23 @@ type LoopConfig struct {
 	ExitCondition *LoopExitCondition `yaml:"exit_condition,omitempty"`
 }
 
-// LoopExitCondition defines when a loop should exit early.
+// LoopExitCondition defines when a loop should exit early. Both forms may be
+// set; the loop exits as soon as either matches.
+//
+// step_context_empty exits on an ABSENCE, so it cannot distinguish "the step
+// decided the work is done" from "the step crashed, timed out, or forgot to
+// publish" — every one of those silently ends the loop and ships whatever is
+// on the branch. Prefer step_context_contains, which requires the step to make
+// a positive statement to end the loop; a step that fails to run leaves the
+// marker absent and the loop keeps going (bounded by max_iterations).
 type LoopExitCondition struct {
-	StepContextEmpty string `yaml:"step_context_empty"` // step name whose context to check
+	StepContextEmpty string `yaml:"step_context_empty"` // step name whose context must be empty
+
+	// StepContextContains names the step whose context is searched for Marker.
+	StepContextContains string `yaml:"step_context_contains"`
+	// Marker is the literal substring that ends the loop. Required whenever
+	// StepContextContains is set; matched case-sensitively, not as a regexp.
+	Marker string `yaml:"marker"`
 }
 
 // ValidateLoops checks all loop configurations in a workflow for correctness.
@@ -507,11 +522,25 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 		}
 
 		// Validate exit condition
-		if step.Loop.ExitCondition != nil {
-			if step.Loop.ExitCondition.StepContextEmpty != "" {
-				if _, ok := stepIndex[step.Loop.ExitCondition.StepContextEmpty]; !ok {
-					return fmt.Errorf("step %q: exit_condition step_context_empty references unknown step %q", step.Name, step.Loop.ExitCondition.StepContextEmpty)
+		if ec := step.Loop.ExitCondition; ec != nil {
+			if ec.StepContextEmpty != "" {
+				if _, ok := stepIndex[ec.StepContextEmpty]; !ok {
+					return fmt.Errorf("step %q: exit_condition step_context_empty references unknown step %q", step.Name, ec.StepContextEmpty)
 				}
+			}
+			if ec.StepContextContains != "" {
+				if _, ok := stepIndex[ec.StepContextContains]; !ok {
+					return fmt.Errorf("step %q: exit_condition step_context_contains references unknown step %q", step.Name, ec.StepContextContains)
+				}
+				if strings.TrimSpace(ec.Marker) == "" {
+					return fmt.Errorf("step %q: exit_condition step_context_contains requires a non-empty marker", step.Name)
+				}
+			}
+			if ec.Marker != "" && ec.StepContextContains == "" {
+				return fmt.Errorf("step %q: exit_condition marker requires step_context_contains", step.Name)
+			}
+			if ec.StepContextEmpty == "" && ec.StepContextContains == "" {
+				return fmt.Errorf("step %q: exit_condition must set step_context_empty or step_context_contains", step.Name)
 			}
 		}
 

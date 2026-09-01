@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // LogsDir returns the path to the logs directory in a worktree.
@@ -26,6 +28,28 @@ func ProjectLogsDir(dataDir string, taskID int64) string {
 // chronological order across step boundaries.
 func ProjectLogPath(dataDir string, taskID int64) string {
 	return filepath.Join(ProjectLogsDir(dataDir, taskID), "task.log")
+}
+
+// appendTaskLog appends one timestamped line to the unified task log, matching
+// the format runHeadlessAgent and FinalizeTask write. Used for engine-level
+// events that belong in the run record a user actually reads rather than only
+// in the daemon log. Best-effort: failures are logged and swallowed, never
+// propagated into task execution.
+func (e *Engine) appendTaskLog(taskID int64, format string, args ...any) {
+	if err := os.MkdirAll(ProjectLogsDir(e.dataDir, taskID), 0755); err != nil {
+		log.Printf("Warning: failed to create log dir for task #%d: %v", taskID, err)
+		return
+	}
+	f, err := os.OpenFile(ProjectLogPath(e.dataDir, taskID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("Warning: failed to open task log for task #%d: %v", taskID, err)
+		return
+	}
+	defer f.Close()
+	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+	if _, err := f.WriteString(line); err != nil {
+		log.Printf("Warning: failed to append to task log for task #%d: %v", taskID, err)
+	}
 }
 
 // ImagesDir returns the path to the images directory in a worktree.

@@ -1488,3 +1488,74 @@ func TestEffectiveOnComplete(t *testing.T) {
 		})
 	}
 }
+
+// TestLoopExitOnMarker covers the affirmative loop exit condition. Unlike
+// step_context_empty — which cannot tell "the planner says we are done" from
+// "the planner crashed and published nothing" — step_context_contains only
+// ends the loop when the step makes a positive statement.
+func TestLoopExitOnMarker(t *testing.T) {
+	newWorkflow := func() config.WorkflowConfig {
+		return config.WorkflowConfig{
+			Name: "default",
+			Steps: []config.StepConfig{
+				{Name: "plan", Prompt: "plan the next unit"},
+				{
+					Name:   "implement",
+					Prompt: "implement: {{steps.plan.context}}",
+					Loop: &config.LoopConfig{
+						Goto:          "plan",
+						MaxIterations: 5,
+						ExitCondition: &config.LoopExitCondition{
+							StepContextContains: "plan",
+							Marker:              "LOOP-EXIT",
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("marker ends the loop", func(t *testing.T) {
+		engine, tk, runner, _ := newFakeRunnerTestEngine(t, newWorkflow())
+		runner.script("plan", fakeAgentResult{resultText: "work order 1"})
+		runner.script("plan", fakeAgentResult{resultText: "work order 2"})
+		runner.script("plan", fakeAgentResult{resultText: "all criteria pass — LOOP-EXIT"})
+
+		if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+			t.Fatalf("RunTask: %v", err)
+		}
+		if got := len(runner.callsFor("plan")); got != 3 {
+			t.Errorf("plan ran %d times, want 3 (two work orders then the exit marker)", got)
+		}
+		if got := len(runner.callsFor("implement")); got != 3 {
+			t.Errorf("implement ran %d times, want 3", got)
+		}
+
+		// The loop counter is reset on exit, so the task log is the only
+		// durable record of how many passes ran.
+		logged, err := os.ReadFile(ProjectLogPath(engine.dataDir, tk.ID))
+		if err != nil {
+			t.Fatalf("read task log: %v", err)
+		}
+		if !strings.Contains(string(logged), `=== Loop "implement" completed after 2 iteration(s) (max 5) ===`) {
+			t.Errorf("task log is missing the loop-completion record:\n%s", logged)
+		}
+	})
+
+	t.Run("a silent step does not end the loop", func(t *testing.T) {
+		// The empty-context condition would exit here on the first pass and
+		// ship whatever is on the branch. The marker condition keeps looping
+		// until max_iterations, which is the safe direction to fail.
+		wf := newWorkflow()
+		wf.Steps[0].SummarizationStrategy = config.SummarizationStrategyNone
+		engine, tk, runner, _ := newFakeRunnerTestEngine(t, wf)
+
+		if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+			t.Fatalf("RunTask: %v", err)
+		}
+		// Iteration 0 plus max_iterations further passes.
+		if got := len(runner.callsFor("plan")); got != 6 {
+			t.Errorf("plan ran %d times, want 6 (bounded by max_iterations, not exited early)", got)
+		}
+	})
+}

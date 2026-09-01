@@ -2506,3 +2506,85 @@ workflows:
 		t.Error("expected StepAgent to fail at run time when no agent is configured")
 	}
 }
+
+// TestValidateLoopsContainsExitCondition covers the affirmative exit
+// condition: step_context_contains requires a marker, a marker requires the
+// step reference, and an exit_condition block must configure at least one
+// form rather than silently never firing.
+func TestValidateLoopsContainsExitCondition(t *testing.T) {
+	loopWith := func(ec *LoopExitCondition) *WorkflowConfig {
+		return &WorkflowConfig{
+			Name: "test",
+			Steps: []StepConfig{
+				{Name: "plan", Prompt: "Plan"},
+				{
+					Name:   "implement",
+					Prompt: "Implement",
+					Loop: &LoopConfig{
+						Goto:          "plan",
+						MaxIterations: 3,
+						ExitCondition: ec,
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		ec      *LoopExitCondition
+		wantErr string
+	}{
+		{
+			name: "valid contains + marker",
+			ec:   &LoopExitCondition{StepContextContains: "plan", Marker: "LOOP-EXIT"},
+		},
+		{
+			name: "valid alongside step_context_empty",
+			ec:   &LoopExitCondition{StepContextEmpty: "plan", StepContextContains: "plan", Marker: "LOOP-EXIT"},
+		},
+		{
+			name:    "contains references unknown step",
+			ec:      &LoopExitCondition{StepContextContains: "nonexistent", Marker: "LOOP-EXIT"},
+			wantErr: "unknown step",
+		},
+		{
+			name:    "contains without marker",
+			ec:      &LoopExitCondition{StepContextContains: "plan"},
+			wantErr: "non-empty marker",
+		},
+		{
+			name:    "blank marker",
+			ec:      &LoopExitCondition{StepContextContains: "plan", Marker: "   "},
+			wantErr: "non-empty marker",
+		},
+		{
+			name:    "marker without contains",
+			ec:      &LoopExitCondition{Marker: "LOOP-EXIT"},
+			wantErr: "requires step_context_contains",
+		},
+		{
+			name:    "empty exit condition block",
+			ec:      &LoopExitCondition{},
+			wantErr: "must set step_context_empty or step_context_contains",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := loopWith(tt.ec).ValidateLoops()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected valid config to pass, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !containsString(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
