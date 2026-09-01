@@ -227,7 +227,13 @@ func (db *DB) UpdateTaskStatus(id int64, status task.Status) error {
 
 	switch status {
 	case task.StatusRunning:
-		query = "UPDATE tasks SET status = ?, started_at = ?, updated_at = ? WHERE id = ?"
+		// started_at is write-once. A task re-enters "running" many times
+		// during a single run — markSummarizingStep restores it after every
+		// per-step summarization pass — and rewriting the column each time
+		// reports the task as having started at its last summarizer round
+		// trip instead of at its actual claim. ClaimTask sets the real start;
+		// the retry paths NULL the column out to re-arm it.
+		query = "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?"
 		args = []interface{}{status, now, now, id}
 	case task.StatusCompleted, task.StatusFailed:
 		query = "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?"

@@ -679,3 +679,112 @@ func TestResetTaskForRetryAtStep(t *testing.T) {
 		}
 	}
 }
+
+// TestStartedAtIsWriteOnce pins that re-entering the running status does not
+// move started_at. markSummarizingStep flips a task to a summarizing status
+// and back to running after EVERY per-step summarization pass, so an
+// unconditional write made a long task report the duration of its last
+// summarizer round trip instead of its real runtime.
+func TestStartedAtIsWriteOnce(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	proj, err := database.GetOrCreateProject("/home/user/myproject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := database.CreateTask(proj.ID, "Loop", "Loop task", "loop", "", "", "pending", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := database.ClaimTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Fatal("expected to claim a pending task")
+	}
+	afterClaim, err := database.GetTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterClaim.StartedAt == nil {
+		t.Fatal("ClaimTask must set started_at")
+	}
+	start := *afterClaim.StartedAt
+
+	// One step-summarization round trip: running -> summarizing_step -> running.
+	for i := 0; i < 3; i++ {
+		if err := database.UpdateTaskStatus(created.ID, task.StatusSummarizingStep); err != nil {
+			t.Fatal(err)
+		}
+		if err := database.UpdateTaskStatus(created.ID, task.StatusRunning); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	after, err := database.GetTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.StartedAt == nil {
+		t.Fatal("started_at was cleared")
+	}
+	if !after.StartedAt.Equal(start) {
+		t.Errorf("started_at moved from %v to %v; it must be write-once", start, *after.StartedAt)
+	}
+}
+
+// TestRetryRearmsStartedAt guards the other half of the write-once rule: a
+// retry NULLs started_at so the next claim records a fresh start.
+func TestRetryRearmsStartedAt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	proj, err := database.GetOrCreateProject("/home/user/myproject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := database.CreateTask(proj.ID, "Retry", "Retry task", "retry", "", "", "pending", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ClaimTask(created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ResetTaskForRetry(created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	afterRetry, err := database.GetTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRetry.StartedAt != nil {
+		t.Fatalf("ResetTaskForRetry must clear started_at, got %v", *afterRetry.StartedAt)
+	}
+
+	claimed, err := database.ClaimTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Fatal("expected to re-claim the retried task")
+	}
+	afterReclaim, err := database.GetTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterReclaim.StartedAt == nil {
+		t.Error("re-claiming a retried task must set a fresh started_at")
+	}
+}

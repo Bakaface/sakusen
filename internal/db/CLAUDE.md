@@ -5,6 +5,7 @@ Schema, migrations, task/project queries. Load `/database` skill before making s
 ## Critical Invariants
 
 - **`ClaimTask(id)` is atomic: pending → running with `started_at`** — returns false if not pending; prevents duplicate execution
+- **`started_at` is write-once** — `ClaimTask` sets the real start; `UpdateTaskStatus(StatusRunning)` uses `COALESCE(started_at, ?)` because a task re-enters "running" many times per run (`markSummarizingStep` restores it after every per-step summarization), and an unconditional write reported the duration of the last summarizer round trip instead of the run. The retry paths `NULL` the column to re-arm it
 - **`GetClaimableTasks()` filters blocked dependencies, orders by priority desc then `created_at` asc** — ordering matters for fairness
 - **Parameterized queries only (`?` placeholders)** — never use string interpolation in SQL
 - **`taskColumns` and `scanTaskRow`'s Scan arg list must change in lockstep** (now including `track_id`) — a drift silently mis-scans every task row
