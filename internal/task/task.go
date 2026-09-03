@@ -146,6 +146,7 @@ type Task struct {
 	BlockedBy        []int64
 	Images           []string
 	Commits          []string
+	PeriodicID       *int64 // set when this task was materialized by a periodic definition
 	CreatedAt        time.Time
 	StartedAt        *time.Time
 	CompletedAt      *time.Time

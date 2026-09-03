@@ -84,6 +84,7 @@ var migrations = []func(db *DB) error{
 	migrateV20,
 	migrateV21,
 	migrateV22,
+	migrateV23,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -414,6 +415,53 @@ func migrateV22(db *DB) error {
 	}
 	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks RENAME COLUMN description TO input`); err != nil {
 		return fmt.Errorf("failed to rename tasks.description to input: %w", err)
+	}
+	return nil
+}
+
+// migrateV23 adds the periodic_definitions table and tasks.periodic_id — the
+// scheduled-task (periodic:) feature. priority is stored raw (” = fall back
+// to the project default at fire time). The partial idx_periodic_due index
+// covers the scheduler's due-scan predicate.
+func migrateV23(db *DB) error {
+	if _, err := db.sqlDB.Exec(`CREATE TABLE IF NOT EXISTS periodic_definitions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		name TEXT NOT NULL,
+		cadence TEXT NOT NULL,
+		workflow_ref TEXT NOT NULL DEFAULT '',
+		input TEXT NOT NULL DEFAULT '',
+		priority TEXT NOT NULL DEFAULT '',
+		paused INTEGER NOT NULL DEFAULT 0,
+		config_paused INTEGER NOT NULL DEFAULT 0,
+		next_fire_at DATETIME NOT NULL,
+		last_fired_at DATETIME,
+		last_task_id INTEGER REFERENCES tasks(id),
+		deleted_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(project_id, name)
+	)`); err != nil {
+		return fmt.Errorf("failed to create periodic_definitions table: %w", err)
+	}
+	// Guarded by a column-existence check so replaying the ladder on a
+	// database that already has the final schema (e.g. a fresh install rolled
+	// back to an earlier version) is a no-op rather than an error — the CREATE
+	// statements above/below are already idempotent via IF NOT EXISTS.
+	hasPeriodicID, err := db.tasksHasColumn("periodic_id")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tasks columns: %w", err)
+	}
+	if !hasPeriodicID {
+		if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN periodic_id INTEGER REFERENCES periodic_definitions(id)`); err != nil {
+			return fmt.Errorf("failed to add periodic_id column: %w", err)
+		}
+	}
+	if _, err := db.sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_periodic_id ON tasks(periodic_id) WHERE periodic_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("failed to create idx_tasks_periodic_id index: %w", err)
+	}
+	if _, err := db.sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_periodic_due ON periodic_definitions(next_fire_at) WHERE deleted_at IS NULL AND paused = 0`); err != nil {
+		return fmt.Errorf("failed to create idx_periodic_due index: %w", err)
 	}
 	return nil
 }

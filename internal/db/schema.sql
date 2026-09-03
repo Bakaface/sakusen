@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     context TEXT,
     images TEXT,
     commits TEXT,
+    periodic_id INTEGER REFERENCES periodic_definitions(id),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     started_at DATETIME,
     completed_at DATETIME,
@@ -64,6 +65,34 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_periodic_id ON tasks(periodic_id) WHERE periodic_id IS NOT NULL;
+
+-- periodic_definitions stores scheduled-task definitions reconciled from the
+-- top-level periodic: section of .sortie.yml. Each due definition is
+-- materialized by the daemon's scheduler into an ordinary tasks row
+-- (tasks.periodic_id FK). workflow_ref empty ⇒ the inline hidden workflow
+-- "periodic:<name>". priority empty ⇒ the project default at fire time.
+-- deleted_at is set (soft delete) when an entry disappears from the yml so its
+-- run history (linked tasks) survives.
+CREATE TABLE IF NOT EXISTS periodic_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    cadence TEXT NOT NULL,
+    workflow_ref TEXT NOT NULL DEFAULT '',
+    input TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL DEFAULT '',
+    paused INTEGER NOT NULL DEFAULT 0,
+    config_paused INTEGER NOT NULL DEFAULT 0,
+    next_fire_at DATETIME NOT NULL,
+    last_fired_at DATETIME,
+    last_task_id INTEGER REFERENCES tasks(id),
+    deleted_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_periodic_due ON periodic_definitions(next_fire_at) WHERE deleted_at IS NULL AND paused = 0;
 
 CREATE TABLE IF NOT EXISTS task_dependencies (
     task_id INTEGER NOT NULL REFERENCES tasks(id),

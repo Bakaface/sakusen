@@ -347,6 +347,7 @@ func TaskInfoFromTask(t *task.Task) TaskInfo {
 		Images:           t.Images,
 		Commits:          t.Commits,
 		BlockedBy:        t.BlockedBy,
+		PeriodicID:       t.PeriodicID,
 		CreatedAt:        t.CreatedAt,
 		StartedAt:        t.StartedAt,
 		CompletedAt:      t.CompletedAt,

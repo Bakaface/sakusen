@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"time"
+
 	"github.com/Bakaface/sakusen/internal/db"
 	"github.com/Bakaface/sakusen/internal/task"
 )
@@ -90,8 +92,23 @@ type taskStore interface {
 	// Projects.
 	GetOrCreateProject(projectPath string) (*db.Project, error)
 	GetProject(id int64) (*db.Project, error)
+	ListProjects() ([]*db.Project, error)
 	UpdateProjectDefaultWorktree(id int64, worktree bool) error
 	UpdateProjectDefaults(id int64, worktree bool, branchMode int, workflow string) error
+
+	// Periodic definitions (periodic_definitions table) — reconciled from the
+	// periodic: section of .sakusen.yml and fired by the scheduler loop.
+	GetPeriodicByID(id int64) (*db.PeriodicDef, error)
+	GetPeriodicByName(projectID int64, name string) (*db.PeriodicDef, error)
+	ListPeriodicsForProject(projectID int64) ([]*db.PeriodicDef, error)
+	ListDuePeriodics(now time.Time) ([]*db.PeriodicDef, error)
+	UpsertPeriodicDef(projectID int64, name, cadence, workflowRef, input, priority string, paused bool, nextFireAt time.Time) (*db.PeriodicDef, error)
+	SoftDeletePeriodicDef(projectID int64, name string) error
+	ClaimPeriodicFire(id int64, now, newNextFire time.Time) (bool, error)
+	SetPeriodicPaused(id int64, paused bool) error
+	UpdatePeriodicLastTask(id, taskID int64) error
+	GetTasksForPeriodic(periodicID int64) ([]*task.Task, error)
+	SetTaskPeriodicID(taskID, periodicID int64) error
 
 	// Per-step execution tracking (task_steps table). Note: manual
 	// step-context writes (the update_step_context MCP tool) do NOT call

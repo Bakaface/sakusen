@@ -661,6 +661,27 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 		}
 	}
 
+	// Resolve periodic definitions. Inline-step entries are registered with the
+	// engine as hidden workflows named "periodic:<name>" so the existing engine
+	// resolution path (GetWorkflow) reaches them unchanged. Ref-mode entries
+	// contribute nothing to cfg.Workflows.
+	cfg.Periodic = append([]PeriodicEntry(nil), proj.Periodic...)
+	for i := range cfg.Periodic {
+		p := &cfg.Periodic[i]
+		if len(p.Steps) > 0 && p.Workflow == "" {
+			wf := WorkflowConfig{
+				Name:             p.InlineWorkflowName(),
+				Description:      p.Description,
+				Agent:            p.Agent,
+				Steps:            p.Steps,
+				SummarizerPrompt: p.SummarizerPrompt,
+				Hidden:           true,
+				Source:           "periodic",
+			}
+			cfg.Workflows = append(cfg.Workflows, wf)
+		}
+	}
+
 	// Validate workflow configurations (after all workflows are assembled)
 	for i := range cfg.Workflows {
 		if err := cfg.Workflows[i].ValidatePins(); err != nil {
@@ -675,6 +696,13 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 		if err := cfg.Workflows[i].ValidateOnComplete(); err != nil {
 			return fmt.Errorf("workflow %q: %w", cfg.Workflows[i].Name, err)
 		}
+	}
+
+	// Validate periodic definitions on the production load path too — this
+	// rejects "both workflow and steps set" and the missing-input
+	// {{task.input}} guard at config-load time, not just in ValidateFile.
+	if err := validatePeriodic(cfg); err != nil {
+		return err
 	}
 
 	return nil

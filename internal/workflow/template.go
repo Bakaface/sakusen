@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/task"
 )
@@ -87,6 +88,10 @@ func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
 		key := match[2 : len(match)-2] // strip {{ and }}
 
 		switch {
+		case key == "now":
+			// Globally available; evaluated live at each resolution so step
+			// retries see a fresh timestamp.
+			return time.Now().Format(time.RFC3339)
 		case key == "task.id":
 			return fmt.Sprintf("%d", ctx.Task.ID)
 		case key == "task.title":

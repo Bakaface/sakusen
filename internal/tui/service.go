@@ -33,6 +33,12 @@ type TaskService interface {
 	// picks up the new state).
 	AdvanceTask(id int64) (string, error)
 
+	// Periodic definitions — the "P" view (list, run history, pause/run-now).
+	ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error)
+	ListPeriodicRuns(periodicID int64) ([]daemon.TaskInfo, error)
+	SetPeriodicPaused(id int64, paused bool) (*daemon.PeriodicInfo, error)
+	FirePeriodicNow(id int64) (*daemon.TaskInfo, error)
+
 	// Connection lifecycle.
 	Connect() error
 	Subscribe() error

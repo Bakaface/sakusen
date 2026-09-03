@@ -46,7 +46,7 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workfl
 }
 
 const taskColumns = `id, project_id, track_id, title, input, slug, workflow, status, priority, step_index, current_step, loop_iteration,
-	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, exit_code, error_message, context, images, commits,
+	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, exit_code, error_message, context, images, commits, periodic_id,
 	created_at, started_at, completed_at, updated_at`
 
 func (db *DB) GetTask(id int64) (*task.Task, error) {
@@ -588,6 +588,7 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	var taskContext sql.NullString
 	var imagesJSON sql.NullString
 	var commitsJSON sql.NullString
+	var periodicID sql.NullInt64
 	var exitCode sql.NullInt64
 	var worktreeInt int
 	var worktreeDetached int
@@ -597,11 +598,16 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	err := s.Scan(
 		&t.ID, &projectID, &trackID, &title, &t.Input, &slug, &workflow, &t.Status, &priority,
 		&t.StepIndex, &currentStep, &t.LoopIteration,
-		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON,
+		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON, &periodicID,
 		&t.CreatedAt, &startedAt, &completedAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if periodicID.Valid {
+		id := periodicID.Int64
+		t.PeriodicID = &id
 	}
 
 	t.Worktree = worktreeInt != 0
@@ -692,6 +698,17 @@ func scanTasks(rows *sql.Rows) ([]*task.Task, error) {
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
+}
+
+// SetTaskPeriodicID links a task to the periodic definition that materialized
+// it. Kept as a post-creation setter rather than threading a nullable arg
+// through the long positional CreateTaskWithPriority.
+func (db *DB) SetTaskPeriodicID(taskID, periodicID int64) error {
+	_, err := db.sqlDB.Exec(
+		"UPDATE tasks SET periodic_id = ?, updated_at = ? WHERE id = ?",
+		periodicID, time.Now(), taskID,
+	)
+	return err
 }
 
 func (db *DB) SetWorktreeDetached(id int64, detached bool) error {

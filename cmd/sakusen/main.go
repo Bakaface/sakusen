@@ -69,6 +69,7 @@ func init() {
 	tuiCmd.Flags().BoolP("global", "g", false, "Show tasks from all projects")
 	logsCmd.Flags().IntP("tail", "n", 0, "Show only the last N lines")
 	tasksCmd.Flags().BoolP("json", "j", false, "Output as JSON")
+	tasksCmd.Flags().Int64("periodic-id", 0, "Only show tasks materialized by the given periodic definition")
 	listCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 
 	daemonCmd.AddCommand(daemonStartCmd)

@@ -101,6 +101,75 @@ type ProjectConfig struct {
 	WorktreeSetupCommands    []string                `yaml:"worktree-setup-commands"`
 	TmuxSetupCommand         string                  `yaml:"tmux-setup-command"`
 	Options                  *OptionsConfig          `yaml:"options,omitempty"`
+	// Periodic defines scheduled tasks that the daemon materializes as ordinary
+	// tasks rows on a cron/@every cadence. Top-level (sibling to workflows:).
+	// See PeriodicEntry.
+	Periodic []PeriodicEntry `yaml:"periodic,omitempty"`
+}
+
+// PeriodicEntry is a single scheduled-task definition under the top-level
+// periodic: key in .sakusen.yml. Each entry pairs a cadence (standard 5-field
+// cron or @every/descriptor) with EITHER a workflow reference (Workflow) OR
+// inline steps (Steps) — exactly one must be set (enforced in validation).
+//
+// Inline-step entries are registered with the engine as a hidden workflow named
+// "periodic:<name>" (same "<prefix>:<name>" shape as track workflows; a track
+// slugged "periodic" whose workflow name collides with a periodic entry name is
+// rejected as a workflow-name collision at load time). Ref-mode entries reuse
+// an existing workflow by name.
+type PeriodicEntry struct {
+	Name        string `yaml:"name"`
+	Cadence     string `yaml:"cadence"`
+	Description string `yaml:"description,omitempty"`
+
+	// Workflow references an existing workflow by name (ref mode). Mutually
+	// exclusive with Steps.
+	Workflow string `yaml:"workflow,omitempty"`
+
+	// Steps defines an inline workflow (inline mode). Mutually exclusive with
+	// Workflow. Registered as the hidden workflow "periodic:<name>".
+	Steps []StepConfig `yaml:"steps,omitempty"`
+
+	// Agent is the inline-workflow agent slug default (see WorkflowConfig.Agent).
+	// Ignored in ref mode.
+	Agent string `yaml:"agent,omitempty"`
+
+	// SummarizerPrompt is the inline-workflow summarizer prompt. Ignored in ref mode.
+	SummarizerPrompt string `yaml:"summarizer_prompt,omitempty"`
+
+	// Input becomes the task input ({{task.input}}) for each fire. Optional —
+	// when empty, no step prompt of the effective workflow may reference
+	// {{task.input}} (enforced in validation).
+	Input string `yaml:"input,omitempty"`
+
+	// Priority for materialized tasks. Empty falls back to the project default
+	// at fire time (resolved in createTaskFromRequest, not at reconcile, so a
+	// changed project default takes effect without touching .sakusen.yml).
+	Priority string `yaml:"priority,omitempty"`
+
+	// Paused, when true, keeps the definition registered but prevents fires.
+	Paused bool `yaml:"paused,omitempty"`
+}
+
+// UnmarshalYAML decodes a PeriodicEntry and rejects the removed `tmux:` and
+// `print:` fields with the same migration errors as workflows.
+func (p *PeriodicEntry) UnmarshalYAML(value *yaml.Node) error {
+	if err := checkRemovedModeFields(value, "periodic"); err != nil {
+		return err
+	}
+	type raw PeriodicEntry
+	var r raw
+	if err := value.Decode(&r); err != nil {
+		return err
+	}
+	*p = PeriodicEntry(r)
+	return nil
+}
+
+// InlineWorkflowName returns the engine-registered hidden workflow name for an
+// inline-mode periodic entry.
+func (p *PeriodicEntry) InlineWorkflowName() string {
+	return "periodic:" + p.Name
 }
 
 // WorkflowEntry is a single item in the flat workflows: list. It is either
@@ -680,6 +749,7 @@ type Config struct {
 	// Populated by the loader.
 	OnCompleteFromProject bool
 	Workflows             []WorkflowConfig // flat resolved workflow list
+	Periodic              []PeriodicEntry  // scheduled-task definitions (top-level periodic: section)
 
 	// Agents is the merged agent registry (global tier overlaid by the
 	// project tier, per slug). See AgentConfig and Config.StepAgent. After

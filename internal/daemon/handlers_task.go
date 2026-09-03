@@ -172,7 +172,10 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		targetBranch = wf.Target
 	}
 
-	if input == "" && checkoutBranch == "" && !tmuxFirst {
+	// Periodic fires are exempt from the empty-input rule: a periodic entry
+	// without `input` is validated at config load to never reference
+	// {{task.input}} in its step prompts.
+	if input == "" && checkoutBranch == "" && !tmuxFirst && req.PeriodicID == nil {
 		return nil, "", fmt.Errorf("input cannot be empty")
 	}
 
@@ -228,16 +231,21 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	// Persist form preferences for this project. Only user-driven choices
 	// (explicit request values) should overwrite the saved project defaults —
 	// pin-derived worktree values must not leak into the persisted default.
-	persistWorktree := proj.DefaultWorktree
-	if req.Worktree != nil {
-		persistWorktree = *req.Worktree
-	}
-	branchMode := 0
-	if req.BranchMode != nil {
-		branchMode = *req.BranchMode
-	}
-	if err := s.database.UpdateProjectDefaults(proj.ID, persistWorktree, branchMode, req.Workflow); err != nil {
-		log.Printf("%sFailed to update project defaults for project %d: %v", s.projectLogPrefix(proj.ID), proj.ID, err)
+	// Skipped for scheduler-materialized periodic fires — those must not
+	// clobber the user's interactive "new task" defaults (worktree / branch
+	// mode / workflow).
+	if req.PeriodicID == nil {
+		persistWorktree := proj.DefaultWorktree
+		if req.Worktree != nil {
+			persistWorktree = *req.Worktree
+		}
+		branchMode := 0
+		if req.BranchMode != nil {
+			branchMode = *req.BranchMode
+		}
+		if err := s.database.UpdateProjectDefaults(proj.ID, persistWorktree, branchMode, req.Workflow); err != nil {
+			log.Printf("%sFailed to update project defaults for project %d: %v", s.projectLogPrefix(proj.ID), proj.ID, err)
+		}
 	}
 
 	var trackID *int64
@@ -247,6 +255,15 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	t, err := s.database.CreateTaskWithPriority(proj.ID, title, input, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create task: %v", err)
+	}
+
+	// Link the task to its periodic definition (scheduler-materialized fires).
+	if req.PeriodicID != nil {
+		if err := s.database.SetTaskPeriodicID(t.ID, *req.PeriodicID); err != nil {
+			log.Printf("%sFailed to set periodic_id for task #%d: %v", s.projectLogPrefix(proj.ID), t.ID, err)
+		} else if updated, err := s.database.GetTask(t.ID); err == nil {
+			t = updated
+		}
 	}
 
 	// Merge auto-blockers (from {{tasks.<id>.<field>}} refs) into req.BlockedBy,

@@ -155,6 +155,14 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case key.Matches(msg, m.keys.Periodics):
+		if m.client != nil && m.projectPath != "" {
+			m.view = viewPeriodicList
+			m.periodic.loading = true
+			return m, m.loadPeriodics()
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.Revert):
 		if task := m.list.Selected(); task != nil && m.client != nil {
 			if taskpkg.Status(task.Status) == taskpkg.StatusCompleted || taskpkg.Status(task.Status) == taskpkg.StatusFailed {

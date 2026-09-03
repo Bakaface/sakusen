@@ -11,6 +11,7 @@ type keyMap struct {
 	Logs             key.Binding
 	Stop             key.Binding
 	Retry            key.Binding
+	Periodics        key.Binding
 	Delete           key.Binding
 	NewTask          key.Binding
 	NewBlockingTask  key.Binding
@@ -67,6 +68,10 @@ func newKeyMap() keyMap {
 		Retry: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "retry"),
+		),
+		Periodics: key.NewBinding(
+			key.WithKeys("P"),
+			key.WithHelp("P", "periodics"),
 		),
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
@@ -194,7 +199,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.PageUp, k.PageDown, k.GotoTop, k.GotoBottom, k.GotoTask, k.SearchForward, k.SearchBackward, k.NextMatch, k.PrevMatch, k.Enter, k.Logs},
-		{k.NewTask, k.NewBlockingTask, k.BranchTask, k.ToggleBranchView, k.Stop, k.Retry, k.Revert, k.Continue, k.ChangePriority, k.Delete, k.Attach, k.DetachBranch, k.AttachBranch, k.OpenArtifact, k.EditArtifact, k.EditDesc, k.EditTitle, k.EditContext, k.Refresh},
+		{k.NewTask, k.NewBlockingTask, k.BranchTask, k.ToggleBranchView, k.Periodics, k.Stop, k.Retry, k.Revert, k.Continue, k.ChangePriority, k.Delete, k.Attach, k.DetachBranch, k.AttachBranch, k.OpenArtifact, k.EditArtifact, k.EditDesc, k.EditTitle, k.EditContext, k.Refresh},
 		{k.Back, k.Quit, k.Help},
 	}
 }

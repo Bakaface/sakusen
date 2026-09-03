@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -184,6 +186,23 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 
 	var diagnostics []Diagnostic
 
+	// Sub-minute @every cadences parse fine but the scheduler polls on a 30s
+	// tick, so they are observed at tick resolution — surface that as a
+	// warning rather than silently under-delivering.
+	for i := range cfg.Periodic {
+		p := &cfg.Periodic[i]
+		if rest, ok := strings.CutPrefix(p.Cadence, "@every "); ok {
+			if d, err := time.ParseDuration(strings.TrimSpace(rest)); err == nil && d < time.Minute {
+				diagnostics = append(diagnostics, Diagnostic{
+					Severity: "warning",
+					Message: fmt.Sprintf(
+						"periodic %q: sub-minute cadence %q is observed at the scheduler's ~30s tick resolution, not to the second",
+						p.Name, p.Cadence),
+				})
+			}
+		}
+	}
+
 	// When on-disk files exist but .sakusen.yml has no workflows listing, every
 	// file becomes hidden — surface a single aggregate warning rather than one
 	// per file (which would all describe the same oversight).
@@ -207,6 +226,86 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	}
 
 	return diagnostics, nil
+}
+
+// validatePeriodic checks the resolved periodic definitions for correctness:
+//  1. cadence parses with the periodic cron parser
+//  2. exactly one of workflow / steps is set
+//  3. ref-mode: the referenced workflow exists
+//  4. when input is empty, no step prompt of the effective workflow may
+//     reference {{task.input}} (it would resolve to the empty string)
+//  5. names are unique and non-empty
+func validatePeriodic(cfg *Config) error {
+	seen := make(map[string]bool, len(cfg.Periodic))
+	for i := range cfg.Periodic {
+		p := &cfg.Periodic[i]
+		if p.Name == "" {
+			return fmt.Errorf("periodic: entry %d is missing a name", i)
+		}
+		if seen[p.Name] {
+			return fmt.Errorf("periodic: duplicate name %q", p.Name)
+		}
+		seen[p.Name] = true
+
+		if p.Cadence == "" {
+			return fmt.Errorf("periodic %q: cadence is required", p.Name)
+		}
+		if _, err := ParsePeriodicCadence(p.Cadence); err != nil {
+			return fmt.Errorf("periodic %q: invalid cadence %q: %w", p.Name, p.Cadence, err)
+		}
+
+		hasWorkflow := p.Workflow != ""
+		hasSteps := len(p.Steps) > 0
+		switch {
+		case hasWorkflow && hasSteps:
+			return fmt.Errorf("periodic %q: set exactly one of `workflow` or `steps`, not both", p.Name)
+		case !hasWorkflow && !hasSteps:
+			return fmt.Errorf("periodic %q: set exactly one of `workflow` or `steps`", p.Name)
+		}
+
+		if p.Priority != "" && !validPriorities[p.Priority] {
+			return fmt.Errorf("periodic %q: invalid priority %q (must be \"low\", \"medium\", \"high\", or \"urgent\")", p.Name, p.Priority)
+		}
+
+		// Resolve the effective steps for the empty-input guard. A ref-mode
+		// workflow with its own input pin (WorkflowConfig.Input) satisfies the
+		// guard too — createTaskFromRequest falls back to the pin when the
+		// request input is empty.
+		var steps []StepConfig
+		inputPinned := false
+		if hasWorkflow {
+			wf := findWorkflowByName(cfg, p.Workflow)
+			if wf == nil {
+				return fmt.Errorf("periodic %q: referenced workflow %q does not exist", p.Name, p.Workflow)
+			}
+			steps = wf.Steps
+			inputPinned = wf.Input != ""
+		} else {
+			steps = p.Steps
+		}
+
+		if p.Input == "" && !inputPinned {
+			for _, step := range steps {
+				if strings.Contains(step.Prompt, "{{task.input}}") {
+					return fmt.Errorf("periodic %q: step %q references {{task.input}} but no `input` is set", p.Name, step.Name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// findWorkflowByName locates a workflow by an exact name match in the resolved
+// flat engine list (cfg.Workflows — which also carries hidden entries such as
+// "periodic:<name>" inline workflows and "<slug>:<name>" track workflows). It
+// does NOT add or strip prefixes.
+func findWorkflowByName(cfg *Config, name string) *WorkflowConfig {
+	for i := range cfg.Workflows {
+		if cfg.Workflows[i].Name == name {
+			return &cfg.Workflows[i]
+		}
+	}
+	return nil
 }
 
 // validateUniqueNames ensures workflow names are unique across the flat list and

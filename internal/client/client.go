@@ -930,6 +930,72 @@ func (c *Client) ListWorkflows(projectPath string) (*daemon.ListWorkflowsRespons
 	return &resp, nil
 }
 
+// ListPeriodics returns the periodic definitions registered for a project.
+func (c *Client) ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error) {
+	msg, err := c.request(daemon.MsgListPeriodics, daemon.ListPeriodicsRequest{ProjectPath: projectPath})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.ListPeriodicsResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return resp.Periodics, nil
+}
+
+// GetPeriodic returns a single periodic definition by id.
+func (c *Client) GetPeriodic(id int64) (*daemon.PeriodicInfo, error) {
+	msg, err := c.request(daemon.MsgGetPeriodic, daemon.GetPeriodicRequest{ID: id})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.GetPeriodicResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp.Periodic, nil
+}
+
+// SetPeriodicPaused toggles the paused flag for a periodic definition.
+func (c *Client) SetPeriodicPaused(id int64, paused bool) (*daemon.PeriodicInfo, error) {
+	msg, err := c.request(daemon.MsgSetPeriodicPaused, daemon.SetPeriodicPausedRequest{ID: id, Paused: paused})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.SetPeriodicPausedResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp.Periodic, nil
+}
+
+// ListPeriodicRuns returns the tasks materialized by a periodic definition.
+func (c *Client) ListPeriodicRuns(periodicID int64) ([]daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgListPeriodicRuns, daemon.ListPeriodicRunsRequest{PeriodicID: periodicID})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.ListPeriodicRunsResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return resp.Tasks, nil
+}
+
+// FirePeriodicNow triggers an immediate one-shot fire of a periodic definition
+// without advancing its schedule.
+func (c *Client) FirePeriodicNow(id int64) (*daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgFirePeriodicNow, daemon.FirePeriodicNowRequest{ID: id})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.FirePeriodicNowResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp.Task, nil
+}
+
 func ParseAgentUpdate(msg *daemon.Message) (*daemon.AgentInfo, error) {
 	if msg.Type != daemon.MsgAgentUpdate {
 		return nil, fmt.Errorf("not an agent update message")

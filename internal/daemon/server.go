@@ -95,6 +95,21 @@ type Server struct {
 	taskFlowMu    sync.Mutex
 	taskFlowLocks map[int64]*sync.Mutex
 
+	// periodicMu guards periodicReconciled.
+	periodicMu sync.Mutex
+	// periodicReconciled maps projectID → the .sakusen.yml mod-time at the last
+	// successful periodic reconcile. The scheduler uses it to skip reconciling
+	// projects whose config has not changed since the previous pass.
+	periodicReconciled map[int64]time.Time
+
+	// periodicReconcileMu serializes the reconcile body itself. The scheduler
+	// loop and handleListPeriodics can both call reconcilePeriodicsForProject
+	// concurrently; without this, two callers racing on a brand-new entry both
+	// observe ErrNoRows in the non-atomic UpsertPeriodicDef and both INSERT, so
+	// the loser hits UNIQUE(project_id,name) and logs a spurious error. Held
+	// across the (mod-time-gated, infrequent) DB writes — never with periodicMu.
+	periodicReconcileMu sync.Mutex
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -124,21 +139,22 @@ func NewServer(cfg *config.Config, database taskStore) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	notifier := notify.New(&cfg.Notifications)
 	return &Server{
-		cfg:           cfg,
-		database:      database,
-		manager:       agent.NewManager(cfg.MaxWorkers, config.DefaultOutputBufferLines),
-		notifier:      notifier,
-		projects:      make(map[int64]*projectContext),
-		mergeLocks:    merge.NewLocks(),
-		clients:       make(map[net.Conn]bool),
-		subscribers:   make(map[net.Conn]bool),
-		tmuxActivity:  make(map[int64]string),
-		tmuxAutoState: make(map[int64]*tmuxAutoEntry),
-		enginePaused:  make(map[int64]bool),
-		taskFlowLocks: make(map[int64]*sync.Mutex),
-		ctx:           ctx,
-		cancel:        cancel,
-		shutdownDone:  make(chan struct{}),
+		cfg:                cfg,
+		database:           database,
+		manager:            agent.NewManager(cfg.MaxWorkers, config.DefaultOutputBufferLines),
+		notifier:           notifier,
+		projects:           make(map[int64]*projectContext),
+		mergeLocks:         merge.NewLocks(),
+		clients:            make(map[net.Conn]bool),
+		subscribers:        make(map[net.Conn]bool),
+		tmuxActivity:       make(map[int64]string),
+		tmuxAutoState:      make(map[int64]*tmuxAutoEntry),
+		enginePaused:       make(map[int64]bool),
+		taskFlowLocks:      make(map[int64]*sync.Mutex),
+		periodicReconciled: make(map[int64]time.Time),
+		ctx:                ctx,
+		cancel:             cancel,
+		shutdownDone:       make(chan struct{}),
 	}
 }
 
@@ -391,6 +407,8 @@ func (s *Server) Start() error {
 		log.Printf("Warning: failed to recover orphaned tasks: %v", err)
 	}
 
+	s.checkPeriodicCatchup()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -408,6 +426,9 @@ func (s *Server) Start() error {
 
 	s.wg.Add(1)
 	go s.tmuxMonitorLoop()
+
+	s.wg.Add(1)
+	go s.periodicSchedulerLoop()
 
 	log.Printf("Daemon started, listening on %s (pid=%d, ppid=%d)", s.cfg.SocketPath, os.Getpid(), os.Getppid())
 
@@ -700,6 +721,46 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 			return
 		}
 		s.handleWaitForTasks(conn, req)
+
+	case MsgListPeriodics:
+		var req ListPeriodicsRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleListPeriodics(conn, req)
+
+	case MsgGetPeriodic:
+		var req GetPeriodicRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleGetPeriodic(conn, req)
+
+	case MsgSetPeriodicPaused:
+		var req SetPeriodicPausedRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleSetPeriodicPaused(conn, req)
+
+	case MsgListPeriodicRuns:
+		var req ListPeriodicRunsRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleListPeriodicRuns(conn, req)
+
+	case MsgFirePeriodicNow:
+		var req FirePeriodicNowRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleFirePeriodicNow(conn, req)
 
 	case MsgCreateTrack:
 		var req CreateTrackRequest

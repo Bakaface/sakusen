@@ -31,6 +31,10 @@ type fakeTaskService struct {
 
 	listTasksFiltered      func(int64) ([]daemon.TaskInfo, error)
 	listTasksByProjectName func(string) ([]daemon.TaskInfo, error)
+	listPeriodics          func(string) ([]daemon.PeriodicInfo, error)
+	listPeriodicRuns       func(int64) ([]daemon.TaskInfo, error)
+	setPeriodicPaused      func(int64, bool) (*daemon.PeriodicInfo, error)
+	firePeriodicNow        func(int64) (*daemon.TaskInfo, error)
 	getTaskSteps           func(int64) ([]daemon.TaskStepDetail, error)
 	updateStepContext      func(int64, string, string) error
 	advanceTask            func(int64) (string, error)
@@ -173,6 +177,34 @@ func (f *fakeTaskService) AdvanceTask(id int64) (string, error) {
 		return "", errNotStubbedTUI
 	}
 	return f.advanceTask(id)
+}
+
+func (f *fakeTaskService) ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error) {
+	if f.listPeriodics == nil {
+		return nil, errNotStubbedTUI
+	}
+	return f.listPeriodics(projectPath)
+}
+
+func (f *fakeTaskService) ListPeriodicRuns(periodicID int64) ([]daemon.TaskInfo, error) {
+	if f.listPeriodicRuns == nil {
+		return nil, errNotStubbedTUI
+	}
+	return f.listPeriodicRuns(periodicID)
+}
+
+func (f *fakeTaskService) SetPeriodicPaused(id int64, paused bool) (*daemon.PeriodicInfo, error) {
+	if f.setPeriodicPaused == nil {
+		return nil, errNotStubbedTUI
+	}
+	return f.setPeriodicPaused(id, paused)
+}
+
+func (f *fakeTaskService) FirePeriodicNow(id int64) (*daemon.TaskInfo, error) {
+	if f.firePeriodicNow == nil {
+		return nil, errNotStubbedTUI
+	}
+	return f.firePeriodicNow(id)
 }
 
 func (f *fakeTaskService) Connect() error {

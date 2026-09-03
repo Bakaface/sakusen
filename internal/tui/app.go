@@ -23,6 +23,8 @@ const (
 	viewPrompt
 	viewArtifact
 	viewSakusen
+	viewPeriodicList
+	viewPeriodicRuns
 )
 
 type Model struct {
@@ -100,6 +102,9 @@ type Model struct {
 	searchQuery     string
 	searchDirection int // 1 for forward (/), -1 for backward (?)
 	searchHistory   inputHistory
+
+	// Periodic views state (read + pause/run-now surface)
+	periodic periodicViewState
 }
 
 type clientConnectedMsg struct {
@@ -223,6 +228,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tasksLoadedMsg:
 		m.list.refreshing = false
 		m.list.SetTasks(msg)
+		return m, nil
+
+	case periodicsLoadedMsg:
+		m.periodic.loading = false
+		m.periodic.defs = []daemon.PeriodicInfo(msg)
+		if m.periodic.cursor >= len(m.periodic.defs) {
+			m.periodic.cursor = len(m.periodic.defs) - 1
+		}
+		if m.periodic.cursor < 0 {
+			m.periodic.cursor = 0
+		}
+		return m, nil
+
+	case periodicRunsLoadedMsg:
+		m.periodic.runsLoading = false
+		m.periodic.runs = []daemon.TaskInfo(msg)
+		if m.periodic.runsCursor >= len(m.periodic.runs) {
+			m.periodic.runsCursor = len(m.periodic.runs) - 1
+		}
+		if m.periodic.runsCursor < 0 {
+			m.periodic.runsCursor = 0
+		}
 		return m, nil
 
 	case taskUpdateMsg:
@@ -494,6 +521,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePromptKey(msg)
 	case viewArtifact:
 		return m.handleArtifactViewKey(msg)
+	case viewPeriodicList:
+		return m.handlePeriodicListKey(msg)
+	case viewPeriodicRuns:
+		return m.handlePeriodicRunsKey(msg)
 	case viewSakusen:
 		// Any keypress skips the animation
 		m.view = viewList
@@ -536,6 +567,15 @@ func (m Model) View() string {
 	// Show artifact-view help overlay
 	if m.artifactView.showHelp && m.view == viewArtifact {
 		return m.renderArtifactHelpOverlay()
+	}
+
+	// Periodic views are full-screen and render independently of the list/
+	// selector machinery below.
+	if m.view == viewPeriodicList {
+		return m.renderPeriodicList()
+	}
+	if m.view == viewPeriodicRuns {
+		return m.renderPeriodicRuns()
 	}
 
 	// Show selection dialog

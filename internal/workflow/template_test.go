@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/task"
 )
@@ -246,5 +247,26 @@ func TestValidateTaskRefs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "title") {
 		t.Errorf("error should list supported fields: %v", err)
+	}
+}
+
+func TestResolveTemplate_Now(t *testing.T) {
+	ctx := &TemplateContext{}
+	out := ResolveTemplate("fired at {{now}}", ctx)
+	const prefix = "fired at "
+	if !strings.HasPrefix(out, prefix) {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	ts := strings.TrimPrefix(out, prefix)
+	if _, err := time.Parse(time.RFC3339, ts); err != nil {
+		t.Fatalf("{{now}} did not resolve to RFC3339: %q (%v)", ts, err)
+	}
+}
+
+func TestResolveTemplate_NowDoesNotAffectOtherVars(t *testing.T) {
+	ctx := &TemplateContext{Task: TaskVars{Title: "hello"}}
+	out := ResolveTemplate("{{task.title}} {{unknown}}", ctx)
+	if out != "hello {{unknown}}" {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }

@@ -58,6 +58,12 @@ const (
 
 	MsgSetTrackDescription        MessageType = "set_track_description"         // CLI: arbitrary track by ref
 	MsgUpdateTaskTrackDescription MessageType = "update_task_track_description" // MCP: own-track-only via task_id
+
+	MsgListPeriodics     MessageType = "list_periodics"
+	MsgGetPeriodic       MessageType = "get_periodic"
+	MsgSetPeriodicPaused MessageType = "set_periodic_paused"
+	MsgListPeriodicRuns  MessageType = "list_periodic_runs"
+	MsgFirePeriodicNow   MessageType = "fire_periodic_now"
 )
 
 // IsBroadcast reports whether t is a message type the daemon pushes to
@@ -168,6 +174,8 @@ type CreateTaskRequest struct {
 	// "none" means explicitly trackless — meaningful for create_tasks_and_wait
 	// children, which otherwise inherit the parent task's track.
 	Track string `json:"track,omitempty"`
+	// PeriodicID is set by the scheduler when materializing a periodic fire.
+	PeriodicID *int64 `json:"periodic_id,omitempty"`
 }
 
 type ContinueTaskRequest struct {
@@ -573,6 +581,68 @@ type TaskInfo struct {
 	// tmux steps render as running with a [T] postfix.
 	StepHuman  bool      `json:"step_human,omitempty"`
 	LatestChat *ChatInfo `json:"latest_chat,omitempty"`
+	// PeriodicID is set when the task was materialized by a periodic definition.
+	PeriodicID *int64 `json:"periodic_id,omitempty"`
+}
+
+// PeriodicInfo is the client-facing projection of a periodic_definitions row.
+type PeriodicInfo struct {
+	ID          int64      `json:"id"`
+	ProjectID   int64      `json:"project_id"`
+	ProjectName string     `json:"project_name,omitempty"`
+	ProjectPath string     `json:"project_path,omitempty"`
+	Name        string     `json:"name"`
+	Cadence     string     `json:"cadence"`
+	WorkflowRef string     `json:"workflow_ref,omitempty"` // empty ⇒ inline
+	Inline      bool       `json:"inline"`                 // true when steps are inline (no workflow_ref)
+	Input       string     `json:"input,omitempty"`
+	Priority    string     `json:"priority"` // empty ⇒ project default at fire time
+	Paused      bool       `json:"paused"`
+	NextFireAt  time.Time  `json:"next_fire_at"`
+	LastFiredAt *time.Time `json:"last_fired_at,omitempty"`
+	LastTaskID  *int64     `json:"last_task_id,omitempty"`
+}
+
+type ListPeriodicsRequest struct {
+	ProjectPath string `json:"project_path,omitempty"`
+	ProjectID   int64  `json:"project_id,omitempty"`
+}
+
+type ListPeriodicsResponse struct {
+	Periodics []PeriodicInfo `json:"periodics"`
+}
+
+type GetPeriodicRequest struct {
+	ID int64 `json:"id"`
+}
+
+type GetPeriodicResponse struct {
+	Periodic PeriodicInfo `json:"periodic"`
+}
+
+type SetPeriodicPausedRequest struct {
+	ID     int64 `json:"id"`
+	Paused bool  `json:"paused"`
+}
+
+type SetPeriodicPausedResponse struct {
+	Periodic PeriodicInfo `json:"periodic"`
+}
+
+type ListPeriodicRunsRequest struct {
+	PeriodicID int64 `json:"periodic_id"`
+}
+
+type ListPeriodicRunsResponse struct {
+	Tasks []TaskInfo `json:"tasks"`
+}
+
+type FirePeriodicNowRequest struct {
+	ID int64 `json:"id"`
+}
+
+type FirePeriodicNowResponse struct {
+	Task TaskInfo `json:"task"`
 }
 
 type TaskListResponse struct {
