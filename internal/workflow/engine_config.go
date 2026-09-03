@@ -80,19 +80,14 @@ func (e *engineConfig) StepAgent(wf *config.WorkflowConfig, step *config.StepCon
 	return e.full.StepAgent(wf, step)
 }
 
-// WorkflowAgent resolves the workflow-level agent record (workflow.agent →
-// default_agent → "claude"). Used by paths that need an agent without a
-// concrete step (merge conflict resolution).
-func (e *engineConfig) WorkflowAgent(wf *config.WorkflowConfig) (string, config.AgentConfig, error) {
-	return e.full.StepAgent(wf, nil)
+// MergeConflictAgent resolves the headless agent that fixes merge conflicts
+// (merge_conflict_agent → workflow.agent → default_agent → "claude").
+// See config.Config.MergeConflictAgentFor.
+func (e *engineConfig) MergeConflictAgent(wf *config.WorkflowConfig) (string, config.AgentConfig, error) {
+	return e.full.MergeConflictAgentFor(wf)
 }
 
 // StepIsTmux reports whether a step resolves to a tmux-mode agent.
 func (e *engineConfig) StepIsTmux(wf *config.WorkflowConfig, step *config.StepConfig) bool {
 	return e.full.StepIsTmux(wf, step)
-}
-
-// ResolveAgent looks up an agent record by slug.
-func (e *engineConfig) ResolveAgent(slug string) (config.AgentConfig, bool) {
-	return e.full.ResolveAgent(slug)
 }

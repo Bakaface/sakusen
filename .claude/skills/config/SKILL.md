@@ -34,6 +34,7 @@ type ProjectConfig struct {
     Git                      GitConfig               // BaseBranch, BranchTemplate
     Agents                   map[string]AgentConfig  // Project-tier agent registry (slug → record)
     DefaultAgent             string                  // Fallback agent slug; empty → "claude"
+    MergeConflictAgent       string                  // Headless agent slug for conflict resolution
     Summarizer               *SummarizerConfig       // Utility LLM command (summaries, titles)
     OnComplete               string                  // Top-level finalization action (moved out of git:)
     Workflows                []WorkflowEntry         `yaml:"workflows"` // flat list (string ref or inline)
@@ -118,12 +119,14 @@ type GlobalConfig struct {
     Options                  *OptionsConfig
     Agents                   map[string]AgentConfig
     DefaultAgent             string
+    MergeConflictAgent       string
     Summarizer               *SummarizerConfig
 }
 ```
 
 The merged runtime `Config` (in `types.go`) flattens project + global settings and also holds
-the merged `Agents` registry, `DefaultAgent`, `Summarizer`, and the resolved `WorktreeSyncPaths`.
+the merged `Agents` registry, `DefaultAgent`, `MergeConflictAgent`, `Summarizer`, and the
+resolved `WorktreeSyncPaths`.
 
 ### Agents (agents.go)
 
@@ -134,6 +137,7 @@ type AgentConfig struct {
     ResumeCommand  string            // tmux-only: resume with SAKUSEN_SESSION_ID after daemon restart
     ChatLogCommand string            // tmux-only: prints the chat log on stdout for summarize_chat
     Env            map[string]string // extra env for every spawn of this agent
+    Prompt         string            // standing preamble composed into every prompt this agent runs
 }
 
 type SummarizerConfig struct {
@@ -149,6 +153,17 @@ Resolution cascade (`Config.StepAgent(wf, &step)`): `step.agent` → `workflow.a
 top-level `default_agent:` → `"claude"` (`DefaultAgentSlug`). Helpers: `StepAgentSlug`,
 `WorkflowAgentSlug`, `StepIsTmux`, `FirstStepIsTmux`, `ResolveAgent`,
 `EffectiveDefaultAgentSlug`. The agent's mode decides headless vs tmux execution.
+
+`Prompt` is a standing preamble the workflow engine composes into every prompt the agent runs
+(steps in both modes, plus the merge-conflict resolver): the base prompt is spliced at every
+`{{prompt}}` occurrence, or appended after a blank line when the placeholder is absent.
+Composition happens on raw templates, so the agent prompt may use the same `{{...}}` variables
+a step prompt can. Variants override it wholesale; aliases carry it like any other field.
+
+The merge-conflict resolver has its own cascade (`Config.MergeConflictAgentFor(wf)`): top-level
+`merge_conflict_agent:` → `workflow.agent` → `default_agent:` → `"claude"`. The tmux→`"claude"`
+fallback applies only to the lower tiers; an explicit `merge_conflict_agent:` must resolve and
+must be headless (both checked at load in `validateAgentRefs`).
 
 Merging: `mergeAgents` overlays project-tier records onto global-tier per slug (a redefined
 slug wins wholesale). `validateAgents` runs in `Load()`/`LoadForProject()` AFTER all tiers

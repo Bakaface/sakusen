@@ -67,8 +67,9 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `max_workers` | int | `3` | Max concurrent agents |
 | `default_priority` | string | `"medium"` | `low`, `medium`, `high`, `urgent` |
 | `poll_interval` | string | `"5s"` | Daemon task-polling cadence (Go duration string). Rarely overridden per-project. |
-| `agents` | map | — | **Agent registry** — slug → agent record (`mode`, `command`, `resume_command`, `chat_log_command`, `env`). See [Agents](#agents). |
+| `agents` | map | — | **Agent registry** — slug → agent record (`mode`, `command`, `resume_command`, `chat_log_command`, `env`, `prompt`). See [Agents](#agents). |
 | `default_agent` | string | `"claude"` | Agent slug steps fall back to when neither the step nor the workflow sets `agent:`. |
+| `merge_conflict_agent` | string | — | Agent slug that resolves merge conflicts. Must be headless. Unset → the workflow's agent (falling back to `"claude"` when that agent is tmux-mode). |
 | `summarizer` | object | — | Utility LLM command for summaries and AI titles/slugs (`command`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`). See [Summarizer](#summarizer). |
 | `verification` | object | — | Summarizer verification settings (`max_retries`, `verify_summarizer`) |
 | `git` | object | — | Branch naming, base branch |
@@ -88,7 +89,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 |---|---|
 | `claude:` | Define agents under the `agents:` map (`sakusen init` scaffolds claude records) |
 | `yolo:` | Put permission flags (e.g. `--dangerously-skip-permissions`) directly in the agent's `command` |
-| `system_prompt:` | Bake system-prompt flags into the agent's `command` (e.g. `claude --append-system-prompt "..."`) or fold the text into step prompts |
+| `system_prompt:` | Set `prompt:` on the agent record under `agents:` (a standing preamble composed into every prompt that agent runs), bake system-prompt flags into the agent's `command` (e.g. `claude --append-system-prompt "..."`), or fold the text into step prompts |
 | `allowed_summarization_models:` (top-level and step-level) | The `summarizer:` command; pick the model inside that command |
 | `print:` (workflow and step level) | `agent: <slug>` where the agent's `mode` is `headless` (was `print: true`) or `tmux` (was `print: false`) |
 | `tmux:` (workflow and step level) | Same — the agent record's `mode` |
@@ -135,9 +136,41 @@ Agent record fields:
 | `resume_command` | tmux only | When set, restored sessions after a daemon restart run this with `SAKUSEN_SESSION_ID` set to the recorded session id instead of starting fresh. |
 | `chat_log_command` | tmux only | When set, run to obtain the step's conversation log (printed on stdout) for the `summarize_chat` strategy. Env: `SAKUSEN_SESSION_ID`, plus `SAKUSEN_SENTINEL_FILE` / `SAKUSEN_TRANSCRIPT_PATH` from the latest turn-end sentinel. |
 | `env` | both | Extra environment variables for every spawn (command, resume, chat-log alike). Cannot override `SAKUSEN_*` contract vars. |
+| `prompt` | both | Standing preamble composed into every prompt this agent runs. See [Agent prompts](#agent-prompts). |
 | `variants` | both | Named child configs (variant name → partial record) inheriting every parent field. See Variants below. |
 
 **Selection cascade:** step `agent:` → workflow `agent:` → top-level `default_agent:` → the `"claude"` slug. Explicit references to unknown slugs are load errors; the implicit `"claude"` fallback may be missing at load time (steps then fail at run time with a pointer to `sakusen init`).
+
+### Agent prompts
+
+`prompt:` on an agent record is a standing preamble composed into **every** prompt that agent runs — every workflow step (headless and tmux alike) and, when the agent is the merge-conflict resolver, the conflict-resolution prompt. Use it for methodology that belongs to the agent rather than to any one step, instead of repeating it in each step's `prompt:`.
+
+```yaml
+agents:
+  claude:
+    command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-headless.sh"'
+    variants:
+      lazy-first:
+        prompt: |
+          Before writing code, look for the laziest correct solution:
+          reuse what exists, delete before you add, and prefer the smallest
+          diff that fully solves the problem. Explain the shortcut you took.
+
+          {{prompt}}
+```
+
+Composition rules:
+
+- The literal placeholder `{{prompt}}` is where the step's (or conflict resolver's) own prompt is spliced in — every occurrence is substituted.
+- Without the placeholder, that prompt is **appended** after a blank line (`<agent prompt>\n\n<step prompt>`).
+- Composition happens before template resolution, so the agent prompt may use the same `{{...}}` variables a step prompt can (`{{task.title}}`, `{{git.base_branch}}`, `{{steps.<name>.context}}`, `{{track.context}}`, …). On the merge-conflict path there is no step to draw from, so only `{{task.*}}` and `{{git.*}}` have values — everything else resolves to `""`.
+- `{{prompt}}` is **not** a general template variable: written in a step's `prompt:` it stays verbatim.
+- An empty or absent `prompt:` leaves the base prompt untouched.
+- Variants override `prompt:` wholesale (empty inherits, and a variant cannot unset it); aliases carry it like any other field.
+
+### Merge-conflict agent
+
+The agent that resolves merge conflicts is selected by its own cascade: top-level `merge_conflict_agent:` → workflow `agent:` → `default_agent:` → the `"claude"` slug. The resolver runs a synchronous pass, so the agent must be headless — for the lower cascade tiers a tmux-mode agent silently falls back to a headless `"claude"` record, while an explicit `merge_conflict_agent:` that is unknown or tmux-mode is a **load error**. `merge_conflict_agent:` merges across tiers like `default_agent:` (more-local non-empty value wins). Point it at a plain agent to keep conflict resolution free of an implementer agent's `prompt:`.
 
 ### Variants
 

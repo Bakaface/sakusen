@@ -32,23 +32,14 @@ func (e *Engine) bindConflictResolver() func(ctx context.Context, t *task.Task, 
 }
 
 // resolveConflicts spawns a headless agent to resolve merge conflicts in the
-// worktree. The agent is resolved at the workflow level (workflow.agent →
-// default_agent → "claude") and must be headless-mode: an interactive tmux
+// worktree. The agent is resolved via merge_conflict_agent → workflow.agent →
+// default_agent → "claude" and must be headless-mode: an interactive tmux
 // agent cannot run a synchronous conflict-resolution pass.
 func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFiles []string, outputFn func([]string)) error {
 	wf := e.cfg.GetWorkflow(t.Workflow)
-	slug, agent, err := e.cfg.WorkflowAgent(wf)
+	slug, agent, err := e.cfg.MergeConflictAgent(wf)
 	if err != nil {
 		return fmt.Errorf("failed to resolve merge conflicts: %w", err)
-	}
-	if agent.IsTmux() {
-		// Fall back to the implicit default headless agent when the workflow's
-		// agent is interactive.
-		if fallback, ok := e.cfg.ResolveAgent(config.DefaultAgentSlug); ok && !fallback.IsTmux() {
-			slug, agent = config.DefaultAgentSlug, fallback
-		} else {
-			return fmt.Errorf("failed to resolve merge conflicts: workflow agent %q is tmux-mode and no headless %q agent is configured", slug, config.DefaultAgentSlug)
-		}
 	}
 	var sb strings.Builder
 	sb.WriteString("You are resolving merge conflicts in an automated merge pipeline.\n\n")
@@ -63,7 +54,24 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 	sb.WriteString("4. Do NOT run `git commit` — the merge commit will be created automatically\n")
 	sb.WriteString("5. Do NOT modify any files that are not conflicted\n")
 	sb.WriteString("6. Verify the code compiles after resolving conflicts (run `go build ./...` or equivalent)\n")
-	prompt := sb.String()
+
+	// No step ran here, so the agent prompt only gets task and git vars —
+	// {{steps.*}} / {{loop.*}} / {{children.*}} / {{track.*}} resolve empty.
+	prompt := ResolveTemplate(ComposeAgentPrompt(agent.Prompt, sb.String()), &TemplateContext{
+		Task: TaskVars{
+			ID:      t.ID,
+			Title:   t.Title,
+			Input:   t.Input,
+			Context: t.Context,
+			Slug:    t.Slug,
+			Branch:  t.Branch,
+		},
+		Git: GitVars{
+			BaseBranch:   e.cfg.BaseBranch,
+			TargetBranch: e.effectiveBaseBranch(t),
+			RepoRoot:     e.repoRoot,
+		},
+	})
 
 	step := config.StepConfig{
 		Name:    "resolve-conflicts",

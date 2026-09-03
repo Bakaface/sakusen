@@ -475,7 +475,18 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		}
 	}
 
-	resolvedPrompt := ResolveTemplate(step.Prompt, tmplCtx)
+	// Resolve the agent that runs this step (step.agent → workflow.agent →
+	// default_agent → "claude"). An unresolvable slug fails the step with an
+	// instructive error instead of spawning anything.
+	agentSlug, agentCfg, agentErr := e.cfg.StepAgent(wf, &step)
+	if agentErr != nil {
+		e.database.UpdateTaskExitCode(t.ID, 1, agentErr.Error())
+		return stepResult{}, fmt.Errorf("step %q failed: %w", step.Name, agentErr)
+	}
+
+	// Compose before resolving so the agent's standing prompt can use the same
+	// template variables as the step prompt, in one pass.
+	resolvedPrompt := ResolveTemplate(ComposeAgentPrompt(agentCfg.Prompt, step.Prompt), tmplCtx)
 
 	// Surface attached images by appending a pointer section to the prompt —
 	// there is no agent-agnostic system-prompt channel to inject them through.
@@ -488,15 +499,6 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 			sb.WriteString("- `" + imgPath + "`\n")
 		}
 		resolvedPrompt = sb.String()
-	}
-
-	// Resolve the agent that runs this step (step.agent → workflow.agent →
-	// default_agent → "claude"). An unresolvable slug fails the step with an
-	// instructive error instead of spawning anything.
-	agentSlug, agentCfg, agentErr := e.cfg.StepAgent(wf, &step)
-	if agentErr != nil {
-		e.database.UpdateTaskExitCode(t.ID, 1, agentErr.Error())
-		return stepResult{}, fmt.Errorf("step %q failed: %w", step.Name, agentErr)
 	}
 
 	// Set environment variables

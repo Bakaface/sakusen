@@ -270,3 +270,60 @@ func TestResolveTemplate_NowDoesNotAffectOtherVars(t *testing.T) {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }
+
+func TestComposeAgentPrompt(t *testing.T) {
+	tests := []struct {
+		name        string
+		agentPrompt string
+		basePrompt  string
+		want        string
+	}{
+		{
+			name:       "empty agent prompt passes the base through",
+			basePrompt: "do the thing",
+			want:       "do the thing",
+		},
+		{
+			name:        "placeholder splices the base in",
+			agentPrompt: "BEFORE\n{{prompt}}\nAFTER",
+			basePrompt:  "do the thing",
+			want:        "BEFORE\ndo the thing\nAFTER",
+		},
+		{
+			name:        "every placeholder occurrence is substituted",
+			agentPrompt: "{{prompt}} / {{prompt}}",
+			basePrompt:  "X",
+			want:        "X / X",
+		},
+		{
+			name:        "no placeholder appends after a blank line",
+			agentPrompt: "PREAMBLE",
+			basePrompt:  "do the thing",
+			want:        "PREAMBLE\n\ndo the thing",
+		},
+		{
+			name:        "empty base prompt still gets the agent prompt",
+			agentPrompt: "PREAMBLE",
+			want:        "PREAMBLE\n\n",
+		},
+		{
+			name:        "a block scalar's trailing newline does not double the blank line",
+			agentPrompt: "PREAMBLE\n",
+			basePrompt:  "do the thing",
+			want:        "PREAMBLE\n\ndo the thing",
+		},
+		{
+			name:        "whitespace-only agent prompt passes the base through",
+			agentPrompt: "\n  \n",
+			basePrompt:  "do the thing",
+			want:        "do the thing",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ComposeAgentPrompt(tt.agentPrompt, tt.basePrompt); got != tt.want {
+				t.Errorf("ComposeAgentPrompt(%q, %q) = %q, want %q", tt.agentPrompt, tt.basePrompt, got, tt.want)
+			}
+		})
+	}
+}

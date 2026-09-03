@@ -113,3 +113,57 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveConflictsMergeConflictAgent verifies the merge_conflict_agent
+// key: it wins over the workflow's agent, and its `prompt:` is composed around
+// (and resolved with) the conflict-resolution prompt.
+func TestResolveConflictsMergeConflictAgent(t *testing.T) {
+	worktree := t.TempDir()
+	cfg := &config.Config{
+		Git: config.GitConfig{BaseBranch: "main"},
+		Workflows: []config.WorkflowConfig{{
+			Name:  "wf",
+			Agent: "workflow-agent",
+			Steps: []config.StepConfig{{Name: "s", Prompt: "p"}},
+		}},
+		MergeConflictAgent: "fixer",
+		Agents: map[string]config.AgentConfig{
+			"workflow-agent": {Command: "true"},
+			"claude":         {Command: "true"},
+			"fixer": {
+				Command: `cp "$SAKUSEN_PROMPT_FILE" prompt.txt; printf '%s' "$SAKUSEN_AGENT" > agent-slug.txt; printf resolved > "$SAKUSEN_RESULT_FILE"`,
+				Prompt:  "FIX MODE for {{task.title}} onto {{git.base_branch}}\n---\n{{prompt}}",
+			},
+		},
+	}
+	e := &Engine{
+		cfg:      newEngineConfig(cfg),
+		dataDir:  filepath.Join(t.TempDir(), "data"),
+		repoRoot: worktree,
+	}
+	tk := &task.Task{ID: 7, Title: "my task", Workflow: "wf", Branch: "sakusen/7", WorktreePath: worktree}
+
+	if err := e.resolveConflicts(context.Background(), tk, []string{"main.go"}, nil); err != nil {
+		t.Fatalf("resolveConflicts: %v", err)
+	}
+
+	slug, err := os.ReadFile(filepath.Join(worktree, "agent-slug.txt"))
+	if err != nil {
+		t.Fatalf("expected the merge_conflict_agent to have run: %v", err)
+	}
+	if got := strings.TrimSpace(string(slug)); got != "fixer" {
+		t.Errorf("SAKUSEN_AGENT = %q, want the explicit merge_conflict_agent %q", got, "fixer")
+	}
+
+	promptBytes, err := os.ReadFile(filepath.Join(worktree, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("reading the prompt file: %v", err)
+	}
+	prompt := string(promptBytes)
+	if !strings.HasPrefix(prompt, "FIX MODE for my task onto main\n---\n") {
+		t.Errorf("prompt = %q, want the agent prompt resolved and spliced ahead of the conflict prompt", prompt)
+	}
+	if !strings.Contains(prompt, "You are resolving merge conflicts") || !strings.Contains(prompt, "`main.go`") {
+		t.Errorf("prompt = %q, want it to still contain the conflict-resolution body", prompt)
+	}
+}

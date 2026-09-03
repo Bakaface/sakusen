@@ -3,6 +3,8 @@
 ## Contents
 
 - [Agents Section](#agents-section)
+  - [Agent Prompts (`prompt:`)](#agent-prompts-prompt)
+  - [Merge Conflict Agent (`merge_conflict_agent:`)](#merge-conflict-agent-merge_conflict_agent)
 - [Summarizer Section](#summarizer-section)
 - [Git Section](#git-section)
 - [Finalization (`on_complete`)](#finalization-on_complete)
@@ -63,7 +65,57 @@ See SKILL.md → Variants / Agent aliases for the full rules (inheritance semant
 
 `sakusen init` scaffolds the two records above plus the user-owned scripts under `.sakusen/agents/` (they require `claude` and `jq` on PATH; steps reference them via `$SAKUSEN_PROJECT_PATH` so worktrees share the project-root copies). Swap the commands to use any other tool.
 
-There is no system-prompt injection: the fully-resolved step prompt is delivered via `$SAKUSEN_PROMPT_FILE`, and attached images are appended to the step prompt itself. To customize system-level behavior, bake flags into the agent's `command` (e.g. `claude --append-system-prompt "..."`).
+There is no system-prompt injection: the fully-resolved step prompt is delivered via `$SAKUSEN_PROMPT_FILE`, and attached images are appended to the step prompt itself. To customize system-level behavior, set the agent's [`prompt:`](#agent-prompts-prompt) or bake flags into its `command` (e.g. `claude --append-system-prompt "..."`).
+
+### Agent Prompts (`prompt:`)
+
+`prompt:` on an agent record is a standing preamble composed into **every** prompt that agent runs: every workflow step (headless and tmux alike), and the merge-conflict prompt when the agent is the conflict resolver. It carries methodology that belongs to the agent rather than to any one step.
+
+```yaml
+agents:
+  claude:
+    command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-headless.sh"'
+    prompt: |
+      Work lazy-first: reuse what exists, delete before you add, and ship the
+      smallest diff that fully solves the problem.
+
+      ## Task ({{task.title}})
+
+      {{prompt}}
+```
+
+Composition rules:
+
+| Rule | Behavior |
+|---|---|
+| Agent prompt contains `{{prompt}}` | The step's (or conflict resolver's) own prompt is substituted at **every** occurrence |
+| Agent prompt has no `{{prompt}}` | That prompt is appended after a blank line: `<agent prompt>\n\n<base prompt>` |
+| Agent prompt empty / absent | Base prompt used verbatim — identical to having no `prompt:` at all |
+
+Template variables:
+
+- Composition runs on the raw templates, and the combined text is then resolved in a single pass — so the agent prompt may use every variable a step prompt can: `{{task.id}}`, `{{task.title}}`, `{{task.input}}`, `{{task.context}}`, `{{task.slug}}`, `{{task.branch}}`, `{{git.base_branch}}`, `{{git.target_branch}}`, `{{git.repo_root}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{children.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`.
+- On the merge-conflict path there is no step context, loop, children, or track to draw from: only `{{task.*}}` and `{{git.*}}` have values; the rest resolve to `""` (`{{loop.*}}` to `0`).
+- `{{prompt}}` is a plain string substitution applied before template resolution — **not** a template variable. Written inside a step's `prompt:` it stays verbatim, like any unknown placeholder.
+
+Variants override `prompt:` wholesale (empty inherits, and a variant cannot unset it); aliases copy it along with the rest of the target's record.
+
+### Merge Conflict Agent (`merge_conflict_agent:`)
+
+```yaml
+merge_conflict_agent: claude   # optional; must be a headless agent or variant slug
+```
+
+When a merge into the base branch conflicts, Sakusen spawns a headless agent (with `SAKUSEN_PURPOSE=merge_conflict`) to resolve the markers. The agent is selected by its own cascade:
+
+1. Top-level `merge_conflict_agent:`
+2. The task's workflow `agent:`
+3. Top-level `default_agent:`
+4. The `"claude"` slug
+
+The pass is synchronous, so the agent must be headless. For tiers 2–4 a tmux-mode agent silently falls back to a headless `"claude"` record (and errors when none exists). An explicit `merge_conflict_agent:` is stricter — an unknown slug, or one resolving to a tmux-mode agent, is a **load error**.
+
+`merge_conflict_agent:` merges across tiers like `default_agent:` (project `.sakusen.yml` beats `~/.sakusen.yml` beats `~/.config/sakusen/config.yaml`; the more-local non-empty value wins). Because the selected agent's `prompt:` also wraps the conflict prompt, point this key at a plain agent when an implementer agent's preamble would be noise during conflict resolution.
 
 ---
 
@@ -366,7 +418,7 @@ All of the following are **hard load errors** with migration messages:
 |---|---|
 | `claude:` (binary override block) | `agents:` records — the whole invocation lives in the agent's `command` |
 | `yolo:` | Permission flags directly in the agent's `command` |
-| `system_prompt:` | System-prompt flags in the agent's `command`, or fold the text into step prompts |
+| `system_prompt:` | The agent record's [`prompt:`](#agent-prompts-prompt), system-prompt flags in the agent's `command`, or fold the text into step prompts |
 | `allowed_summarization_models:` (top-level and step-level) | `summarizer:` command — pick the model inside it |
 | `print:` / `tmux:` (workflow and step level) | The resolved agent record's `mode` |
 | `{{claude_command}}` in `tmux-setup-command` | `{{agent_command}}` or `{{run_agent}}` |

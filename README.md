@@ -273,6 +273,8 @@ summarizer:                 # utility LLM: chat/step/task summaries + AI task ti
   # slug_command: ...       # optional; runs the slug call instead of command
 ```
 
+An agent record may also carry a `prompt:` — a standing preamble composed into **every** prompt that agent runs (steps in both modes, and the merge-conflict prompt when it resolves conflicts). The step's own prompt is spliced in at the literal `{{prompt}}` placeholder, or appended after a blank line when the placeholder is absent; composition happens before template resolution, so the agent prompt may use the same `{{...}}` variables step prompts can. Set the top-level `merge_conflict_agent:` to a headless agent slug to choose which agent resolves merge conflicts (unset → the workflow's agent, falling back to `claude` when that agent is tmux-mode).
+
 Sakusen communicates with agents purely through environment variables: `SAKUSEN_PROMPT_FILE` (the fully-resolved step prompt), `SAKUSEN_RESULT_FILE` (headless result text), `SAKUSEN_DONE_DIR`/`SAKUSEN_DONE_PREFIX` (tmux turn-end sentinels), plus `SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH`, `SAKUSEN_AGENT`, and `SAKUSEN_PURPOSE`.
 
 **Tmux auto-advance is sentinel-driven**: when the agent finishes a turn, something inside the session (a hook, the agent itself, an idle-watcher) writes `"$SAKUSEN_DONE_DIR/$SAKUSEN_DONE_PREFIX-$(date +%s%N).json"`; the daemon polls for these files and advances the workflow (unless the step has `human: true`). The file may carry a JSON payload with `session_id` (enables `resume_command` restore and `chat_log_command` lookup) and `transcript_path`. The scaffolded `claude-tmux` agent wires this up via a Claude Code `Stop` hook; agents that never write a sentinel are **manual-advance** — the task waits in `tmux` status until you advance it. Agents without a `chat_log_command` can't capture `summarize_chat` context for tmux steps. Without a `summarizer:` there are no AI titles, slugs, or summaries (titles fall back to truncated input, slugs to the slugified title).
@@ -294,7 +296,7 @@ The old Claude-specific keys were removed and are now hard load errors with migr
 
 - `claude:` (binary override) → define agents under `agents:` (run `sakusen init` in a fresh project for scaffolded records)
 - `yolo:` → put permission flags (e.g. `--dangerously-skip-permissions`) directly in the agent's `command`
-- `system_prompt:` → bake system-prompt flags into the agent's `command` or fold the text into step prompts
+- `system_prompt:` → set `prompt:` on the agent record, bake system-prompt flags into the agent's `command`, or fold the text into step prompts
 - `allowed_summarization_models:` → the `summarizer:` command; pick the model inside it
 - `print:` / `tmux:` (workflow and step level) → select an agent whose `mode` is `headless` (was `print: true`) or `tmux` (was `print: false`)
 - `{{claude_command}}` in `tmux-setup-command` → `{{agent_command}}` or `{{run_agent}}`

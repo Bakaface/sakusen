@@ -18,8 +18,8 @@ description: >
 5. Copy attached images to `.sakusen/images/`
 6. For each step (from `task.StepIndex`):
    - Collect step contexts from prior steps (fetched from `task_steps` DB table)
-   - Build `TemplateContext`, resolve prompt via `ResolveTemplate()` (attached images append an "## Attached Images" section to the step prompt itself)
    - Resolve the step's agent record via `cfg.StepAgent(wf, &step)`; its mode picks headless vs tmux execution
+   - Build `TemplateContext`, compose the agent's `prompt:` around the step prompt (`ComposeAgentPrompt()`), then resolve the combined text in one `ResolveTemplate()` pass (attached images append an "## Attached Images" section afterwards)
    - Headless: write the prompt to `.sakusen/step-prompt-<step>.txt`, spawn the agent command via `runner.Process` with `SAKUSEN_PROMPT_FILE`/`SAKUSEN_RESULT_FILE` exported, capture the result text from `$SAKUSEN_RESULT_FILE` (stdout-tail fallback)
    - Tmux: write a wrapper script (`runner.BuildWrapperScript`) exporting the sentinel contract (`SAKUSEN_DONE_DIR`/`SAKUSEN_DONE_PREFIX`) and return immediately
    - Store step context in `task_steps` DB table
@@ -37,7 +37,7 @@ description: >
 | `stepcontext.go` | Step-context precedence (manual > last_message > summarize_chat): `captureHeadlessStepContext()`, `PublishManualStepContext()`, `RecordTmuxStepSentinelSession()` |
 | `merge.go` | Engine-side glue to `internal/merge`: `executeOnComplete()` (calls `e.coord.Finalize()`), `bindConflictResolver()` (wires the agent-driven resolver into the Coordinator), `resolveConflicts()` (the resolver itself), `cleanupMergedWorktree()`. **Per-repo locking, retry, and target-clean wait live in `internal/merge`, not here.** |
 | `summarizer.go` | Summarization + finalization: `FinalizeTask()`, `runSummarizer()`, `summarizeChatLog()`, `loadStepChatContent()`, `RunWorktreeSetupCommand()`, `runSummarizerSync()` |
-| `template.go` | `{{placeholder}}` interpolation via `ResolveTemplate()` |
+| `template.go` | `{{placeholder}}` interpolation via `ResolveTemplate()`; `ComposeAgentPrompt()` (agent `prompt:` ⊕ base prompt) |
 | `artifact.go` | Directory management, image copying |
 | `sync.go` | `SyncPathsToWorktree(srcRoot, dstRoot string, paths config.WorktreeSyncPathsConfig) error` — copies/links configured paths |
 
@@ -49,8 +49,10 @@ See [references/templates.md](references/templates.md) for supported placeholder
 
 There is no system-prompt injection — the fully-resolved step prompt is written to
 `.sakusen/step-prompt-<step>.txt` and the agent command reads it via `$SAKUSEN_PROMPT_FILE`.
-Attached images append an "## Attached Images" section to the step prompt itself. The engine
-exports the env contract (`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`,
+The agent record's own `prompt:` (when set) is composed into that text before resolution:
+the step prompt is spliced at every `{{prompt}}` occurrence, or appended after a blank line
+when the placeholder is absent. Attached images append an "## Attached Images" section last.
+The engine exports the env contract (`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`,
 `SAKUSEN_PROJECT_PATH`, `SAKUSEN_PURPOSE`, `SAKUSEN_AGENT`, `SAKUSEN_TRACK_ID` when tracked) plus
 `SAKUSEN_PROMPT_FILE`/`SAKUSEN_RESULT_FILE` (headless) or
 `SAKUSEN_DONE_DIR`/`SAKUSEN_DONE_PREFIX` (tmux); the agent record's `env:` map is merged
@@ -107,7 +109,7 @@ When `task.Worktree == false`:
 
 ## Key Mechanisms
 
-- **Merge**: delegated to `internal/merge`. The Engine calls `e.coord.Finalize(ctx, t, baseBranch, onComplete, logFn)`; the Coordinator owns per-repo serialization (via `*merge.Lock` from the daemon's `*merge.Locks` registry), `--no-ff` merge into base (preserves task branch commit history), agent-driven conflict resolution (wired via `bindConflictResolver()`), up to 3 retries, target-clean wait, and cleanup-on-failure. The conflict resolver requires a HEADLESS agent: the workflow's agent, or the implicit `"claude"` fallback when the workflow agent is tmux-mode; it errors when only tmux agents exist.
+- **Merge**: delegated to `internal/merge`. The Engine calls `e.coord.Finalize(ctx, t, baseBranch, onComplete, logFn)`; the Coordinator owns per-repo serialization (via `*merge.Lock` from the daemon's `*merge.Locks` registry), `--no-ff` merge into base (preserves task branch commit history), agent-driven conflict resolution (wired via `bindConflictResolver()`), up to 3 retries, target-clean wait, and cleanup-on-failure. The conflict resolver requires a HEADLESS agent, picked by `cfg.MergeConflictAgent(wf)` (→ `config.Config.MergeConflictAgentFor`): top-level `merge_conflict_agent:` → the workflow's agent → `default_agent:` → `"claude"`. An explicit `merge_conflict_agent:` must be headless (a load error otherwise); for the lower tiers a tmux-mode agent falls back to the implicit `"claude"` record, and it errors when only tmux agents exist. The selected agent's `prompt:` wraps the conflict prompt, resolved with a minimal context (task + git vars only).
 - **Loops**: evaluate at step end, check `MaxIterations` + `ExitCondition.StepContextEmpty`, persist iteration to DB
 - **Approval gates**: human steps pause at `AwaitingApproval`, tmux steps at `Tmux`
 - **Summarization strategy**: per-step `summarization_strategy` controls how step context is captured. `summarize_chat` (default when unset, see `StepConfig.EffectiveSummarizationStrategy()`) stores last_message immediately, then synchronously runs `summarizeChatLog()` against the step's chat content and overwrites the context via `UpdateTaskStepContext()`. Chat content comes from `loadStepChatContent()`: headless steps slice the step's region out of the unified task log and then keep **only the agent's streamed output** via `stepAgentOutput()` — the step header, the echoed prompt block (bounded by the single literally-empty line `runHeadlessAgent` writes after it), and the footer are stripped, because summarizing sakusen's own prompt back into the step context overwrites the agent's real result text, and `smallChatBytes` is no protection since a long prompt clears it. An agent that redirects stdout into `$SAKUSEN_RESULT_FILE` (the documented env contract) streams nothing, so this correctly yields `""` and the summarize pass is skipped. Tmux steps run the step agent's `chat_log_command` (env: `SAKUSEN_SESSION_ID` from the chats table, `SAKUSEN_SENTINEL_FILE` + `SAKUSEN_TRANSCRIPT_PATH` from the latest sentinel) and use its stdout — an agent without `chat_log_command` degrades to no chat content (warn, or fail when `require_context: true`). `last_message` keeps only the headless result text — cheaper but loses decisions; for tmux steps it leaves context empty because there is no result text. Non-tmux + non-empty result text + chat < `smallChatBytes` (4 KB) short-circuits via `shouldSummarizeChat()` and keeps the result text. For tmux steps the summarization runs synchronously inside `ResumeAfterApproval` (the step itself returns immediately to pause at the tmux approval gate).

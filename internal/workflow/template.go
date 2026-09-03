@@ -387,3 +387,29 @@ func ResolveTaskRefs(s string, lookup func(int64) (*task.Task, error)) string {
 		return resolveTaskRef(key, match, ctx)
 	})
 }
+
+// agentPromptPlaceholder marks where an agent's `prompt:` splices in the base
+// prompt. It is a plain string substitution applied to raw templates before
+// ResolveTemplate, never a template variable — a literal {{prompt}} elsewhere
+// (e.g. in a step prompt) stays verbatim.
+const agentPromptPlaceholder = "{{prompt}}"
+
+// ComposeAgentPrompt wraps a base prompt (a step prompt, or the merge-conflict
+// resolver's prompt) in the agent's standing prompt: substituted at every
+// {{prompt}} occurrence, or appended after a blank line when the placeholder
+// is absent. A blank agent prompt returns the base prompt unchanged. Operates
+// on raw templates so the combined text can be resolved in a single pass.
+//
+// Surrounding whitespace on the agent prompt is trimmed first, so the trailing
+// newline a YAML block scalar (`prompt: |`) always carries does not turn the
+// separating blank line into two.
+func ComposeAgentPrompt(agentPrompt, basePrompt string) string {
+	agentPrompt = strings.TrimSpace(agentPrompt)
+	if agentPrompt == "" {
+		return basePrompt
+	}
+	if strings.Contains(agentPrompt, agentPromptPlaceholder) {
+		return strings.ReplaceAll(agentPrompt, agentPromptPlaceholder, basePrompt)
+	}
+	return agentPrompt + "\n\n" + basePrompt
+}
