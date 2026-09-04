@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -434,58 +433,5 @@ func TestRunTaskFakeRunner_AttachedImagesAppendedToPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "screenshot.png") {
 		t.Errorf("expected prompt to reference the copied image, got:\n%s", prompt)
-	}
-}
-
-// TestRunTaskFakeRunner_AgentPrompt verifies that an agent's `prompt:` is
-// composed around the step prompt before template resolution: the {{prompt}}
-// placeholder splices the step prompt in, template variables inside the agent
-// prompt resolve, and an agent without a prompt leaves the step prompt alone.
-func TestRunTaskFakeRunner_AgentPrompt(t *testing.T) {
-	wf := config.WorkflowConfig{
-		Name: "default",
-		Steps: []config.StepConfig{
-			{Name: "spliced", Prompt: "STEP BODY", Agent: "wrapper"},
-			{Name: "appended", Prompt: "SECOND BODY", Agent: "appender"},
-			{Name: "plain", Prompt: "THIRD BODY"},
-		},
-	}
-	engine, tk, runner, _ := newFakeRunnerTestEngine(t, wf)
-	engine.cfg.full.Agents["wrapper"] = config.AgentConfig{
-		Command: "true",
-		Prompt:  "PREAMBLE for task {{task.id}}\n{{prompt}}\nPOSTAMBLE",
-	}
-	engine.cfg.full.Agents["appender"] = config.AgentConfig{
-		Command: "true",
-		Prompt:  "STANDING PREAMBLE",
-	}
-
-	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
-		t.Fatalf("RunTask failed: %v", err)
-	}
-
-	spliced := runner.callsFor("spliced")
-	if len(spliced) != 1 {
-		t.Fatalf("expected 1 spliced call, got %d", len(spliced))
-	}
-	want := fmt.Sprintf("PREAMBLE for task %d\nSTEP BODY\nPOSTAMBLE", tk.ID)
-	if spliced[0].prompt != want {
-		t.Errorf("spliced prompt = %q, want %q", spliced[0].prompt, want)
-	}
-
-	appended := runner.callsFor("appended")
-	if len(appended) != 1 {
-		t.Fatalf("expected 1 appended call, got %d", len(appended))
-	}
-	if appended[0].prompt != "STANDING PREAMBLE\n\nSECOND BODY" {
-		t.Errorf("appended prompt = %q, want the agent prompt followed by a blank line and the step prompt", appended[0].prompt)
-	}
-
-	plain := runner.callsFor("plain")
-	if len(plain) != 1 {
-		t.Fatalf("expected 1 plain call, got %d", len(plain))
-	}
-	if plain[0].prompt != "THIRD BODY" {
-		t.Errorf("plain prompt = %q, want the step prompt unchanged", plain[0].prompt)
 	}
 }

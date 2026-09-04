@@ -86,18 +86,6 @@ type AgentConfig struct {
 	// agent (Command, ResumeCommand, and ChatLogCommand alike).
 	Env map[string]string `yaml:"env,omitempty"`
 
-	// Prompt is a standing preamble composed into every prompt this agent
-	// runs — workflow steps (headless and tmux alike) and the merge-conflict
-	// resolver. It carries methodology that belongs to the agent rather than
-	// to any one step. When it contains the literal placeholder {{prompt}},
-	// the base prompt is substituted at every occurrence; otherwise the base
-	// prompt is appended after a blank line. Composition happens on the raw
-	// templates, so the agent prompt may itself use the same {{...}} template
-	// variables a step prompt can (the conflict resolver has no step context,
-	// so step/loop/children/track vars resolve empty there). Empty → the base
-	// prompt is used verbatim.
-	Prompt string `yaml:"prompt,omitempty"`
-
 	// Variants declares named child configs (variant name → partial record)
 	// that inherit every field from this agent and override only what they
 	// redefine; `env` merges per-key (variant wins, parent-only keys survive).
@@ -225,38 +213,6 @@ func (c *Config) StepAgent(wf *WorkflowConfig, step *StepConfig) (string, AgentC
 	if !ok {
 		return slug, AgentConfig{}, fmt.Errorf(
 			"no agent %q configured: define it under `agents:` in .sakusen.yml (or set `agent:`/`default_agent:` to an existing slug); run `sakusen init` in a fresh project to scaffold defaults", slug)
-	}
-	return slug, agent, nil
-}
-
-// MergeConflictAgentFor resolves the agent that runs the merge-conflict
-// resolver for a workflow, following the cascade: top-level
-// `merge_conflict_agent:` → workflow.agent → default_agent → "claude". The
-// resolver runs a synchronous pass, so the agent must be headless: an explicit
-// `merge_conflict_agent:` is rejected at config load when it is tmux-mode,
-// while the lower cascade tiers fall back to the implicit "claude" record when
-// it exists and is headless.
-func (c *Config) MergeConflictAgentFor(wf *WorkflowConfig) (string, AgentConfig, error) {
-	if c.MergeConflictAgent != "" {
-		agent, ok := c.ResolveAgent(c.MergeConflictAgent)
-		if !ok {
-			return c.MergeConflictAgent, AgentConfig{}, fmt.Errorf("merge_conflict_agent: unknown agent %q (no such slug under `agents:`)", c.MergeConflictAgent)
-		}
-		if agent.IsTmux() {
-			return c.MergeConflictAgent, AgentConfig{}, fmt.Errorf("merge_conflict_agent %q is tmux-mode: conflict resolution requires a headless agent", c.MergeConflictAgent)
-		}
-		return c.MergeConflictAgent, agent, nil
-	}
-	slug, agent, err := c.StepAgent(wf, nil)
-	if err != nil {
-		return slug, AgentConfig{}, err
-	}
-	if agent.IsTmux() {
-		fallback, ok := c.ResolveAgent(DefaultAgentSlug)
-		if !ok || fallback.IsTmux() {
-			return slug, AgentConfig{}, fmt.Errorf("workflow agent %q is tmux-mode and no headless %q agent is configured", slug, DefaultAgentSlug)
-		}
-		return DefaultAgentSlug, fallback, nil
 	}
 	return slug, agent, nil
 }
@@ -406,9 +362,6 @@ func resolveVariant(parent, v AgentConfig) AgentConfig {
 	if v.ChatLogCommand != "" {
 		out.ChatLogCommand = v.ChatLogCommand
 	}
-	if v.Prompt != "" {
-		out.Prompt = v.Prompt
-	}
 	if len(v.Env) > 0 {
 		env := make(map[string]string, len(parent.Env)+len(v.Env))
 		for k, val := range parent.Env {
@@ -492,16 +445,6 @@ func validateAgentRefs(cfg *Config) error {
 	if err := checkRef(cfg.DefaultAgent, "default_agent"); err != nil {
 		return err
 	}
-	if err := checkRef(cfg.MergeConflictAgent, "merge_conflict_agent"); err != nil {
-		return err
-	}
-	// The conflict resolver runs synchronously, so an explicit choice must be
-	// headless — the lower cascade tiers can still fall back to "claude".
-	if cfg.MergeConflictAgent != "" {
-		if agent, ok := cfg.ResolveAgent(cfg.MergeConflictAgent); ok && agent.IsTmux() {
-			return fmt.Errorf("merge_conflict_agent %q: conflict resolution cannot use a tmux-mode agent", cfg.MergeConflictAgent)
-		}
-	}
 	for i := range cfg.Workflows {
 		wf := &cfg.Workflows[i]
 		if err := checkRef(wf.Agent, fmt.Sprintf("workflow %q", wf.Name)); err != nil {
@@ -570,7 +513,7 @@ func mergeAgentAliases(dst map[string]string, src map[string]string) map[string]
 var removedProjectKeys = map[string]string{
 	"claude":                       "the `claude:` block was removed: define agents under the top-level `agents:` map instead (run `sakusen init` in a fresh project for scaffolded claude agent records)",
 	"yolo":                         "`yolo:` was removed with the `claude:` block: put permission flags (e.g. --dangerously-skip-permissions) directly in your agent's `command`",
-	"system_prompt":                "`system_prompt:` was removed: set `prompt:` on the agent record under `agents:` (a standing preamble composed into every prompt that agent runs), bake system-prompt flags into the agent's `command`, or fold the text into step prompts",
+	"system_prompt":                "`system_prompt:` was removed: bake system-prompt flags into your agent's `command` (e.g. claude --append-system-prompt \"...\") or fold the text into step prompts",
 	"allowed_summarization_models": "`allowed_summarization_models` was removed: summarization now runs the top-level `summarizer:` command; pick the model inside that command",
 }
 

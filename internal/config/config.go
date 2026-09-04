@@ -204,7 +204,6 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	cfg.Agents = mergeAgents(cfg.Agents, global.Agents)
 	cfg.AgentAliases = mergeAgentAliases(cfg.AgentAliases, global.AgentAliases)
 	override(&cfg.DefaultAgent, global.DefaultAgent)
-	override(&cfg.MergeConflictAgent, global.MergeConflictAgent)
 	overrideFromPtr(&cfg.Summarizer, global.Summarizer)
 	if global.Options != nil {
 		override(&cfg.Options.Number, global.Options.Number)
@@ -284,7 +283,6 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 	cfg.Agents = mergeAgents(cfg.Agents, proj.Agents)
 	cfg.AgentAliases = mergeAgentAliases(cfg.AgentAliases, proj.AgentAliases)
 	override(&cfg.DefaultAgent, proj.DefaultAgent)
-	override(&cfg.MergeConflictAgent, proj.MergeConflictAgent)
 	overrideFromPtr(&cfg.Summarizer, proj.Summarizer)
 	if proj.Options != nil {
 		override(&cfg.Options.Number, proj.Options.Number)
