@@ -143,7 +143,7 @@ Agent record fields:
 
 A variant inherits every field from its parent agent and overrides only what it redefines (`env` merges per-key — variant wins, parent-only keys survive; all other fields override wholesale). Each variant becomes an ordinary agent named `<parent>:<variant>`, usable anywhere a slug is accepted (`agent:`, `default_agent:`, alias targets). The parent stays usable as-is.
 
-The canonical pattern is **env-override**: the parent command reads a shell variable, variants set it via `env:` (commands run via `sh -c` with the agent's env exported, so `"$VAR"` expands):
+The canonical pattern is **env-override**: the parent command reads a shell variable, variants set it via `env:` (commands run via `sh -c` with the agent's env exported, so `"$VAR"` expands). Keep each variant to one dimension — a ref can stack several of them:
 
 ```yaml
 agents:
@@ -157,16 +157,53 @@ agents:
       SAKUSEN_PLUGINS: "false"
     variants:
       opus:         { env: { SAKUSEN_MODEL: claude-opus-4-1 } }
-      opus-plugins: { env: { SAKUSEN_MODEL: claude-opus-4-1, SAKUSEN_PLUGINS: "true" } }
-      default-plugins: { env: { SAKUSEN_PLUGINS: "true" } }
+      fable:        { env: { SAKUSEN_MODEL: claude-fable-5-1 } }
+      with-plugins: { env: { SAKUSEN_PLUGINS: "true" } }
 ```
+
+#### Composing variants
+
+A ref is a parent slug followed by any number of that parent's variants, used as **modifiers**:
+
+```yaml
+    agent: claude:opus:with-plugins
+```
+
+- **Any order.** `claude:with-plugins:opus` and `claude:opus:with-plugins` are the same agent: modifiers are sorted alphabetically into a canonical form, and that canonical form is the record's registry key.
+- **Only referenced combinations exist.** A combination becomes a registry entry when some `agent:`, `default_agent:`, or alias target mentions it — the parent's cross product is never materialized.
+- **Conflict rule.** Two modifiers in one ref that set the same env key, or the same whole field, to *different* values is a load error naming both modifiers. Identical values are fine. This gives mutually-exclusive dimensions for free: `opus` and `fable` both write `SAKUSEN_MODEL`, so `claude:opus:fable` fails.
+- Every field a single variant may set is allowed on a modifier (`command`, `mode`, `resume_command`, `chat_log_command`, `env`); the composed record is shape-checked like any other.
+- A modifier must be a variant declared by *that* parent — `claude:with-plugins` fails when `claude` doesn't declare `with-plugins`, listing the declared names. Repeating a modifier (`claude:opus:opus`) is also an error.
 
 Rules and limitations:
 
 - Variant names are kebab-case; the `<parent>:<variant>` slug is created by expansion only — authoring a literal colon key under `agents:` is a load error.
-- **One level deep** — a variant declaring its own `variants:` is a load error. For cross-product dimensions (model × plugins), declare one flat variant per combination, as above.
+- **No nesting** — a variant declaring its own `variants:` is a load error. Cross-product dimensions are expressed by stacking modifiers in a ref, not by pre-multiplying variant names.
 - A variant **cannot unset** a parent field (empty = inherit). E.g. a `mode: headless` variant of a tmux parent with `resume_command` fails validation (tmux-only field on the resolved record) — use a separate agent record instead.
 - Cross-tier: a slug redefined in a more-local tier replaces the record wholesale, variants included — a project cannot add a variant to a global agent without redefining the whole record.
+
+#### Sharing variants across agents
+
+Variants are declared per-parent — there is no shared modifier namespace in Sakusen. When two agents need the same dimension, share the block with a YAML anchor and the `<<:` merge key:
+
+```yaml
+x-models: &models
+  opus:  { env: { SAKUSEN_MODEL: claude-opus-4-1 } }
+  fable: { env: { SAKUSEN_MODEL: claude-fable-5-1 } }
+
+agents:
+  claude:
+    command: ...
+    variants: *models
+  claude-tmux:
+    mode: tmux
+    command: ...
+    variants:
+      <<: *models
+      with-plugins: { env: { SAKUSEN_PLUGINS: "true" } }
+```
+
+Unknown top-level keys are ignored by the loader, so an `x-`-prefixed anchor block is a safe place to park the shared definition.
 
 ### Agent aliases
 
@@ -174,7 +211,8 @@ The top-level `agent_aliases:` map (alias → target) gives roles stable semanti
 
 ```yaml
 agent_aliases:
-  headless-implementer: claude:opus   # target may be an agent or a variant
+  headless-implementer: claude:opus                    # target may be an agent or a variant
+  conversationist: claude-tmux:fable:with-plugins      # ...or a composed ref
   reviewer: claude
 ```
 

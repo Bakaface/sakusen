@@ -91,10 +91,14 @@ type AgentConfig struct {
 	// redefine; `env` merges per-key (variant wins, parent-only keys survive).
 	// Each variant is expanded at load time into an ordinary registry entry
 	// under the slug "<parent>:<variant>", referenceable anywhere an agent
-	// slug is accepted. Variants are one level deep (no nesting), and a
-	// variant cannot unset a parent field — a field left empty inherits; use a
-	// separate agent record when a field must go away. Records in the resolved
-	// registry never carry Variants (cleared during expansion).
+	// slug is accepted. A ref may also stack several variants as modifiers in
+	// any order ("<parent>:<mod>:<mod>"); such composed refs are expanded only
+	// when they appear in the config, and two modifiers that set the same
+	// field or env key to different values are a load-time error. Variants are
+	// one level deep (no nesting), and a variant cannot unset a parent field —
+	// a field left empty inherits; use a separate agent record when a field
+	// must go away. Records in the resolved registry never carry Variants
+	// (cleared during expansion).
 	Variants map[string]AgentConfig `yaml:"variants,omitempty"`
 }
 
@@ -169,9 +173,16 @@ func (s *SummarizerConfig) SlugConfigured() bool {
 	return strings.TrimSpace(s.EffectiveSlugCommand()) != ""
 }
 
-// ResolveAgent looks up an agent record by slug in the merged registry.
+// ResolveAgent looks up an agent record by slug in the merged registry. The
+// slug is canonicalized first, so every modifier ordering of a composed ref
+// finds the single entry expansion stored under the canonical key; a malformed
+// ref (duplicate modifier) resolves to nothing.
 func (c *Config) ResolveAgent(slug string) (AgentConfig, bool) {
-	a, ok := c.Agents[slug]
+	key, err := canonicalAgentRef(slug)
+	if err != nil {
+		return AgentConfig{}, false
+	}
+	a, ok := c.Agents[key]
 	return a, ok
 }
 
@@ -240,7 +251,8 @@ func (c *Config) FirstStepIsTmux(wf *WorkflowConfig) bool {
 
 // resolveAndValidateAgents finalizes the merged agent registry: validates
 // user-authored records (slug format, record shape, variant declarations),
-// expands `variants:` into flat `parent:variant` entries, resolves
+// expands `variants:` into flat `parent:variant` entries, expands every
+// composed ref the config actually mentions into its canonical entry, resolves
 // `agent_aliases:` into ordinary registry entries, then validates every agent
 // reference reachable from the resolved config (explicit refs, loop-step mode
 // constraints, and the removed {{claude_command}} tmux-setup-command
@@ -252,7 +264,11 @@ func resolveAndValidateAgents(cfg *Config) error {
 	if err := validateAgentRecords(cfg.Agents); err != nil {
 		return err
 	}
-	if err := expandAgentVariants(cfg); err != nil {
+	declared, err := expandAgentVariants(cfg)
+	if err != nil {
+		return err
+	}
+	if err := expandComposedAgentRefs(cfg, declared); err != nil {
 		return err
 	}
 	if err := resolveAgentAliases(cfg); err != nil {
@@ -314,8 +330,10 @@ func validateAgentRecordShape(slug string, a *AgentConfig) error {
 // shape-checked against their effective (post-inheritance) field set, so e.g.
 // a variant that switches a tmux parent to headless while inheriting
 // resume_command fails here. Assumes validateAgentRecords already vetted the
-// declarations.
-func expandAgentVariants(cfg *Config) error {
+// declarations. Returns the per-parent variant declarations (parent slug →
+// variant name → partial record) so composed-ref expansion can still reach
+// them after Variants is cleared on stored records.
+func expandAgentVariants(cfg *Config) (map[string]map[string]AgentConfig, error) {
 	var parents []string
 	for slug, a := range cfg.Agents {
 		if len(a.Variants) > 0 {
@@ -323,8 +341,10 @@ func expandAgentVariants(cfg *Config) error {
 		}
 	}
 	sort.Strings(parents)
+	declared := make(map[string]map[string]AgentConfig, len(parents))
 	for _, slug := range parents {
 		parent := cfg.Agents[slug]
+		declared[slug] = parent.Variants
 		names := make([]string, 0, len(parent.Variants))
 		for name := range parent.Variants {
 			names = append(names, name)
@@ -334,14 +354,14 @@ func expandAgentVariants(cfg *Config) error {
 			key := slug + ":" + name
 			resolved := resolveVariant(parent, parent.Variants[name])
 			if err := validateAgentRecordShape(key, &resolved); err != nil {
-				return err
+				return nil, err
 			}
 			cfg.Agents[key] = resolved
 		}
 		parent.Variants = nil
 		cfg.Agents[slug] = parent
 	}
-	return nil
+	return declared, nil
 }
 
 // resolveVariant builds a variant's effective record: a field left unset
@@ -375,6 +395,192 @@ func resolveVariant(parent, v AgentConfig) AgentConfig {
 	return out
 }
 
+// splitAgentRef parses an agent ref ("parent[:modifier]*") into its parent slug
+// and its modifier set sorted alphabetically. Sorting is what makes modifier
+// order irrelevant: every permutation of one set yields the same registry key.
+func splitAgentRef(ref string) (string, []string, error) {
+	parts := strings.Split(ref, ":")
+	mods := append([]string(nil), parts[1:]...)
+	seen := make(map[string]bool, len(mods))
+	for _, m := range mods {
+		if seen[m] {
+			return "", nil, fmt.Errorf("agent ref %q: duplicate modifier %q", ref, m)
+		}
+		seen[m] = true
+	}
+	sort.Strings(mods)
+	return parts[0], mods, nil
+}
+
+// joinAgentRef builds a registry key from a parent slug and its sorted
+// modifiers — the one place the canonical key shape is defined.
+func joinAgentRef(parent string, mods []string) string {
+	if len(mods) == 0 {
+		return parent
+	}
+	return parent + ":" + strings.Join(mods, ":")
+}
+
+// canonicalAgentRef returns the registry key for an agent ref: the parent slug
+// followed by its modifiers in sorted order. Refs with zero or one modifier
+// canonicalize to themselves.
+func canonicalAgentRef(ref string) (string, error) {
+	parent, mods, err := splitAgentRef(ref)
+	if err != nil {
+		return "", err
+	}
+	return joinAgentRef(parent, mods), nil
+}
+
+// agentRef is an agent ref exactly as authored plus the config location it came
+// from, which prefixes any error about it.
+type agentRef struct {
+	ref   string
+	where string
+}
+
+// collectAgentRefs returns every agent ref reachable from the resolved config
+// (default_agent, workflow and step `agent:`, alias targets), deduplicated by
+// ref string and sorted so errors are deterministic.
+func collectAgentRefs(cfg *Config) []agentRef {
+	where := make(map[string]string)
+	add := func(ref, loc string) {
+		if ref == "" {
+			return
+		}
+		if _, dup := where[ref]; !dup {
+			where[ref] = loc
+		}
+	}
+	add(cfg.DefaultAgent, "default_agent")
+	for i := range cfg.Workflows {
+		wf := &cfg.Workflows[i]
+		add(wf.Agent, fmt.Sprintf("workflow %q", wf.Name))
+		for j := range wf.Steps {
+			add(wf.Steps[j].Agent, fmt.Sprintf("workflow %q step %q", wf.Name, wf.Steps[j].Name))
+		}
+	}
+	aliases := make([]string, 0, len(cfg.AgentAliases))
+	for name := range cfg.AgentAliases {
+		aliases = append(aliases, name)
+	}
+	sort.Strings(aliases)
+	for _, name := range aliases {
+		add(cfg.AgentAliases[name], fmt.Sprintf("agent_aliases: alias %q", name))
+	}
+	refs := make([]agentRef, 0, len(where))
+	for ref, loc := range where {
+		refs = append(refs, agentRef{ref: ref, where: loc})
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].ref < refs[j].ref })
+	return refs
+}
+
+// expandComposedAgentRefs inserts a registry entry for every composed ref (two
+// or more modifiers) that actually appears in the config, keyed by its
+// canonical form — only referenced combinations are materialized, never a
+// parent's whole cross product. Runs after expandAgentVariants, which supplies
+// the variant declarations since stored records no longer carry them, and
+// before alias resolution so an alias may target a composed ref. Unknown
+// parents are left to validateAgentRefs / alias resolution, which already
+// report them as unknown agents.
+func expandComposedAgentRefs(cfg *Config, declared map[string]map[string]AgentConfig) error {
+	for _, r := range collectAgentRefs(cfg) {
+		parent, mods, err := splitAgentRef(r.ref)
+		if err != nil {
+			return fmt.Errorf("%s: %w", r.where, err)
+		}
+		if len(mods) < 2 {
+			continue
+		}
+		key := joinAgentRef(parent, mods)
+		if _, exists := cfg.Agents[key]; exists {
+			continue
+		}
+		parentRec, ok := cfg.Agents[parent]
+		if !ok {
+			continue
+		}
+		rec, err := composeAgentRecord(parent, key, parentRec, declared[parent], mods, r)
+		if err != nil {
+			return err
+		}
+		if err := validateAgentRecordShape(key, &rec); err != nil {
+			return err
+		}
+		cfg.Agents[key] = rec
+	}
+	return nil
+}
+
+// composeAgentRecord applies a ref's modifiers onto the parent record with the
+// same semantics as a single variant. Every modifier must be a declared
+// variant of that parent, and two modifiers that set the same field or env key
+// to different values are rejected; with conflicts out of the way, application
+// order cannot change the result.
+func composeAgentRecord(parentSlug, canonical string, parent AgentConfig, variants map[string]AgentConfig, mods []string, r agentRef) (AgentConfig, error) {
+	fields := []struct {
+		name string
+		get  func(*AgentConfig) string
+	}{
+		{"mode", func(a *AgentConfig) string { return a.Mode }},
+		{"command", func(a *AgentConfig) string { return a.Command }},
+		{"resume_command", func(a *AgentConfig) string { return a.ResumeCommand }},
+		{"chat_log_command", func(a *AgentConfig) string { return a.ChatLogCommand }},
+	}
+	type setter struct{ modifier, value string }
+	setFields := make(map[string]setter, len(fields))
+	setEnv := make(map[string]setter)
+
+	out := parent
+	out.Variants = nil
+	for _, m := range mods {
+		v, ok := variants[m]
+		if !ok {
+			return AgentConfig{}, fmt.Errorf("%s: agent ref %q: unknown modifier %q for agent %q (declared variants: %s)",
+				r.where, r.ref, m, parentSlug, declaredVariantNames(variants))
+		}
+		for _, f := range fields {
+			val := f.get(&v)
+			if val == "" {
+				continue
+			}
+			if prev, dup := setFields[f.name]; dup && prev.value != val {
+				return AgentConfig{}, fmt.Errorf("%s: agent ref %q: modifiers %q and %q both set %s to different values",
+					r.where, canonical, prev.modifier, m, f.name)
+			}
+			setFields[f.name] = setter{modifier: m, value: val}
+		}
+		envKeys := make([]string, 0, len(v.Env))
+		for k := range v.Env {
+			envKeys = append(envKeys, k)
+		}
+		sort.Strings(envKeys)
+		for _, k := range envKeys {
+			if prev, dup := setEnv[k]; dup && prev.value != v.Env[k] {
+				return AgentConfig{}, fmt.Errorf("%s: agent ref %q: modifiers %q and %q both set env %s to different values",
+					r.where, canonical, prev.modifier, m, k)
+			}
+			setEnv[k] = setter{modifier: m, value: v.Env[k]}
+		}
+		out = resolveVariant(out, v)
+	}
+	return out, nil
+}
+
+// declaredVariantNames lists a parent's variant names for error messages.
+func declaredVariantNames(variants map[string]AgentConfig) string {
+	if len(variants) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(variants))
+	for name := range variants {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // validateAgentAliasNames checks that every alias name is a plain kebab-case
 // slug (colons rejected — an alias is a stable semantic name, never a
 // variant-shaped key). Shared by resolveAgentAliases and single-file
@@ -391,10 +597,10 @@ func validateAgentAliasNames(aliases map[string]string) error {
 
 // resolveAgentAliases inserts each `agent_aliases:` entry into the registry
 // as a copy of its target's record, making the alias an ordinary agent name.
-// Runs after variant expansion so targets may be plain agents or
-// `parent:variant` slugs. Every alias is validated against the pre-alias
-// registry before any is inserted, so alias→alias chains can never resolve
-// through insertion order.
+// Runs after variant and composed-ref expansion so targets may be plain
+// agents, `parent:variant` slugs, or composed refs. Every alias is validated
+// against the pre-alias registry before any is inserted, so alias→alias chains
+// can never resolve through insertion order.
 func resolveAgentAliases(cfg *Config) error {
 	if len(cfg.AgentAliases) == 0 {
 		return nil
@@ -416,7 +622,7 @@ func resolveAgentAliases(cfg *Config) error {
 		if _, chained := cfg.AgentAliases[target]; chained {
 			return fmt.Errorf("agent_aliases: alias %q targets alias %q — alias chains are not supported; point it directly at an agent or variant", name, target)
 		}
-		rec, ok := cfg.Agents[target]
+		rec, ok := cfg.ResolveAgent(target)
 		if !ok {
 			return fmt.Errorf("agent_aliases: alias %q targets unknown agent %q (no such slug under `agents:`)", name, target)
 		}
@@ -437,7 +643,7 @@ func validateAgentRefs(cfg *Config) error {
 		if slug == "" {
 			return nil
 		}
-		if _, ok := cfg.Agents[slug]; !ok {
+		if _, ok := cfg.ResolveAgent(slug); !ok {
 			return fmt.Errorf("%s: unknown agent %q (no such slug under `agents:`)", where, slug)
 		}
 		return nil

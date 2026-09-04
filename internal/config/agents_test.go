@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -878,4 +880,420 @@ func TestSummarizerSlugCommand(t *testing.T) {
 			t.Error("SlugConfigured() = true, want false")
 		}
 	})
+}
+
+// composedRefsYaml declares a tmux parent with three orthogonal variants
+// (two model modifiers plus a plugin modifier) and references composed refs
+// from a step, an alias, and default_agent.
+const composedRefsYaml = `
+agents:
+  claude-tmux:
+    mode: tmux
+    command: tmux-cmd
+    env:
+      KEEP: base
+    variants:
+      opus:
+        env:
+          SAKUSEN_MODEL: opus-model
+      fable:
+        env:
+          SAKUSEN_MODEL: fable-model
+      with-plugins:
+        env:
+          SAKUSEN_WITH_PLUGINS: "true"
+default_agent: claude-tmux:fable:with-plugins
+agent_aliases:
+  conversationist: claude-tmux:opus:with-plugins
+workflows:
+  - name: w
+    steps:
+      - name: s
+        prompt: p
+        agent: claude-tmux:with-plugins:opus
+`
+
+// TestCanonicalAgentRef locks the ref grammar: a ref is `parent[:modifier]*`,
+// the modifier tail sorts into the registry key, and a repeated modifier is
+// rejected rather than silently collapsed.
+func TestCanonicalAgentRef(t *testing.T) {
+	tests := []struct {
+		ref     string
+		want    string
+		wantErr string
+	}{
+		{ref: "claude", want: "claude"},
+		{ref: "claude:opus", want: "claude:opus"},
+		{ref: "claude:opus:with-plugins", want: "claude:opus:with-plugins"},
+		{ref: "claude:with-plugins:opus", want: "claude:opus:with-plugins"},
+		{ref: "claude:c:a:b", want: "claude:a:b:c"},
+		{ref: "claude:opus:opus", wantErr: `agent ref "claude:opus:opus": duplicate modifier "opus"`},
+	}
+	for _, tt := range tests {
+		got, err := canonicalAgentRef(tt.ref)
+		switch {
+		case tt.wantErr != "":
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("canonicalAgentRef(%q) error = %v, want %q", tt.ref, err, tt.wantErr)
+			}
+		case err != nil:
+			t.Errorf("canonicalAgentRef(%q): %v", tt.ref, err)
+		case got != tt.want:
+			t.Errorf("canonicalAgentRef(%q) = %q, want %q", tt.ref, got, tt.want)
+		}
+	}
+}
+
+// TestAgentComposedRefsExpansion verifies a ref may stack several of a
+// parent's variants as modifiers in any order: both orderings resolve to the
+// same record, the registry holds only canonical keys, and only referenced
+// combinations are expanded (no cross product).
+func TestAgentComposedRefsExpansion(t *testing.T) {
+	isolateHome(t)
+	dir, _ := setupProject(t, composedRefsYaml, nil)
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+
+	authored, ok := cfg.ResolveAgent("claude-tmux:with-plugins:opus")
+	if !ok {
+		t.Fatal("expected the authored ordering to resolve")
+	}
+	canonical, ok := cfg.ResolveAgent("claude-tmux:opus:with-plugins")
+	if !ok {
+		t.Fatal("expected the canonical ordering to resolve")
+	}
+	if !reflect.DeepEqual(authored, canonical) {
+		t.Errorf("orderings resolve differently:\n%+v\n%+v", authored, canonical)
+	}
+	if authored.Env["SAKUSEN_MODEL"] != "opus-model" || authored.Env["SAKUSEN_WITH_PLUGINS"] != "true" {
+		t.Errorf("composed env = %v, want both modifiers applied", authored.Env)
+	}
+	if authored.Env["KEEP"] != "base" {
+		t.Errorf("Env[KEEP] = %q, want the parent-only key to survive", authored.Env["KEEP"])
+	}
+	if authored.Command != "tmux-cmd" || !authored.IsTmux() {
+		t.Errorf("composed record = %+v, want the parent's command and mode inherited", authored)
+	}
+
+	for _, key := range []string{"claude-tmux", "claude-tmux:opus", "claude-tmux:fable", "claude-tmux:with-plugins",
+		"claude-tmux:opus:with-plugins", "claude-tmux:fable:with-plugins"} {
+		if _, ok := cfg.Agents[key]; !ok {
+			t.Errorf("registry is missing %q; have %v", key, sortedAgentKeys(cfg))
+		}
+	}
+	for _, key := range []string{"claude-tmux:with-plugins:opus", "claude-tmux:with-plugins:fable"} {
+		if _, ok := cfg.Agents[key]; ok {
+			t.Errorf("registry holds non-canonical key %q", key)
+		}
+	}
+	// Only refs that appear in the config are expanded.
+	if _, ok := cfg.Agents["claude-tmux:fable:opus"]; ok {
+		t.Error("unreferenced combination claude-tmux:fable:opus must not be materialized")
+	}
+	for key, rec := range cfg.Agents {
+		if rec.Variants != nil {
+			t.Errorf("stored record %q carries Variants", key)
+		}
+	}
+
+	wf := cfg.GetTaskWorkflow("w")
+	slug, agent, err := cfg.StepAgent(wf, &wf.Steps[0])
+	if err != nil {
+		t.Fatalf("StepAgent: %v", err)
+	}
+	if slug != "claude-tmux:with-plugins:opus" {
+		t.Errorf("StepAgent slug = %q, want the ref as authored", slug)
+	}
+	if agent.Env["SAKUSEN_MODEL"] != "opus-model" {
+		t.Errorf("StepAgent env = %v, want the composed record", agent.Env)
+	}
+}
+
+// sortedAgentKeys returns the registry keys sorted, for error messages.
+func sortedAgentKeys(cfg *Config) []string {
+	keys := make([]string, 0, len(cfg.Agents))
+	for k := range cfg.Agents {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// TestAgentComposedRefsThreeModifiers verifies a ref stacks an arbitrary
+// number of modifiers, not just a pair.
+func TestAgentComposedRefsThreeModifiers(t *testing.T) {
+	isolateHome(t)
+	yaml := "agents:\n  claude:\n    command: base-cmd\n    variants:\n" +
+		"      opus:\n        env:\n          SAKUSEN_MODEL: opus-model\n" +
+		"      with-plugins:\n        env:\n          SAKUSEN_PLUGINS: \"true\"\n" +
+		"      verbose:\n        env:\n          SAKUSEN_VERBOSE: \"1\"\n" +
+		"default_agent: claude:verbose:with-plugins:opus\n"
+	dir, _ := setupProject(t, yaml, nil)
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if _, ok := cfg.Agents["claude:opus:verbose:with-plugins"]; !ok {
+		t.Fatalf("registry is missing the canonical three-modifier key; have %v", sortedAgentKeys(cfg))
+	}
+	rec, ok := cfg.ResolveAgent("claude:with-plugins:opus:verbose")
+	if !ok {
+		t.Fatal("expected a third ordering of the same modifier set to resolve")
+	}
+	want := map[string]string{"SAKUSEN_MODEL": "opus-model", "SAKUSEN_PLUGINS": "true", "SAKUSEN_VERBOSE": "1"}
+	if !reflect.DeepEqual(rec.Env, want) {
+		t.Errorf("composed env = %v, want %v", rec.Env, want)
+	}
+}
+
+// TestAgentComposedRefsWholeField verifies a modifier may override any field a
+// single variant can, and that two modifiers setting the same field conflict
+// only when the values differ.
+func TestAgentComposedRefsWholeField(t *testing.T) {
+	t.Run("command modifier composes with an env modifier", func(t *testing.T) {
+		isolateHome(t)
+		yaml := "agents:\n  claude:\n    command: base-cmd\n    variants:\n" +
+			"      opus:\n        env:\n          M: opus\n" +
+			"      tracing:\n        command: traced-cmd\n" +
+			"default_agent: claude:opus:tracing\n"
+		dir, _ := setupProject(t, yaml, nil)
+		cfg, err := LoadForProject(dir)
+		if err != nil {
+			t.Fatalf("LoadForProject: %v", err)
+		}
+		rec, ok := cfg.ResolveAgent("claude:tracing:opus")
+		if !ok {
+			t.Fatal("expected the composed ref to resolve in either order")
+		}
+		if rec.Command != "traced-cmd" || rec.Env["M"] != "opus" {
+			t.Errorf("composed record = %+v, want the tracing command and the opus env", rec)
+		}
+	})
+
+	t.Run("two modifiers setting command differently conflict", func(t *testing.T) {
+		isolateHome(t)
+		yaml := "agents:\n  claude:\n    command: base-cmd\n    variants:\n" +
+			"      a:\n        command: a-cmd\n      b:\n        command: b-cmd\n" +
+			"default_agent: claude:a:b\n"
+		dir, _ := setupProject(t, yaml, nil)
+		_, err := LoadForProject(dir)
+		if err == nil || !strings.Contains(err.Error(), `modifiers "a" and "b" both set command to different values`) {
+			t.Fatalf("expected a command conflict naming both modifiers, got: %v", err)
+		}
+	})
+
+	t.Run("two modifiers setting command identically load", func(t *testing.T) {
+		isolateHome(t)
+		yaml := "agents:\n  claude:\n    command: base-cmd\n    variants:\n" +
+			"      a:\n        command: same-cmd\n      b:\n        command: same-cmd\n" +
+			"default_agent: claude:a:b\n"
+		dir, _ := setupProject(t, yaml, nil)
+		cfg, err := LoadForProject(dir)
+		if err != nil {
+			t.Fatalf("identical values must not conflict, got: %v", err)
+		}
+		if rec, _ := cfg.ResolveAgent("claude:a:b"); rec.Command != "same-cmd" {
+			t.Errorf("Command = %q, want same-cmd", rec.Command)
+		}
+	})
+}
+
+// TestAgentComposedRefsConflict verifies the env conflict rule: two modifiers
+// writing the same env key with different values is a load error naming both
+// modifiers and the key, while identical values compose fine.
+func TestAgentComposedRefsConflict(t *testing.T) {
+	base := "agents:\n  claude:\n    command: x\n    variants:\n" +
+		"      opus:\n        env:\n          SAKUSEN_MODEL: opus-model\n" +
+		"      fable:\n        env:\n          SAKUSEN_MODEL: %s\n" +
+		"default_agent: claude:opus:fable\n"
+
+	t.Run("different values conflict", func(t *testing.T) {
+		isolateHome(t)
+		dir, _ := setupProject(t, strings.Replace(base, "%s", "fable-model", 1), nil)
+		_, err := LoadForProject(dir)
+		if err == nil || !strings.Contains(err.Error(), `modifiers "fable" and "opus" both set env SAKUSEN_MODEL to different values`) {
+			t.Fatalf("expected an env conflict naming both modifiers and the key, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), `"claude:fable:opus"`) {
+			t.Errorf("conflict error should echo the canonical ref, got: %v", err)
+		}
+	})
+
+	t.Run("same value composes", func(t *testing.T) {
+		isolateHome(t)
+		dir, _ := setupProject(t, strings.Replace(base, "%s", "opus-model", 1), nil)
+		cfg, err := LoadForProject(dir)
+		if err != nil {
+			t.Fatalf("identical values must not conflict, got: %v", err)
+		}
+		if rec, _ := cfg.ResolveAgent("claude:opus:fable"); rec.Env["SAKUSEN_MODEL"] != "opus-model" {
+			t.Errorf("Env = %v, want SAKUSEN_MODEL=opus-model", rec.Env)
+		}
+	})
+}
+
+// TestAgentComposedRefsErrors covers the load-time rejections for composed
+// refs: unknown modifier, duplicate modifier, unknown parent, and a composed
+// record that fails shape validation.
+func TestAgentComposedRefsErrors(t *testing.T) {
+	variants := "agents:\n  claude:\n    command: x\n    variants:\n" +
+		"      opus:\n        env:\n          M: o\n      fable:\n        env:\n          M: f\n"
+
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr []string
+	}{
+		{
+			name:    "unknown modifier lists declared variants",
+			yaml:    variants + "default_agent: claude:opus:turbo\n",
+			wantErr: []string{`unknown modifier "turbo" for agent "claude"`, "declared variants: fable, opus"},
+		},
+		{
+			name:    "duplicate modifier rejected",
+			yaml:    variants + "default_agent: claude:opus:opus\n",
+			wantErr: []string{`agent ref "claude:opus:opus": duplicate modifier "opus"`, "default_agent"},
+		},
+		{
+			name:    "parent declaring no variants reports none",
+			yaml:    "agents:\n  plain:\n    command: x\ndefault_agent: plain:opus:fable\n",
+			wantErr: []string{`unknown modifier "fable" for agent "plain"`, "declared variants: none"},
+		},
+		{
+			name:    "unknown parent keeps the unknown-agent error",
+			yaml:    variants + "default_agent: nope:opus:fable\n",
+			wantErr: []string{`unknown agent "nope:opus:fable"`},
+		},
+		{
+			// Each modifier is valid alone on the tmux parent; only their
+			// composition produces a headless record with resume_command.
+			name: "composed record failing shape validation",
+			yaml: "agents:\n  claude-tmux:\n    mode: tmux\n    command: x\n    variants:\n" +
+				"      hl:\n        mode: headless\n      resumable:\n        resume_command: r\n" +
+				"default_agent: claude-tmux:resumable:hl\n",
+			wantErr: []string{"resume_command is only valid for tmux-mode agents", "claude-tmux:hl:resumable"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			dir, _ := setupProject(t, tt.yaml, nil)
+			_, err := LoadForProject(dir)
+			if err == nil {
+				t.Fatalf("expected an error containing %v", tt.wantErr)
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %v does not contain %q", err, want)
+				}
+			}
+		})
+	}
+
+	t.Run("composed ref in a track workflow is validated", func(t *testing.T) {
+		isolateHome(t)
+		dir, _ := setupProject(t, variants, map[string]string{
+			".sakusen/tracks/pay/workflows/impl.yml": "steps:\n  - name: s\n    prompt: p\n    agent: claude:opus:turbo\n",
+		})
+		_, err := LoadForProject(dir)
+		if err == nil || !strings.Contains(err.Error(), `unknown modifier "turbo"`) {
+			t.Fatalf("expected the track workflow's composed ref to be validated, got: %v", err)
+		}
+		if err != nil && !strings.Contains(err.Error(), `workflow "pay:impl" step "s"`) {
+			t.Errorf("error should name the track workflow step, got: %v", err)
+		}
+	})
+}
+
+// TestAgentComposedRefsAliasTarget verifies an alias may target a composed ref
+// and resolves to the composed record.
+func TestAgentComposedRefsAliasTarget(t *testing.T) {
+	isolateHome(t)
+	yaml := "agents:\n  claude:\n    command: x\n    variants:\n" +
+		"      opus:\n        env:\n          M: o\n      with-plugins:\n        env:\n          P: \"true\"\n" +
+		"agent_aliases:\n  implementer: claude:with-plugins:opus\n" +
+		"workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: p\n        agent: implementer\n"
+	dir, _ := setupProject(t, yaml, nil)
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	alias, ok := cfg.ResolveAgent("implementer")
+	if !ok {
+		t.Fatal("expected the alias in the registry")
+	}
+	composed, _ := cfg.ResolveAgent("claude:opus:with-plugins")
+	if !reflect.DeepEqual(alias, composed) {
+		t.Errorf("alias record = %+v, want the composed record %+v", alias, composed)
+	}
+	wf := cfg.GetTaskWorkflow("w")
+	if _, agent, err := cfg.StepAgent(wf, &wf.Steps[0]); err != nil || agent.Env["P"] != "true" {
+		t.Errorf("StepAgent via alias = (%+v, %v), want the composed record", agent, err)
+	}
+}
+
+// TestAgentComposedRefsLoopTmux verifies the loop/tmux rule applies to a
+// composed ref that resolves to a tmux record.
+func TestAgentComposedRefsLoopTmux(t *testing.T) {
+	isolateHome(t)
+	yaml := "agents:\n  claude-tmux:\n    mode: tmux\n    command: x\n    variants:\n" +
+		"      opus:\n        env:\n          M: o\n      with-plugins:\n        env:\n          P: \"true\"\n" +
+		"workflows:\n  - name: w\n    agent: claude-tmux:with-plugins:opus\n    steps:\n" +
+		"      - name: a\n        prompt: p\n" +
+		"      - name: b\n        prompt: p\n        loop:\n          goto: a\n          max_iterations: 2\n"
+	dir, _ := setupProject(t, yaml, nil)
+	_, err := LoadForProject(dir)
+	if err == nil || !strings.Contains(err.Error(), "loop steps cannot use a tmux-mode agent") {
+		t.Fatalf("expected the loop/tmux error for a composed tmux ref, got: %v", err)
+	}
+}
+
+// TestAgentVariantsYAMLAnchors documents the dedupe idiom for a variant block
+// shared by several parents: a YAML anchor, reused directly or extended with
+// the `<<:` merge key.
+func TestAgentVariantsYAMLAnchors(t *testing.T) {
+	isolateHome(t)
+	yaml := `
+x-models: &models
+  opus:
+    env:
+      SAKUSEN_MODEL: opus-model
+  fable:
+    env:
+      SAKUSEN_MODEL: fable-model
+
+agents:
+  claude:
+    command: headless-cmd
+    variants: *models
+  claude-tmux:
+    mode: tmux
+    command: tmux-cmd
+    variants:
+      <<: *models
+      with-plugins:
+        env:
+          SAKUSEN_WITH_PLUGINS: "true"
+default_agent: claude-tmux:opus:with-plugins
+`
+	dir, _ := setupProject(t, yaml, nil)
+	cfg, err := LoadForProject(dir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	for _, key := range []string{"claude:opus", "claude:fable", "claude-tmux:opus", "claude-tmux:fable",
+		"claude-tmux:with-plugins", "claude-tmux:opus:with-plugins"} {
+		if _, ok := cfg.Agents[key]; !ok {
+			t.Errorf("registry is missing %q; have %v", key, sortedAgentKeys(cfg))
+		}
+	}
+	if rec, _ := cfg.ResolveAgent("claude:opus"); rec.Command != "headless-cmd" || rec.Env["SAKUSEN_MODEL"] != "opus-model" {
+		t.Errorf("claude:opus = %+v, want the shared variant on the headless parent", rec)
+	}
+	if rec, _ := cfg.ResolveAgent("claude-tmux:opus:with-plugins"); rec.Env["SAKUSEN_WITH_PLUGINS"] != "true" || !rec.IsTmux() {
+		t.Errorf("claude-tmux:opus:with-plugins = %+v, want the merged variant block composed", rec)
+	}
 }

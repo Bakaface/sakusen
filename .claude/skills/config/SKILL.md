@@ -150,9 +150,21 @@ top-level `default_agent:` → `"claude"` (`DefaultAgentSlug`). Helpers: `StepAg
 `WorkflowAgentSlug`, `StepIsTmux`, `FirstStepIsTmux`, `ResolveAgent`,
 `EffectiveDefaultAgentSlug`. The agent's mode decides headless vs tmux execution.
 
+Variants and composed refs: an agent may declare `variants:` (variant name → partial record)
+that inherit every parent field and override only what they redefine (`env` merges per-key,
+variant wins; other fields override wholesale). `expandAgentVariants` inserts each as an
+ordinary `<parent>:<variant>` registry entry and clears `Variants` on stored records. A ref is
+`parent[:modifier]*`: it may stack any number of that parent's variants as modifiers in any
+order, `canonicalAgentRef` sorts them alphabetically into the registry key, and `ResolveAgent`
+canonicalizes before lookup (authored refs are never rewritten). `expandComposedAgentRefs`
+expands only the composed refs the config actually mentions (`default_agent`, workflow/step
+`agent:`, alias targets) — never the cross product. Two modifiers setting the same field or env
+key to different values is a load error, as are duplicate modifiers, modifiers the parent
+doesn't declare, and nested `variants:`.
+
 Merging: `mergeAgents` overlays project-tier records onto global-tier per slug (a redefined
-slug wins wholesale). `validateAgents` runs in `Load()`/`LoadForProject()` AFTER all tiers
-merge: record shape (kebab-case slug, required command, valid mode, tmux-only fields),
+slug wins wholesale). `resolveAndValidateAgents` runs in `Load()`/`LoadForProject()` AFTER all
+tiers merge: record shape (kebab-case slug, required command, valid mode, tmux-only fields),
 explicit `agent:`/`default_agent:` refs must resolve (the implicit `"claude"` fallback is
 exempt — it fails at step-run time with an instructive error), loop steps must not resolve to
 tmux agents, and `{{claude_command}}` in any tmux-setup-command is rejected (use
