@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -47,6 +48,16 @@ func duePeriodicDef(t *testing.T, database *db.DB, projID int64, name, cadence, 
 		t.Fatalf("upsert periodic %q: %v", name, err)
 	}
 	return d
+}
+
+// writeProjectConfig drops a .sakusen.yml into the project dir so
+// getProjectContext loads it (createTaskFromRequest resolves workflow pins
+// against the project config, not the server's fallback cfg).
+func writeProjectConfig(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, ".sakusen.yml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write .sakusen.yml: %v", err)
+	}
 }
 
 func TestReconcilePeriodics_UpsertAndSoftDelete(t *testing.T) {
@@ -122,6 +133,103 @@ func TestScheduledFire_CreatesTask(t *testing.T) {
 	}
 	if !reloaded.NextFireAt.After(time.Now()) {
 		t.Errorf("expected next_fire_at in the future, got %v", reloaded.NextFireAt)
+	}
+}
+
+// A materialized fire never sets CreateTaskRequest.Worktree, so the inline
+// entry's worktree pin (copied onto the hidden "periodic:<name>" workflow) is
+// the only thing standing between the task and the project default — which the
+// user's last interactive task creation mutates. This drives the full path:
+// on-disk .sakusen.yml → hidden workflow pin → materialized task row.
+func TestScheduledFire_InlineWorktreePinReachesTask(t *testing.T) {
+	// Isolate HOME/XDG so the user's real global config can't leak in.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	s, database, proj := newSchedulerTestServer(t)
+
+	// Project default is worktree-on (db default); the pin must win.
+	if !proj.DefaultWorktree {
+		t.Fatalf("expected project default worktree true, got false")
+	}
+
+	writeProjectConfig(t, proj.Path, `workflows:
+  - name: default
+    steps:
+      - name: impl
+        prompt: "do it"
+periodic:
+  - name: docs-refresh
+    cadence: "@every 5m"
+    worktree: false
+    input: "refresh the docs"
+    steps:
+      - name: refresh
+        prompt: "{{task.input}}"
+`)
+
+	d := duePeriodicDef(t, database, proj.ID, "docs-refresh", "@every 5m", "", "refresh the docs", "high")
+
+	s.fireDuePeriodics()
+	time.Sleep(200 * time.Millisecond)
+
+	runs, err := database.GetTasksForPeriodic(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 materialized task, got %d", len(runs))
+	}
+	if runs[0].Worktree {
+		t.Errorf("expected materialized task to honour the worktree: false pin")
+	}
+
+	// The pin must not leak into the persisted project default.
+	reloaded, err := database.GetProject(proj.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.DefaultWorktree {
+		t.Errorf("periodic pin must not clobber the project default worktree")
+	}
+}
+
+// Without a pin the fire still inherits the project default, so the pin is
+// genuinely what changes the outcome above.
+func TestScheduledFire_InlineWithoutPinInheritsProjectDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	s, database, proj := newSchedulerTestServer(t)
+
+	writeProjectConfig(t, proj.Path, `workflows:
+  - name: default
+    steps:
+      - name: impl
+        prompt: "do it"
+periodic:
+  - name: docs-refresh
+    cadence: "@every 5m"
+    input: "refresh the docs"
+    steps:
+      - name: refresh
+        prompt: "{{task.input}}"
+`)
+
+	d := duePeriodicDef(t, database, proj.ID, "docs-refresh", "@every 5m", "", "refresh the docs", "high")
+
+	s.fireDuePeriodics()
+	time.Sleep(200 * time.Millisecond)
+
+	runs, err := database.GetTasksForPeriodic(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 materialized task, got %d", len(runs))
+	}
+	if runs[0].Worktree != proj.DefaultWorktree {
+		t.Errorf("expected unpinned fire to inherit project default %v, got %v", proj.DefaultWorktree, runs[0].Worktree)
 	}
 }
 

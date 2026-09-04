@@ -677,6 +677,10 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 				Agent:            p.Agent,
 				Steps:            p.Steps,
 				SummarizerPrompt: p.SummarizerPrompt,
+				Worktree:         p.Worktree,
+				Branch:           p.Branch,
+				Checkout:         p.Checkout,
+				Target:           p.Target,
 				Hidden:           true,
 				Source:           "periodic",
 			}

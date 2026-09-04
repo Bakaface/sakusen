@@ -313,3 +313,148 @@ periodic:
 		t.Fatalf("expected no diagnostics, got: %+v", diags)
 	}
 }
+
+// Inline-mode entries carry the New Task pins onto the hidden
+// "periodic:<name>" workflow, which is the only lever a materialized fire has
+// (CreateTaskRequest never sets them) for escaping the project default.
+func TestResolvePeriodic_InlinePinsCopiedToHiddenWorkflow(t *testing.T) {
+	// Isolate HOME/XDG so the user's real global config can't leak in.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := writeTempConfig(t, periodicBaseWorkflows+`
+periodic:
+  - name: docs-refresh
+    cadence: "@every 5m"
+    worktree: false
+    steps:
+      - name: refresh
+        prompt: "refresh the docs"
+  - name: nightly
+    cadence: "0 3 * * *"
+    worktree: true
+    branch: "periodic/nightly-{{task.id}}"
+    target: main
+    steps:
+      - name: run
+        prompt: "run it"
+`)
+	cfg, err := LoadForProject(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+
+	docs := cfg.GetWorkflow("periodic:docs-refresh")
+	if docs == nil {
+		t.Fatal("expected hidden workflow periodic:docs-refresh")
+	}
+	if docs.Worktree == nil || *docs.Worktree {
+		t.Fatalf("expected worktree pinned false, got %v", docs.Worktree)
+	}
+
+	nightly := cfg.GetWorkflow("periodic:nightly")
+	if nightly == nil {
+		t.Fatal("expected hidden workflow periodic:nightly")
+	}
+	if nightly.Worktree == nil || !*nightly.Worktree {
+		t.Fatalf("expected worktree pinned true, got %v", nightly.Worktree)
+	}
+	if nightly.Branch != "periodic/nightly-{{task.id}}" {
+		t.Errorf("branch pin not copied, got %q", nightly.Branch)
+	}
+	if nightly.Target != "main" {
+		t.Errorf("target pin not copied, got %q", nightly.Target)
+	}
+}
+
+func TestResolvePeriodic_InlineCheckoutPinCopied(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := writeTempConfig(t, periodicBaseWorkflows+`
+periodic:
+  - name: staging-sweep
+    cadence: "@every 1h"
+    checkout: staging
+    steps:
+      - name: sweep
+        prompt: "sweep"
+`)
+	cfg, err := LoadForProject(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := cfg.GetWorkflow("periodic:staging-sweep")
+	if wf == nil || wf.Checkout != "staging" {
+		t.Fatalf("checkout pin not copied: %+v", wf)
+	}
+}
+
+// In ref mode the referenced workflow's own pins apply and the entry's pins are
+// ignored — the same way Agent and SummarizerPrompt are ignored there.
+func TestResolvePeriodic_RefModeIgnoresEntryPins(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := writeTempConfig(t, `
+workflows:
+  - name: default
+    worktree: true
+    steps:
+      - name: implementing
+        prompt: "do the thing"
+periodic:
+  - name: nightly
+    cadence: "0 3 * * *"
+    workflow: default
+    worktree: false
+`)
+	cfg, err := LoadForProject(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	// GetWorkflow falls back to the default workflow for unknown names, so
+	// scan the resolved list directly.
+	for i := range cfg.Workflows {
+		if cfg.Workflows[i].Name == "periodic:nightly" {
+			t.Fatalf("ref mode must not register a hidden workflow, got %+v", cfg.Workflows[i])
+		}
+	}
+	wf := cfg.GetWorkflow("default")
+	if wf == nil || wf.Worktree == nil || !*wf.Worktree {
+		t.Fatalf("referenced workflow's own pin must survive, got %+v", wf)
+	}
+}
+
+// The inline workflow goes through the ordinary ValidatePins path, so pin
+// combinations that are illegal on a workflow are illegal on a periodic entry.
+func TestValidatePeriodic_RejectBranchWithWorktreeFalse(t *testing.T) {
+	path := writeTempConfig(t, periodicBaseWorkflows+`
+periodic:
+  - name: bad
+    cadence: "@every 5m"
+    worktree: false
+    branch: "periodic/bad"
+    steps:
+      - name: ping
+        prompt: "say hi"
+`)
+	err := ValidateFile(path)
+	if err == nil || !strings.Contains(err.Error(), "worktree: false") {
+		t.Fatalf("expected worktree/branch pin conflict error, got: %v", err)
+	}
+}
+
+func TestValidatePeriodic_RejectBranchAndCheckout(t *testing.T) {
+	path := writeTempConfig(t, periodicBaseWorkflows+`
+periodic:
+  - name: bad
+    cadence: "@every 5m"
+    branch: "periodic/bad"
+    checkout: staging
+    steps:
+      - name: ping
+        prompt: "say hi"
+`)
+	err := ValidateFile(path)
+	if err == nil || !strings.Contains(err.Error(), "both branch and checkout") {
+		t.Fatalf("expected branch/checkout conflict error, got: %v", err)
+	}
+}

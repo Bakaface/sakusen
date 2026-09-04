@@ -141,6 +141,23 @@ type PeriodicEntry struct {
 	// SummarizerPrompt is the inline-workflow summarizer prompt. Ignored in ref mode.
 	SummarizerPrompt string `yaml:"summarizer_prompt,omitempty"`
 
+	// Worktree, Branch, Checkout and Target are the inline-workflow New Task
+	// pins (see the same-named WorkflowConfig fields). They are copied verbatim
+	// onto the hidden "periodic:<name>" workflow, so materialized fires pick
+	// them up through the ordinary workflow-pin path in createTaskFromRequest.
+	// Without them an inline entry could only inherit the project default,
+	// which the user's last interactive task creation mutates.
+	//
+	// Ignored in ref mode — the referenced workflow's own pins apply, the same
+	// way Agent and SummarizerPrompt are ignored there.
+	//
+	// The Input pin is deliberately absent: PeriodicEntry.Input already sets
+	// the materialized task's input directly.
+	Worktree *bool  `yaml:"worktree,omitempty"`
+	Branch   string `yaml:"branch,omitempty"`
+	Checkout string `yaml:"checkout,omitempty"`
+	Target   string `yaml:"target,omitempty"`
+
 	// Input becomes the task input ({{task.input}}) for each fire. Optional —
 	// when empty, no step prompt of the effective workflow may reference
 	// {{task.input}} (enforced in validation).
