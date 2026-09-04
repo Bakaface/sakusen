@@ -2,6 +2,9 @@ package mcp
 
 import (
 	"context"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/client"
@@ -11,11 +14,18 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// defaultListTasksLimit caps a listing that doesn't ask for a size, so an
+// agent calling list_tasks on a long-lived project doesn't pull every task
+// ever created into its context.
+const defaultListTasksLimit = 50
+
 // ListTasksArgs is the typed input schema for list_tasks.
 type ListTasksArgs struct {
 	AllProjects bool   `json:"all_projects,omitempty" jsonschema:"List tasks across every project known to the daemon. Default false lists only the resolved project's tasks."`
 	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the git toplevel of the MCP process's cwd. Ignored when all_projects is true."`
 	Status      string `json:"status,omitempty" jsonschema:"Filter to tasks whose status (raw or effective) equals this value, e.g. pending, running, awaiting-approval, merge-blocked, completed, failed, merge-failed."`
+	Track       string `json:"track,omitempty" jsonschema:"Filter to tasks attached to this track (slug or numeric ID). Tasks with no track are excluded."`
+	Limit       *int   `json:"limit,omitempty" jsonschema:"Maximum number of tasks to return, newest first. Defaults to 50; pass 0 for no limit."`
 }
 
 // TaskSummary is a compact per-task view for list responses. Heavy fields
@@ -26,6 +36,8 @@ type TaskSummary struct {
 	ProjectName     string     `json:"project_name,omitempty"`
 	ProjectPath     string     `json:"project_path,omitempty"`
 	Title           string     `json:"title"`
+	Slug            string     `json:"slug,omitempty"`
+	Track           string     `json:"track,omitempty"`
 	Status          string     `json:"status"`
 	EffectiveStatus string     `json:"effective_status"`
 	Priority        string     `json:"priority"`
@@ -42,16 +54,19 @@ type TaskSummary struct {
 // ListTasksResult is the payload returned by list_tasks. Project fields are
 // only set for project-scoped listings.
 type ListTasksResult struct {
-	ProjectName string        `json:"project_name,omitempty"`
-	ProjectPath string        `json:"project_path,omitempty"`
-	Count       int           `json:"count"`
-	Tasks       []TaskSummary `json:"tasks"`
+	ProjectName string `json:"project_name,omitempty"`
+	ProjectPath string `json:"project_path,omitempty"`
+	Count       int    `json:"count"`
+	// TotalMatched is how many tasks matched the filters before limit
+	// truncation, so a capped listing can't be mistaken for the whole set.
+	TotalMatched int           `json:"total_matched"`
+	Tasks        []TaskSummary `json:"tasks"`
 }
 
 func registerListTasks(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"list_tasks",
-		mcp.WithDescription("List sakusen tasks as compact summaries — for the current project by default, or across all projects with all_projects=true. Optionally filter by status. Use get_task for full details (description, steps, output) on a specific task."),
+		mcp.WithDescription("List sakusen tasks as compact summaries — for the current project by default, or across all projects with all_projects=true. Optionally filter by status and/or track. Results are newest-first and capped at 50 by default; compare count against total_matched to see whether the cap truncated the listing, and raise or lift it with limit. Use get_task for full details (description, steps, output) on a specific task."),
 		mcp.WithInputSchema[ListTasksArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args ListTasksArgs) (*mcp.CallToolResult, error) {
@@ -89,17 +104,63 @@ func handleListTasks(c *client.Client, args ListTasksArgs) (*mcp.CallToolResult,
 		result.ProjectPath = root
 	}
 
-	summaries := make([]TaskSummary, 0, len(tasks))
+	limit := defaultListTasksLimit
+	if args.Limit != nil {
+		if *args.Limit < 0 {
+			return resultErr("limit must not be negative (pass 0 for no limit)")
+		}
+		limit = *args.Limit
+	}
+
+	track := strings.ToLower(strings.TrimSpace(args.Track))
+
+	matched := make([]daemon.TaskInfo, 0, len(tasks))
 	for _, t := range tasks {
 		if args.Status != "" && t.Status != args.Status && t.EffectiveStatus != args.Status {
 			continue
 		}
+		if track != "" && !taskOnTrack(t, track) {
+			continue
+		}
+		matched = append(matched, t)
+	}
+
+	// Newest first, so a capped listing keeps the tasks an agent is most
+	// likely to be reasoning about.
+	sort.SliceStable(matched, func(i, j int) bool {
+		if !matched[i].CreatedAt.Equal(matched[j].CreatedAt) {
+			return matched[i].CreatedAt.After(matched[j].CreatedAt)
+		}
+		return matched[i].ID > matched[j].ID
+	})
+	totalMatched := len(matched)
+	if limit > 0 && totalMatched > limit {
+		matched = matched[:limit]
+	}
+
+	summaries := make([]TaskSummary, 0, len(matched))
+	for _, t := range matched {
 		summaries = append(summaries, taskSummaryFrom(t))
 	}
 
 	result.Count = len(summaries)
+	result.TotalMatched = totalMatched
 	result.Tasks = summaries
 	return jsonResult(result)
+}
+
+// taskOnTrack matches a lowercased track ref against a task's attached track,
+// by slug or by numeric track ID.
+func taskOnTrack(t daemon.TaskInfo, ref string) bool {
+	if t.Track != "" && strings.ToLower(t.Track) == ref {
+		return true
+	}
+	if t.TrackID != nil {
+		if id, err := strconv.ParseInt(ref, 10, 64); err == nil && *t.TrackID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // narrowToProjectPath keeps only tasks whose project path matches root when at
@@ -125,6 +186,8 @@ func taskSummaryFrom(t daemon.TaskInfo) TaskSummary {
 		ProjectName:     t.ProjectName,
 		ProjectPath:     t.ProjectPath,
 		Title:           t.Title,
+		Slug:            t.Slug,
+		Track:           t.Track,
 		Status:          t.Status,
 		EffectiveStatus: t.EffectiveStatus,
 		Priority:        t.Priority,

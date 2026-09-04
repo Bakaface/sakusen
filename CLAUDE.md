@@ -21,9 +21,10 @@ internal/
   agent/             Agent state management
   task/              Task lifecycle and state transitions
   tmux/              Tmux session management for interactive tasks
-  mcp/               MCP server exposing sakusen tools (create_task, get_task, list_workflows,
-                     create_tasks_and_wait, wait_for_tasks, update_step_context,
-                     create_track, update_track_context, update_track_description,
+  mcp/               MCP server exposing sakusen tools (create_task, create_tasks_and_wait,
+                     wait_for_tasks, get_task, list_tasks, list_workflows, retry_task,
+                     advance_task, stop_task, continue_task, update_task,
+                     update_step_context, create_track, get_track, update_track,
                      list_tracks)
   notify/            Notification support
   client/            Client for daemon communication

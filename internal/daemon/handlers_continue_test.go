@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // interactiveAgent picks the agent record for ad-hoc tmux sessions (continue,
@@ -128,5 +129,127 @@ func TestInteractiveAgent_ErrorsWhenNoTmuxAgent(t *testing.T) {
 				t.Errorf("error should name the conventional slug %q for guidance, got: %v", interactiveAgentSlug, err)
 			}
 		})
+	}
+}
+
+// TestHandleContinueTask_TerminalOnly covers the agent-facing continue guard:
+// with TerminalOnly set the handler must reject every non-terminal task —
+// crucially including the awaiting-approval/tmux pair it would otherwise route
+// to continuePausedTask, which is the human approval gate.
+func TestHandleContinueTask_TerminalOnly(t *testing.T) {
+	rejected := []task.Status{
+		task.StatusAwaitingApproval,
+		task.StatusTmux,
+		task.StatusPending,
+		task.StatusRunning,
+	}
+	for _, status := range rejected {
+		t.Run("rejects "+string(status), func(t *testing.T) {
+			s, projID := setupServerWithProject(t)
+			tk, err := s.database.CreateTask(projID, "t", "desc", "slug", "wf", "main", status, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			clientConn, serverConn := pipeForHandler(t)
+			go s.handleContinueTask(serverConn, ContinueTaskRequest{
+				TaskID:       tk.ID,
+				Workflow:     "wf",
+				TerminalOnly: true,
+			})
+
+			msg := readOneMessage(t, clientConn)
+			if msg.Type != MsgError {
+				t.Fatalf("expected MsgError for status %s, got %s: %s", status, msg.Type, string(msg.Payload))
+			}
+			var resp ErrorResponse
+			if err := msg.DecodePayload(&resp); err != nil {
+				t.Fatalf("decode error payload: %v", err)
+			}
+			if !strings.Contains(resp.Message, "task is not terminal") ||
+				!strings.Contains(resp.Message, string(status)) {
+				t.Errorf("error should name the non-terminal status, got %q", resp.Message)
+			}
+
+			// The rejection must land before any state change.
+			refreshed, err := s.database.GetTask(tk.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if refreshed.Status != status {
+				t.Errorf("task status changed to %s despite rejection", refreshed.Status)
+			}
+		})
+	}
+
+	permitted := []task.Status{
+		task.StatusCompleted,
+		task.StatusFailed,
+		task.StatusMergeFailed,
+	}
+	for _, status := range permitted {
+		t.Run("permits "+string(status), func(t *testing.T) {
+			s, projID := setupServerWithProject(t)
+			tk, err := s.database.CreateTask(projID, "t", "desc", "slug", "wf", "main", status, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			clientConn, serverConn := pipeForHandler(t)
+			go s.handleContinueTask(serverConn, ContinueTaskRequest{
+				TaskID:       tk.ID,
+				Workflow:     "follow-up",
+				Prompt:       "keep going",
+				TerminalOnly: true,
+			})
+
+			msg := readOneMessage(t, clientConn)
+			if msg.Type != MsgContinueTask {
+				t.Fatalf("expected MsgContinueTask for status %s, got %s: %s", status, msg.Type, string(msg.Payload))
+			}
+
+			refreshed, err := s.database.GetTask(tk.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if refreshed.Status != task.StatusPending {
+				t.Errorf("continued task should be reset to pending, got %s", refreshed.Status)
+			}
+			if refreshed.Workflow != "follow-up" {
+				t.Errorf("workflow: got %q, want follow-up", refreshed.Workflow)
+			}
+			if refreshed.Input != "keep going" {
+				t.Errorf("input: got %q, want the new prompt", refreshed.Input)
+			}
+		})
+	}
+}
+
+// TestHandleContinueTask_PausedTaskStillContinuableWithoutFlag pins that the
+// human approval path is untouched when TerminalOnly is not set: the handler
+// must reach continuePausedTask rather than the terminal-state rejection.
+func TestHandleContinueTask_PausedTaskStillContinuableWithoutFlag(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	tk, err := s.database.CreateTask(projID, "t", "desc", "slug", "wf", "main", task.StatusAwaitingApproval, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientConn, serverConn := pipeForHandler(t)
+	go s.handleContinueTask(serverConn, ContinueTaskRequest{TaskID: tk.ID, Workflow: "wf"})
+
+	msg := readOneMessage(t, clientConn)
+	if msg.Type != MsgError {
+		// Without a real project on disk the paused path fails later, at
+		// worktree/agent setup — what matters is that it got past the
+		// terminal-state check at all.
+		return
+	}
+	var resp ErrorResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if strings.Contains(resp.Message, "task is not terminal") {
+		t.Errorf("paused task must not hit the terminal-only rejection: %q", resp.Message)
 	}
 }

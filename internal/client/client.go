@@ -566,7 +566,18 @@ func (c *Client) CreateTaskWithOptions(req daemon.CreateTaskRequest) (*daemon.Ta
 }
 
 func (c *Client) ContinueTask(id int64, workflow, prompt string) (*daemon.TaskInfo, error) {
-	msg, err := c.request(daemon.MsgContinueTask, daemon.ContinueTaskRequest{TaskID: id, Workflow: workflow, Prompt: prompt})
+	return c.continueTask(daemon.ContinueTaskRequest{TaskID: id, Workflow: workflow, Prompt: prompt})
+}
+
+// ContinueTaskTerminalOnly continues a task only if it is terminal, so it can
+// never resume one paused at a human approval gate (which plain ContinueTask
+// does). Used by the agent-facing MCP surface.
+func (c *Client) ContinueTaskTerminalOnly(id int64, workflow, prompt string) (*daemon.TaskInfo, error) {
+	return c.continueTask(daemon.ContinueTaskRequest{TaskID: id, Workflow: workflow, Prompt: prompt, TerminalOnly: true})
+}
+
+func (c *Client) continueTask(req daemon.ContinueTaskRequest) (*daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgContinueTask, req)
 	if err != nil {
 		return nil, err
 	}
@@ -886,7 +897,7 @@ func (c *Client) SetTrackContext(projectPath, ref, context, mode string) error {
 
 // UpdateTaskTrackContext writes context to the calling task's own track. The
 // daemon rejects tasks with no track or no active step — the own-track-only
-// enforcement backing the update_track_context MCP tool.
+// enforcement backing the update_track MCP tool.
 func (c *Client) UpdateTaskTrackContext(taskID int64, context, mode string) error {
 	return c.requestOK(daemon.MsgUpdateTaskTrackContext, daemon.UpdateTaskTrackContextRequest{
 		TaskID:  taskID,
@@ -908,7 +919,7 @@ func (c *Client) SetTrackDescription(projectPath, ref, description string) error
 
 // UpdateTaskTrackDescription replaces the description of the calling task's own
 // track. The daemon rejects tasks with no track or no active step — the
-// own-track-only enforcement backing the update_track_description MCP tool.
+// own-track-only enforcement backing the update_track MCP tool.
 func (c *Client) UpdateTaskTrackDescription(taskID int64, description string) error {
 	return c.requestOK(daemon.MsgUpdateTaskTrackDescription, daemon.UpdateTaskTrackDescriptionRequest{
 		TaskID:      taskID,

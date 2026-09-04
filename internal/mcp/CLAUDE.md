@@ -6,25 +6,36 @@ irrecoverably destructive operations**.
 
 ## Critical Invariants
 
-- **No irrecoverable operations**: the surface is `create_task`, `get_task`, `list_tasks`,
-  `list_workflows`, `retry_task`, `advance_task`, `update_task_input`,
-  `update_task_dependencies`, `create_tasks_and_wait`, `wait_for_tasks`,
-  `update_step_context`, `create_track`, `update_track_context`,
-  `update_track_description`, `list_tracks`. Do not add
-  `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision —
+- **No irrecoverable operations**: the 16-tool surface is `create_task`,
+  `create_tasks_and_wait`, `wait_for_tasks`, `get_task`, `list_tasks`, `list_workflows`,
+  `retry_task`, `advance_task`, `stop_task`, `continue_task`, `update_task`,
+  `update_step_context`, `create_track`, `get_track`, `update_track`, `list_tracks`. Do not
+  add `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision —
   every exposed mutation must be recoverable (re-editable DB state or a re-queued task;
   `retry_task` stops only the task's own agent and preserves worktree/branch).
   `update_step_context` is admitted because the daemon enforces that it can only write to
   the calling task's currently-active step (see `handleUpdateActiveStepContext`).
   `advance_task` is admitted because the daemon only accepts it for tasks in tmux state and
-  a premature advance is recoverable via `retry_task`. `update_track_context` is admitted
-  because the daemon enforces it can only write the **calling task's own track** (the task
-  must have a track and an active step — see `handleUpdateTaskTrackContext`).
-  `update_track_description` is admitted on the same grounds: own-track-enforced via
-  `handleUpdateTaskTrackDescription`, and a plain re-editable DB field. Caveat: track
-  context is a **persistent cross-task prompt-injection surface** — anything written flows
-  verbatim into the prompts of every future task attached to that track or its children;
-  the tool descriptions warn about this.
+  a premature advance is recoverable via `retry_task`. `stop_task` is admitted on the same
+  grounds as `retry_task`: it stops only the task's own agent and deletes nothing (the task
+  keeps its pre-stop status — there is no "stopped" status — so recovery is `retry_task`,
+  or the daemon's restart-time orphan recovery). `update_track` is admitted because the
+  daemon enforces it can only write the **calling task's own track** (the task must have a
+  track and an active step — see `handleUpdateTaskTrackContext` /
+  `handleUpdateTaskTrackDescription`), and both fields are plain re-editable DB values.
+  Caveat: track context is a **persistent cross-task prompt-injection surface** — anything
+  written flows verbatim into the prompts of every future task attached to that track or
+  its children; the tool descriptions warn about this.
+- **Agents must never approve a human gate**: `handleContinueTask` doubles as the
+  approval-resume path for awaiting-approval/tmux tasks, so `continue_task` always sets
+  `terminal_only` on the daemon request and the daemon rejects any non-terminal task
+  *before* that routing. Keep the check daemon-side — an MCP-side status pre-check would be
+  raceable. `advance_task`'s tmux-state-only admission is the other half of this rule.
+- **Env-var defaulting**: `create_tasks_and_wait`, `wait_for_tasks`, `update_step_context`
+  and `update_track` default their identity args from `$SAKUSEN_TASK_ID` (and
+  `update_step_context`'s `step_name` from `$SAKUSEN_STEP`) via `env.go`. Explicit
+  arguments always win. This is a convenience only — the daemon's own-task/own-step/
+  own-track checks are what make the tools safe, not the caller's honesty.
 - **Project resolution is per-call**: `resolveProjectPath()` in `project.go` falls back to
   `git rev-parse --show-toplevel` against the caller's cwd when `project_path` is omitted,
   matching how the TUI resolves projects so tasks land on the same project row.
@@ -37,20 +48,21 @@ irrecoverably destructive operations**.
 |------|---------|
 | `server.go` | `Serve(cfg)` entry point, tool registration, MCP-result error helper |
 | `project.go` | `resolveProjectPath()` — explicit → cwd → git toplevel |
-| `tool_create_task.go` | `create_task` tool definition + handler |
-| `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tools |
+| `env.go` | `resolveParentTaskID` / `resolveTaskID` / `resolveStepName` — explicit arg → engine env var |
+| `tool_create_task.go` | `create_task` tool definition + handler; `jsonResult` helper |
+| `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |
 | `tool_get_task.go` | `get_task` tool definition + handler |
-| `tool_list_tasks.go` | `list_tasks` tool — project-scoped or global compact summaries |
+| `tool_list_tasks.go` | `list_tasks` tool — project-scoped or global compact summaries, status/track filters, newest-first limit |
 | `tool_list_workflows.go` | `list_workflows` tool definition + handler |
 | `tool_retry_task.go` | `retry_task` tool — full or from-step retry |
 | `tool_advance_task.go` | `advance_task` tool — mark a tmux step done (next step or finalize) |
-| `tool_update_task_input.go` | `update_task_input` tool definition + handler |
-| `tool_update_task_dependencies.go` | `update_task_dependencies` tool — add/remove blocked_by edges |
+| `tool_stop_task.go` | `stop_task` tool — stop the task's own agent, status unchanged |
+| `tool_continue_task.go` | `continue_task` tool — re-run a terminal task under a required workflow (always `terminal_only`) |
+| `tool_update_task.go` | `update_task` envelope — input/title/priority/blocked_by edits |
 | `tool_update_step_context.go` | `update_step_context` tool definition + handler |
-| `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |
 | `tool_create_track.go` | `create_track` tool definition + handler |
-| `tool_update_track_context.go` | `update_track_context` tool definition + handler (own-track-only) |
-| `tool_update_track_description.go` | `update_track_description` tool definition + handler (own-track-only, replace-only) |
+| `tool_get_track.go` | `get_track` tool — full own context, ancestor chain, rendered `{{track.context}}` |
+| `tool_update_track.go` | `update_track` envelope — own-track context and/or description |
 | `tool_list_tracks.go` | `list_tracks` tool definition + handler |
 
 ## Conventions

@@ -514,7 +514,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		"SAKUSEN_PROJECT_PATH": e.repoRoot,
 	}
 	if t.TrackID != nil {
-		// Lets agents target "their" track via the update_track_context MCP tool.
+		// Lets agents target "their" track via the update_track MCP tool.
 		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 	// The resolved agent slug, so stubs/scripts can tell which agent record a

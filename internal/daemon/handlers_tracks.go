@@ -234,7 +234,7 @@ func (s *Server) resolveOwnTrackID(taskID int64) (int64, error) {
 }
 
 // handleUpdateTaskTrackContext is the own-track-only track context write for
-// agents (the update_track_context MCP tool).
+// agents (the update_track MCP tool).
 func (s *Server) handleUpdateTaskTrackContext(conn net.Conn, req UpdateTaskTrackContextRequest) {
 	if req.TaskID <= 0 {
 		s.sendError(conn, "task_id is required")
@@ -288,7 +288,7 @@ func (s *Server) handleSetTrackDescription(conn net.Conn, req SetTrackDescriptio
 }
 
 // handleUpdateTaskTrackDescription is the own-track-only track description
-// write for agents (the update_track_description MCP tool).
+// write for agents (the update_track MCP tool).
 func (s *Server) handleUpdateTaskTrackDescription(conn net.Conn, req UpdateTaskTrackDescriptionRequest) {
 	if req.TaskID <= 0 {
 		s.sendError(conn, "task_id is required")

@@ -3,8 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 
 	"github.com/Bakaface/sakusen/internal/client"
 	"github.com/Bakaface/sakusen/internal/daemon"
@@ -188,24 +186,4 @@ func handleWaitForTasks(c *client.Client, args WaitForTasksArgs) (*mcp.CallToolR
 		Children:     children,
 		Message:      msg,
 	})
-}
-
-// resolveParentTaskID returns explicit if non-zero, else parses the
-// SAKUSEN_TASK_ID env var that the workflow engine sets for every step's
-// Claude subprocess (and which MCP servers spawned inside that process
-// inherit). Returns an explanatory error if neither source is available so
-// the agent gets a clear remediation hint.
-func resolveParentTaskID(explicit int64) (int64, error) {
-	if explicit > 0 {
-		return explicit, nil
-	}
-	env := os.Getenv("SAKUSEN_TASK_ID")
-	if env == "" {
-		return 0, fmt.Errorf("parent_task_id is required (SAKUSEN_TASK_ID env var not set; this tool must be called from a running sakusen step)")
-	}
-	id, err := strconv.ParseInt(env, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("invalid SAKUSEN_TASK_ID=%q", env)
-	}
-	return id, nil
 }

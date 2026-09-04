@@ -1,10 +1,11 @@
 // Package mcp implements a Model Context Protocol server that lets Claude Code
 // (or any MCP client) interact with a running sakusen daemon over its Unix
 // socket. The server speaks MCP over stdio and exposes task lifecycle
-// management: creating, listing, retrying, advancing, and editing tasks,
-// managing dependencies, listing workflows, reading task state, and creating
-// tracks and publishing step/track context. Irrecoverably destructive
-// operations (delete, revert, cleanup) are not exposed.
+// management: creating, listing, retrying, advancing, stopping, continuing,
+// and editing tasks, managing dependencies, listing workflows, reading task
+// state, and creating/reading tracks and publishing step/track context.
+// Irrecoverably destructive operations (delete, revert, cleanup) are not
+// exposed.
 package mcp
 
 import (
@@ -65,14 +66,29 @@ func Serve(cfg *config.Config) error {
 // stop agents, or retry/revert tasks. The worst-case is that an agent
 // overwrites its own in-flight context — recoverable by re-running the step.
 //
-// retry_task, update_task_description, list_tasks, and
-// update_task_dependencies were added as an explicit design decision
-// (task #217) to let orchestrating agents manage the task lifecycle. All are
-// recoverable mutations: retry_task stops the task's own agent and re-queues
-// it (no work is deleted — worktree and branch survive; a from-step retry
-// preserves earlier step contexts), description and dependency edits are
-// plain re-editable DB updates, and list_tasks is read-only. Task deletion,
-// revert, and worktree cleanup remain off the surface.
+// retry_task, list_tasks, and update_task were added as an explicit design
+// decision (task #217) to let orchestrating agents manage the task lifecycle.
+// All are recoverable mutations: retry_task stops the task's own agent and
+// re-queues it (no work is deleted — worktree and branch survive; a from-step
+// retry preserves earlier step contexts), update_task's input/title/priority
+// and dependency edits are plain re-editable DB updates, and list_tasks is
+// read-only. Task deletion, revert, and worktree cleanup remain off the
+// surface.
+//
+// stop_task carries the same admission argument as retry_task: it stops only
+// the task's OWN agent, deletes nothing, and leaves the worktree and branch
+// intact. The task keeps its pre-stop status (there is no "stopped" status),
+// so recovery is retry_task — or a daemon restart, whose orphan recovery
+// resets a stranded running task to pending.
+//
+// continue_task re-runs a TERMINAL task under a named workflow. It always
+// sets terminal_only on the daemon request, which makes the daemon reject any
+// non-terminal task before its awaiting-approval/tmux routing — that same
+// handler is the human-gate approval path, and an agent must never be able to
+// approve its own gate. The check is daemon-side (not an MCP-side status
+// pre-check) so it cannot be raced. No work is deleted: the branch and
+// worktree survive the reset, and an explicit workflow is required so a
+// continue never falls back to the legacy no-workflow tmux path.
 //
 // advance_task is an explicit design decision to let a Claude Code session
 // signal "this tmux step is done" from outside the tmux pane (the in-pane
@@ -81,32 +97,34 @@ func Serve(cfg *config.Config) error {
 // at the next step or runs the same finalization the TUI's advance/finalize
 // keybind triggers. If it advanced too early, retry_task re-runs the step.
 //
-// create_track and list_tracks are additive/read-only. update_track_context
-// and update_track_description are admitted with the same admission argument
-// as update_step_context: the daemon enforces they can only write the CALLING
-// task's own track (the task must have a track and an active step), and both
-// are plain re-editable DB updates. Note the trust-model caveat, though: track
-// context is a PERSISTENT, CROSS-TASK prompt-injection surface — anything an
-// agent writes flows verbatim into the prompts of every future task attached
-// to that track or its children. That is the feature (gradual context
+// create_track is additive; list_tracks and get_track are read-only.
+// update_track (context and/or description) is admitted with the same
+// admission argument as update_step_context: the daemon enforces it can only
+// write the CALLING task's own track (the task must have a track and an
+// active step), and both fields are plain re-editable DB updates. Note the
+// trust-model caveat, though: track context is a PERSISTENT, CROSS-TASK
+// prompt-injection surface — anything an agent writes flows verbatim into the
+// prompts of every future task attached to that track or its children. That
+// is the feature (gradual context
 // accumulation across a sprint), but it widens the blast radius of a
 // misbehaving agent from "its own step context" to "future prompts on its
 // track"; the tool descriptions call this out explicitly.
 func registerTools(s *server.MCPServer, c *client.Client) {
 	registerCreateTask(s, c)
+	registerCreateTasksAndWait(s, c)
+	registerWaitForTasks(s, c)
 	registerListWorkflows(s, c)
 	registerGetTask(s, c)
 	registerListTasks(s, c)
 	registerRetryTask(s, c)
 	registerAdvanceTask(s, c)
-	registerUpdateTaskInput(s, c)
-	registerUpdateTaskDependencies(s, c)
-	registerCreateTasksAndWait(s, c)
-	registerWaitForTasks(s, c)
+	registerStopTask(s, c)
+	registerContinueTask(s, c)
+	registerUpdateTask(s, c)
 	registerUpdateStepContext(s, c)
 	registerCreateTrack(s, c)
-	registerUpdateTrackContext(s, c)
-	registerUpdateTrackDescription(s, c)
+	registerGetTrack(s, c)
+	registerUpdateTrack(s, c)
 	registerListTracks(s, c)
 }
 

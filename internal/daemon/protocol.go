@@ -182,6 +182,10 @@ type ContinueTaskRequest struct {
 	TaskID   int64  `json:"task_id"`
 	Workflow string `json:"workflow,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
+	// TerminalOnly restricts the request to terminal tasks, rejecting the
+	// awaiting-approval/tmux branch of the handler. Agent-facing callers set
+	// it so they can never resume a task paused at a human approval gate.
+	TerminalOnly bool `json:"terminal_only,omitempty"`
 }
 
 type AdvanceTaskRequest struct {

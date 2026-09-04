@@ -21,13 +21,13 @@ import (
 // tmux/human step paused at its approval gate — for the latter the engine has
 // already cleared current_step and marked the step row 'completed', so the
 // daemon resolves the active step as the one owning the live session (the
-// paused step — see workflow.PausedStep) and writes there. There is no
-// MCP-server-side notion of "the calling agent's task ID", so the client must
-// pass task_id explicitly; misrouted updates are caught by the active-step
-// check rather than by trusting the caller.
+// paused step — see workflow.PausedStep) and writes there. task_id/step_name
+// default to the engine-injected env vars, but that is a convenience only:
+// misrouted updates are caught by the daemon's active-step check rather than
+// by trusting the caller.
 type UpdateStepContextArgs struct {
-	TaskID   int64  `json:"task_id" jsonschema:"Task ID whose active step should receive the context. Required. Must be a task that's currently in a running step."`
-	StepName string `json:"step_name" jsonschema:"Name of the workflow step receiving the context. Must match the task's currently-active step — updates to non-active steps are rejected."`
+	TaskID   int64  `json:"task_id,omitempty" jsonschema:"Task ID whose active step should receive the context. Defaults to $SAKUSEN_TASK_ID (set by the workflow engine for the active step). Must be a task that's currently in a running step."`
+	StepName string `json:"step_name,omitempty" jsonschema:"Name of the workflow step receiving the context. Defaults to $SAKUSEN_STEP (the running step's name). Must match the task's currently-active step — updates to non-active steps are rejected."`
 	Context  string `json:"context" jsonschema:"The canonical context value to publish for the step. Required (may be empty when mode is 'replace' to clear an existing value)."`
 	Mode     string `json:"mode,omitempty" jsonschema:"'replace' (default) overwrites the existing context. 'append' concatenates the new value to the existing one with a newline separator."`
 }
@@ -44,11 +44,13 @@ func registerUpdateStepContext(s *server.MCPServer, c *client.Client) {
 }
 
 func handleUpdateStepContext(c *client.Client, args UpdateStepContextArgs) (*mcp.CallToolResult, error) {
-	if args.TaskID <= 0 {
-		return resultErr("task_id must be a positive integer")
+	taskID, err := resolveTaskID(args.TaskID)
+	if err != nil {
+		return resultErr("%v", err)
 	}
-	if strings.TrimSpace(args.StepName) == "" {
-		return resultErr("step_name is required")
+	stepName, err := resolveStepName(args.StepName)
+	if err != nil {
+		return resultErr("%v", err)
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(args.Mode))
@@ -59,7 +61,7 @@ func handleUpdateStepContext(c *client.Client, args UpdateStepContextArgs) (*mcp
 		return resultErr("invalid mode %q: must be \"replace\" or \"append\"", args.Mode)
 	}
 
-	if err := c.UpdateActiveStepContext(args.TaskID, args.StepName, args.Context, mode); err != nil {
+	if err := c.UpdateActiveStepContext(taskID, stepName, args.Context, mode); err != nil {
 		return resultErr("update step context failed: %v", err)
 	}
 

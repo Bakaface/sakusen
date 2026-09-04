@@ -23,6 +23,13 @@ func (s *Server) handleContinueTask(conn net.Conn, req ContinueTaskRequest) {
 		return
 	}
 
+	// Checked before the paused-task routing below, so a TerminalOnly caller
+	// can never take the approval-gate path.
+	if req.TerminalOnly && !t.Status.IsTerminal() {
+		s.sendError(conn, fmt.Sprintf("task is not terminal (status: %s); only completed, failed or merge-failed tasks can be continued this way", t.Status))
+		return
+	}
+
 	if t.Status == task.StatusAwaitingApproval || t.Status == task.StatusTmux {
 		s.continuePausedTask(conn, t)
 		return
