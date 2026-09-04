@@ -213,8 +213,11 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 		})
 	} else {
 		// Otherwise surface a warning for each unreferenced file-based workflow.
+		// Inline periodic entries are registered as hidden workflows by design
+		// (see buildResolvedConfig) and fire regardless of Hidden, so they are
+		// never "unreferenced" — and listing them would be wrong advice.
 		for _, wf := range cfg.Workflows {
-			if wf.Hidden {
+			if wf.Hidden && wf.Source != "periodic" {
 				diagnostics = append(diagnostics, Diagnostic{
 					Severity: "warning",
 					Message: fmt.Sprintf(

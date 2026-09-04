@@ -373,6 +373,7 @@ type WorkflowConfig struct {
 	// Source records where this workflow definition originated:
 	//   "inline"           — defined inline in .sakusen.yml
 	//   "<path>"           — file path under .sakusen/workflows/
+	//   "periodic"         — synthesized from an inline-mode periodic entry
 	// Not serialized to YAML — populated by the loader.
 	Source string `yaml:"-"`
 

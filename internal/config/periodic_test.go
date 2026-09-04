@@ -289,3 +289,27 @@ func TestNextPeriodicFire(t *testing.T) {
 		t.Fatalf("expected next %v to be after %v", next, from)
 	}
 }
+
+// An inline-mode periodic is registered as the hidden workflow
+// "periodic:<name>" by design and fires regardless of Hidden, so validate must
+// not flag it as an unreferenced workflow.
+func TestDiagnose_InlinePeriodicProducesNoWarning(t *testing.T) {
+	// Isolate HOME/XDG so the user's real global config can't leak in.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := writeTempConfig(t, periodicBaseWorkflows+`
+periodic:
+  - name: heartbeat
+    cadence: "@every 5m"
+    steps:
+      - name: ping
+        prompt: "say hi"
+`)
+	diags, err := Diagnose(path)
+	if err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("expected no diagnostics, got: %+v", diags)
+	}
+}
