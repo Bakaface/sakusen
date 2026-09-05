@@ -25,6 +25,7 @@ import (
 // *config.Config would be.
 type engineConfig struct {
 	BaseBranch       string
+	MergeConflicts   config.MergeConflictsConfig
 	Summarizer       config.SummarizerConfig
 	ProjectName      string
 	TmuxSetupCommand string
@@ -39,6 +40,7 @@ type engineConfig struct {
 func newEngineConfig(cfg *config.Config) *engineConfig {
 	return &engineConfig{
 		BaseBranch:       cfg.Git.BaseBranch,
+		MergeConflicts:   cfg.MergeConflicts,
 		Summarizer:       cfg.Summarizer,
 		ProjectName:      cfg.Project.Name,
 		TmuxSetupCommand: cfg.TmuxSetupCommand,
@@ -80,19 +82,21 @@ func (e *engineConfig) StepAgent(wf *config.WorkflowConfig, step *config.StepCon
 	return e.full.StepAgent(wf, step)
 }
 
-// WorkflowAgent resolves the workflow-level agent record (workflow.agent →
-// default_agent → "claude"). Used by paths that need an agent without a
-// concrete step (merge conflict resolution).
-func (e *engineConfig) WorkflowAgent(wf *config.WorkflowConfig) (string, config.AgentConfig, error) {
-	return e.full.StepAgent(wf, nil)
+// MergeConflictAgent resolves the headless agent that fixes merge conflicts
+// (merge_conflicts.agent → workflow.agent → default_agent → "claude").
+// See config.Config.MergeConflictAgentFor.
+func (e *engineConfig) MergeConflictAgent(wf *config.WorkflowConfig) (string, config.AgentConfig, error) {
+	return e.full.MergeConflictAgentFor(wf)
+}
+
+// SummarizerInvocation resolves how summarizer calls run (registry agent or
+// bare command) from the snapshotted summarizer block, against the live agent
+// registry. See config.Config.SummarizerInvocationFor.
+func (e *engineConfig) SummarizerInvocation() (config.SummarizerInvocation, bool) {
+	return e.full.SummarizerInvocationFor(&e.Summarizer)
 }
 
 // StepIsTmux reports whether a step resolves to a tmux-mode agent.
 func (e *engineConfig) StepIsTmux(wf *config.WorkflowConfig, step *config.StepConfig) bool {
 	return e.full.StepIsTmux(wf, step)
-}
-
-// ResolveAgent looks up an agent record by slug.
-func (e *engineConfig) ResolveAgent(slug string) (config.AgentConfig, bool) {
-	return e.full.ResolveAgent(slug)
 }

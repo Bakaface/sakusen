@@ -52,10 +52,24 @@ ResultText() string             // $SAKUSEN_RESULT_FILE content; stdout-tail fal
 RunSync(ctx context.Context, command, workDir string, env map[string]string, stdin string) (string, error)
 ```
 
-Synchronous `sh -c` with stdin piped, stdout returned. Used for the configured `summarizer:`
-command (chat/step/task summaries, AI titles, backfill-context — tagged via `SAKUSEN_PURPOSE`)
+Synchronous `sh -c` with stdin piped, stdout returned. Used for a bare `summarizer.command`
+(chat/step/task summaries, AI titles, backfill-context — tagged via `SAKUSEN_PURPOSE`)
 and agent helper commands (`chat_log_command`). Also strips `CLAUDECODE`. On failure the
 error carries truncated stdout AND stderr (some tools print errors to stdout).
+
+### RunAgentSync (agentsync.go)
+
+```go
+RunAgentSync(ctx context.Context, call AgentSyncCall, prompt string) (string, error)
+// AgentSyncCall{Command, WorkDir, ProjectPath, Purpose, Env}
+```
+
+The same synchronous shape for a `summarizer.agent`/`slug_agent` (a registry agent record),
+using the file contract instead of stdin: the prompt is written to `$SAKUSEN_PROMPT_FILE` in a
+per-invocation `os.MkdirTemp` scratch dir (removed afterwards — never the task worktree, since
+titles/slugs run before one exists), the answer is read from `$SAKUSEN_RESULT_FILE` with the
+stdout tail as fallback, and `SAKUSEN_PURPOSE`/`SAKUSEN_PROJECT_PATH` are exported over the
+agent record's `env` via `MergeEnv` (contract wins). Output is captured, never streamed.
 
 ### Wrapper Scripts (script.go)
 
@@ -72,8 +86,9 @@ contract; the contract wins on collisions so agents cannot mask `SAKUSEN_*` vari
 ### Tests
 
 `process_test.go` is integration-tagged (`//go:build integration`) — run with `mise run ti`,
-not plain `go test ./...`. `script_test.go` (BuildWrapperScript quoting/determinism, MergeEnv
-contract-wins) runs as a plain unit test.
+not plain `go test ./...`. `sync_test.go`, `agentsync_test.go` (file contract, stdout fallback,
+env/workdir/scratch cleanup) and `script_test.go` (BuildWrapperScript quoting/determinism,
+MergeEnv contract-wins) run as plain unit tests.
 
 ## Agent Management (internal/agent/)
 

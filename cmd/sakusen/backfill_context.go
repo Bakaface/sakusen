@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/Bakaface/sakusen/internal/db"
-	"github.com/Bakaface/sakusen/internal/runner"
 	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/Bakaface/sakusen/internal/workflow"
 	"github.com/spf13/cobra"
@@ -29,7 +28,7 @@ var backfillContextCmd = &cobra.Command{
 Targets tasks where status='completed', context is NULL/empty, and the
 commits field has at least one recorded commit SHA. For each candidate the
 command computes a diff stat against the parent of the first stored commit
-and runs the configured ` + "`summarizer:`" + ` command with the same
+and runs the configured ` + "`summarizer:`" + ` runner with the same
 diff-stat-fallback prompt the live summarizer uses, then writes the result
 via UpdateTaskContext.
 
@@ -225,14 +224,14 @@ func computeBackfillDiffStat(repoPath string, commits []string) (string, error) 
 	return string(out), nil
 }
 
-// runSummarizerBackfill invokes the configured summarizer command
-// synchronously with the prompt on stdin and the project path as cwd,
-// mirroring the live summarizer's invocation shape.
+// runSummarizerBackfill invokes the configured summarizer synchronously with
+// the project path as cwd, mirroring the live summarizer's invocation shape.
 func runSummarizerBackfill(ctx context.Context, prompt, workDir string) (string, error) {
-	if !cfg.Summarizer.Configured() {
-		return "", fmt.Errorf("no summarizer configured: set a top-level `summarizer:` command in .sakusen.yml")
+	inv, ok := cfg.SummarizerInvocation()
+	if !ok {
+		return "", fmt.Errorf("no summarizer configured: set `summarizer.agent` (a slug from `agents:`) or `summarizer.command` in .sakusen.yml")
 	}
-	return runner.RunSync(ctx, cfg.Summarizer.Command, workDir, map[string]string{"SAKUSEN_PURPOSE": "backfill_context"}, prompt)
+	return workflow.RunSummarizer(ctx, inv, prompt, workDir, workDir, "backfill_context")
 }
 
 func truncateForPreview(s string, max int) string {

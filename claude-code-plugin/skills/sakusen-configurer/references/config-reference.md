@@ -4,6 +4,7 @@
 
 - [Agents Section](#agents-section)
 - [Summarizer Section](#summarizer-section)
+- [Merge Conflicts Section](#merge-conflicts-section)
 - [Git Section](#git-section)
 - [Finalization (`on_complete`)](#finalization-on_complete)
 - [Verification Section](#verification-section)
@@ -79,20 +80,49 @@ There is no system-prompt injection: the fully-resolved step prompt is delivered
 
 ```yaml
 summarizer:
-  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  agent: claude:haiku          # headless slug from `agents:` (variants/aliases work)
   max_prompt_bytes: 380000     # optional; >0 enables map-reduce chunking of huge chats
   title_prompt: "..."          # optional; overrides the built-in AI title prompt
   slug_prompt: "..."           # optional; overrides the built-in AI slug prompt
-  slug_command: "..."          # optional; runs the slug call instead of `command`
+  slug_agent: "..."            # optional; runs the slug call on its own agent
+  # command: "..."             # bare-command alternative to `agent:` (mutually exclusive)
+  # slug_command: "..."        # bare-command alternative to `slug_agent:` (mutually exclusive)
 ```
 
-The utility LLM command used for `summarize_chat` step context, the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt is piped on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`). Title and slug calls run with the task's project root as working directory (summarize calls use the task's worktree), so context-loading commands like `claude -p` pick up that project's instructions rather than the daemon's cwd.
+The utility LLM used for `summarize_chat` step context, the final task summary, AI task titles and slugs, and `sakusen backfill-context`. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`). Title and slug calls run with the task's project root as working directory (summarize calls use the task's worktree), so context-loading commands like `claude -p` pick up that project's instructions rather than the daemon's cwd.
 
-`title_prompt` / `slug_prompt` replace the built-in prompts for the title and slug calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). `slug_command` runs the slug call on a different command (model or tool) than the rest of the summarizer work; it falls back to `command` when unset, and setting it alone enables AI slugs without enabling AI titles or summaries.
+Two runner shapes, mutually exclusive (setting both is a load error):
+
+- `agent: <slug>` — a **headless** agent from the `agents:` registry, invoked through the file contract: the prompt is written to a scratch `$SAKUSEN_PROMPT_FILE` (never the task worktree — titles run before one exists), the answer is read from `$SAKUSEN_RESULT_FILE` (falling back to the tail of stdout), and `$SAKUSEN_PROJECT_PATH` plus the agent's `env:` are exported. Unknown or tmux-mode slugs are load errors.
+- `command: "..."` — a bare shell command with the prompt piped on **stdin** and the response printed on **stdout**.
+
+`title_prompt` / `slug_prompt` replace the built-in prompts for the title and slug calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). `slug_agent` / `slug_command` run the slug call on a different agent or command (model or tool) than the rest of the summarizer work; each falls back to the shared setting when unset, and setting one alone enables AI slugs without enabling AI titles or summaries.
 
 The slug answer is used **verbatim** (surrounding whitespace aside) — it is never shortened, re-cased or re-shaped, so its full wording reaches the branch name and worktree path. An answer that isn't a single token of letters, digits, dashes, underscores or dots is rejected and the slug falls back to the slugified title.
 
 When the block is omitted, everything degrades gracefully: titles fall back to a truncated task input, slugs to the slugified title, summarize passes are skipped with a warning (or fail the task when a step sets `require_context: true`), and `backfill-context` errors out.
+
+`summarizer:` merges **wholesale** across config tiers: a project block replaces the global one entirely rather than merging field by field.
+
+---
+
+## Merge Conflicts Section
+
+```yaml
+merge_conflicts:
+  agent: codex                 # optional; omit → workflow agent → default_agent → "claude"
+  timeout: 10m                 # optional; 10m is the default
+  prompt: |                    # optional; replaces the built-in prompt body entirely
+    Resolve the conflict markers left by merging `{{git.base_branch}}` into `{{task.branch}}`:
+
+    {{conflict.files}}
+
+    Stage each resolved file with `git add`. Do not commit.
+```
+
+Configures the agent-driven merge-conflict resolver (`SAKUSEN_PURPOSE=merge_conflict`). Like the summarizer, the role block holds the role's knobs while `agent:` picks a **headless** runner from the registry (variants and aliases are valid targets). An explicit `agent:` must resolve and be headless — both are load errors otherwise; with no explicit agent the cascade is workflow `agent:` → `default_agent:` → `"claude"`, and a tmux-mode result falls back to a headless `"claude"` record. `timeout` is a Go duration string, validated at load.
+
+`prompt` replaces the built-in body wholesale (it is not a preamble). `{{conflict.files}}` renders the conflicted files as one `` - `path` `` line each; task and git variables resolve as usual, while step, loop, children and track variables resolve empty because no step ran. The block merges wholesale across tiers.
 
 ---
 
@@ -375,7 +405,8 @@ All of the following are **hard load errors** with migration messages:
 | `claude:` (binary override block) | `agents:` records — the whole invocation lives in the agent's `command` |
 | `yolo:` | Permission flags directly in the agent's `command` |
 | `system_prompt:` | System-prompt flags in the agent's `command`, or fold the text into step prompts |
-| `allowed_summarization_models:` (top-level and step-level) | `summarizer:` command — pick the model inside it |
+| `allowed_summarization_models:` (top-level and step-level) | `summarizer:` block — pick the model inside its agent or command |
+| `merge_conflict_agent:` | `agent:` inside the top-level `merge_conflicts:` block |
 | `print:` / `tmux:` (workflow and step level) | The resolved agent record's `mode` |
 | `{{claude_command}}` in `tmux-setup-command` | `{{agent_command}}` or `{{run_agent}}` |
 | `git.on_complete` | Top-level `on_complete:` |
@@ -403,6 +434,10 @@ agents:
   claude:
     mode: headless
     command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-headless.sh"'
+    variants:
+      haiku:
+        env:
+          ANTHROPIC_MODEL: haiku
   claude-tmux:
     mode: tmux
     command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-tmux.sh"'
@@ -410,8 +445,11 @@ agents:
     chat_log_command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-chat-log.sh"'
 
 summarizer:
-  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  agent: claude:haiku
   max_prompt_bytes: 380000
+
+merge_conflicts:
+  timeout: 10m
 
 verification:
   verify_summarizer: true

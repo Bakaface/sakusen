@@ -78,6 +78,63 @@ func TestSummarizerGeneratesTitle(t *testing.T) {
 	e.AssertMergedFor(1)
 }
 
+// summarizerAgentYAML wires the stub in twice: as the step agent and as the
+// summarizer's `agent:` — the registry-agent form, which hands the prompt over
+// in $SAKUSEN_PROMPT_FILE instead of on stdin.
+func summarizerAgentYAML(stubPath string) string {
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
+summarizer:
+  agent: stub
+poll_interval: 100ms
+git:
+  base_branch: main
+on_complete: merge
+workflows:
+  - name: simple
+    steps:
+      - name: implementing
+        prompt: "Implement the task"
+`, stubPath)
+}
+
+// TestSummarizerAgentGeneratesTitle is the summarizer.agent counterpart of
+// TestSummarizerGeneratesTitle: the same AI title lands, but the call runs
+// through the file contract — the stub sees SAKUSEN_PROMPT_FILE and
+// SAKUSEN_RESULT_FILE alongside SAKUSEN_PURPOSE=title. The stub prints its
+// answer on stdout without writing the result file, so this also exercises the
+// stdout-tail fallback.
+func TestSummarizerAgentGeneratesTitle(t *testing.T) {
+	e := setupE2E(t, "summarizer_title")
+	e.WriteSakusenYAML(summarizerAgentYAML(e.StubPath))
+
+	e.MustSakusen("create", "add a login form with client-side validation to the settings page")
+
+	e.Eventually(10*time.Second, "AI-generated title", func() bool {
+		return e.TaskField(1, "title") == "AI Generated Title"
+	})
+
+	calls := e.StubCalls("title")
+	if len(calls) != 1 {
+		t.Fatalf("stub title calls: got %d, want 1", len(calls))
+	}
+	if got := calls[0].Env["SAKUSEN_PROMPT_FILE"]; got == "" {
+		t.Errorf("SAKUSEN_PROMPT_FILE not exported to the summarizer agent (env: %v)", calls[0].Env)
+	}
+	if got := calls[0].Env["SAKUSEN_RESULT_FILE"]; got == "" {
+		t.Errorf("SAKUSEN_RESULT_FILE not exported to the summarizer agent (env: %v)", calls[0].Env)
+	}
+	if got := calls[0].Env["SAKUSEN_PURPOSE"]; got != "title" {
+		t.Errorf("SAKUSEN_PURPOSE = %q, want %q", got, "title")
+	}
+
+	e.WaitStatus(1, "completed", 15*time.Second)
+	e.AssertMergedFor(1)
+}
+
 // TestNoSummarizerFallsBackToTruncatedInput verifies the degradation path:
 // without a summarizer: command, a task created without --title gets a
 // sanitized, truncated slice of its input's first line as the title (see

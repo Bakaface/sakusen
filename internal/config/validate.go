@@ -166,6 +166,20 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	if err := validateAgentAliasNames(proj.AgentAliases); err != nil {
 		return nil, err
 	}
+	// System-role blocks: only the file-local rules (agent/command exclusivity,
+	// timeout syntax). Whether a referenced slug exists and is headless is
+	// cross-tier, so it stays in the full load path.
+	var mergeConflicts MergeConflictsConfig
+	if proj.MergeConflicts != nil {
+		mergeConflicts = *proj.MergeConflicts
+	}
+	var summarizer SummarizerConfig
+	if proj.Summarizer != nil {
+		summarizer = *proj.Summarizer
+	}
+	if err := validateRoleBlocks(mergeConflicts, summarizer); err != nil {
+		return nil, err
+	}
 
 	// Capture whether any on-disk files exist before resolution mutates the
 	// pool, so we can warn when files exist but .sakusen.yml has no listing.

@@ -23,19 +23,42 @@ agents:
   claude:
     mode: headless
     command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-headless.sh"'
+    # Variants inherit every field of the parent and override only what they
+    # redefine (env merges per key). Referenceable as `claude:haiku`.
+    variants:
+      haiku:
+        env:
+          ANTHROPIC_MODEL: haiku
   claude-tmux:
     mode: tmux
     command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-tmux.sh"'
     resume_command: 'claude --dangerously-skip-permissions --resume "$SAKUSEN_SESSION_ID"'
     chat_log_command: '"$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-chat-log.sh"'
 
-# Summarizer: the utility LLM command used for chat/step summaries, the final
-# task summary, and AI task titles. Prompt arrives on stdin; response goes to
-# stdout. Remove this block to disable (titles fall back to truncated input,
+# Summarizer: the utility LLM used for chat/step summaries, the final task
+# summary, and AI task titles/slugs. `agent:` points at a headless agent from
+# the registry above — the prompt is handed over in $SAKUSEN_PROMPT_FILE and
+# the answer read back from $SAKUSEN_RESULT_FILE. (`command:` is the
+# alternative: a bare command taking the prompt on stdin and printing the
+# answer.) Remove this block to disable (titles fall back to truncated input,
 # summaries are skipped).
 summarizer:
-  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  agent: claude:haiku
   max_prompt_bytes: 380000
+
+# Merge conflicts: the resolver that fixes conflict markers when a task branch
+# is merged. Every knob is optional — by default it runs the workflow's agent
+# (falling back to `claude`) for 10m with a built-in prompt.
+# merge_conflicts:
+#   agent: claude          # must be headless
+#   timeout: 10m
+#   prompt: |              # replaces the built-in prompt body entirely
+#     Resolve the conflict markers left by merging `{{git.base_branch}}` into
+#     `{{task.branch}}`:
+#
+#     {{conflict.files}}
+#
+#     Stage each resolved file with `git add`. Do not commit.
 
 # workflows:
 #   - name: default

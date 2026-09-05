@@ -34,7 +34,8 @@ type ProjectConfig struct {
     Git                      GitConfig               // BaseBranch, BranchTemplate
     Agents                   map[string]AgentConfig  // Project-tier agent registry (slug → record)
     DefaultAgent             string                  // Fallback agent slug; empty → "claude"
-    Summarizer               *SummarizerConfig       // Utility LLM command (summaries, titles)
+    Summarizer               *SummarizerConfig       // Utility LLM role block (summaries, titles)
+    MergeConflicts           *MergeConflictsConfig   // Merge-conflict resolver role block
     OnComplete               string                  // Top-level finalization action (moved out of git:)
     Workflows                []WorkflowEntry         `yaml:"workflows"` // flat list (string ref or inline)
     WorktreeSyncPaths        WorktreeSyncPathsConfig // Paths to copy/link into worktrees
@@ -47,7 +48,8 @@ type ProjectConfig struct {
 }
 ```
 
-Removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`) are hard
+Removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`,
+`merge_conflict_agent:`) are hard
 load-time migration errors surfaced by `checkRemovedProjectKeys` (agents.go) on the raw YAML.
 
 `WorkflowEntry` is a single item in the flat `workflows:` list — exactly one of `Ref` (string) or `Inline` (`*WorkflowConfig`) is set. String entries resolve to `.sakusen/workflows/<name>.yml` (local first, then global pool).
@@ -118,12 +120,14 @@ type GlobalConfig struct {
     Options                  *OptionsConfig
     Agents                   map[string]AgentConfig
     DefaultAgent             string
+    MergeConflicts           *MergeConflictsConfig
     Summarizer               *SummarizerConfig
 }
 ```
 
 The merged runtime `Config` (in `types.go`) flattens project + global settings and also holds
-the merged `Agents` registry, `DefaultAgent`, `Summarizer`, and the resolved `WorktreeSyncPaths`.
+the merged `Agents` registry, `DefaultAgent`, `Summarizer`, `MergeConflicts`, and the resolved
+`WorktreeSyncPaths`.
 
 ### Agents (agents.go)
 
@@ -137,11 +141,19 @@ type AgentConfig struct {
 }
 
 type SummarizerConfig struct {
-    Command        string // prompt on stdin, response on stdout; SAKUSEN_PURPOSE tags the call site
-    SlugCommand    string // `slug_command:` — runs the slug call instead of Command (falls back to it)
+    Agent          string // `agent:` — headless registry slug; runs via the prompt/result file contract
+    Command        string // prompt on stdin, response on stdout; mutually exclusive with Agent
+    SlugAgent      string // `slug_agent:` — runs the slug call on its own agent (falls back to Agent)
+    SlugCommand    string // `slug_command:` — runs the slug call on its own command (falls back to Command)
     MaxPromptBytes int    // >0 → map-reduce chunking ceiling; 0 disables chunking
     TitlePrompt    string // `title_prompt:` — overrides the built-in AI title prompt ({{input}})
     SlugPrompt     string // `slug_prompt:`  — overrides the built-in AI slug prompt ({{input}})
+}
+
+type MergeConflictsConfig struct {
+    Agent   string // headless registry slug; empty → workflow agent → default_agent → "claude"
+    Timeout string // duration string bounding one resolver pass; empty → DefaultMergeConflictTimeout ("10m")
+    Prompt  string // replaces the built-in resolver body entirely ({{conflict.files}} + task/git vars)
 }
 ```
 
@@ -220,7 +232,11 @@ type StepConfig struct {
 
 **Summarization strategies**: `summarize_chat` (default when unset) runs the configured `summarizer:` command over the full chat log; `last_message` keeps the headless agent's result text — cheaper but often misleading and unusable for tmux steps (which have no result text). The default is resolved via `StepConfig.EffectiveSummarizationStrategy()` and lives in `DefaultSummarizationStrategy`. Validated at config load via `ValidateSteps()`.
 
-**Summarizer command**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles and slugs, backfill-context) runs the single top-level `summarizer:` command via `runner.RunSync` — prompt on stdin, response on stdout, `SAKUSEN_PURPOSE` tagging the call site. `SummarizerConfig.MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; `TitlePrompt`/`SlugPrompt` override the built-in title/slug prompts (`{{input}}` = task input); `SlugCommand` (`slug_command:`) runs the slug call on its own command, resolved via `EffectiveSlugCommand()` with `Command` as fallback and gated by `SlugConfigured()` (so `slug_command` alone enables AI slugs without AI titles); there is no model selection in sakusen — pick the model inside the command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
+**System roles**: the summarizer and the merge-conflict resolver each get a top-level block holding the role's knobs while picking a runner from the `agents:` registry. Role agents must be headless (both are synchronous passes) and are validated at load: `validateAgentRefs` requires every role slug to resolve and be non-tmux, `validateRoleBlocks` (shared with `validate.go`) enforces `agent`/`command` exclusivity and `merge_conflicts.timeout` parseability. Both blocks merge WHOLESALE across tiers.
+
+**Summarizer**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles and slugs, backfill-context) runs the single top-level `summarizer:` block, resolved by `Config.SummarizerInvocation()` / `SummarizerSlugInvocation()` into a `SummarizerInvocation` and executed by `workflow.RunSummarizer` — `agent:` goes through `runner.RunAgentSync` (prompt in `$SAKUSEN_PROMPT_FILE` in a scratch dir, answer from `$SAKUSEN_RESULT_FILE` with a stdout-tail fallback, `SAKUSEN_PROJECT_PATH` + the agent's `env` exported), `command:` through `runner.RunSync` (prompt on stdin, response on stdout); `SAKUSEN_PURPOSE` tags the call site either way. `MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; `TitlePrompt`/`SlugPrompt` override the built-in title/slug prompts (`{{input}}` = task input); the slug side resolves via `EffectiveSlugAgent()`/`EffectiveSlugCommand()` and is gated by `SlugConfigured()` (so a slug-only setting enables AI slugs without AI titles); there is no model selection in sakusen — pick the model inside the agent or command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
+
+**Merge conflicts**: `merge_conflicts:` configures the resolver — `agent:` (cascade `merge_conflicts.agent` → workflow `agent:` → `default_agent:` → `"claude"`, resolved by `Config.MergeConflictAgentFor`; only the lower tiers fall back from a tmux agent to a headless `"claude"`), `timeout:` (default `10m`), and `prompt:` (replaces the built-in body; `{{conflict.files}}` plus task/git vars). The old top-level `merge_conflict_agent:` is a removed key with a migration error.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 

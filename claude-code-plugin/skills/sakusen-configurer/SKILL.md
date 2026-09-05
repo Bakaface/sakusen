@@ -69,7 +69,8 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `poll_interval` | string | `"5s"` | Daemon task-polling cadence (Go duration string). Rarely overridden per-project. |
 | `agents` | map | — | **Agent registry** — slug → agent record (`mode`, `command`, `resume_command`, `chat_log_command`, `env`). See [Agents](#agents). |
 | `default_agent` | string | `"claude"` | Agent slug steps fall back to when neither the step nor the workflow sets `agent:`. |
-| `summarizer` | object | — | Utility LLM command for summaries and AI titles/slugs (`command`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`). See [Summarizer](#summarizer). |
+| `summarizer` | object | — | Utility LLM for summaries and AI titles/slugs (`agent` or `command`, `slug_agent`/`slug_command`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`). See [Summarizer](#summarizer). |
+| `merge_conflicts` | object | — | Merge-conflict resolver role (`agent`, `timeout`, `prompt`). See [Merge conflicts](#merge-conflicts). |
 | `verification` | object | — | Summarizer verification settings (`max_retries`, `verify_summarizer`) |
 | `git` | object | — | Branch naming, base branch |
 | `on_complete` | string | `"commit"` | Finalization action (`commit`/`merge`/`none`); per-workflow overridable |
@@ -89,7 +90,8 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `claude:` | Define agents under the `agents:` map (`sakusen init` scaffolds claude records) |
 | `yolo:` | Put permission flags (e.g. `--dangerously-skip-permissions`) directly in the agent's `command` |
 | `system_prompt:` | Bake system-prompt flags into the agent's `command` (e.g. `claude --append-system-prompt "..."`) or fold the text into step prompts |
-| `allowed_summarization_models:` (top-level and step-level) | The `summarizer:` command; pick the model inside that command |
+| `allowed_summarization_models:` (top-level and step-level) | The `summarizer:` block; pick the model inside its agent or command |
+| `merge_conflict_agent:` | `agent:` inside the top-level `merge_conflicts:` block |
 | `print:` (workflow and step level) | `agent: <slug>` where the agent's `mode` is `headless` (was `print: true`) or `tmux` (was `print: false`) |
 | `tmux:` (workflow and step level) | Same — the agent record's `mode` |
 | `{{claude_command}}` in `tmux-setup-command` | `{{agent_command}}` (or `{{run_agent}}`) |
@@ -254,24 +256,50 @@ Tmux mode additionally (inside the session wrapper script):
 - **Agents without `chat_log_command`** cannot capture `summarize_chat` context for tmux steps (context degrades to empty, or the task fails when the step sets `require_context: true`).
 - **No `summarizer:` configured** → no AI titles (falls back to truncated input) and no chat/step/task summaries (skipped with a warning).
 - **Loop steps cannot use tmux-mode agents** (a tmux step pauses the engine, so a loop over it could never iterate).
-- The merge-conflict resolver needs a **headless** agent: the workflow's agent, or the `"claude"` slug as fallback when the workflow agent is tmux-mode.
+- The merge-conflict resolver needs a **headless** agent: `merge_conflicts.agent` when set, else the workflow's agent, with the `"claude"` slug as fallback when the workflow agent is tmux-mode.
+
+## System roles
+
+The summarizer and the merge-conflict resolver are not workflow steps, but each still needs something to run. Each has its own top-level block: the block holds the role's own knobs, and picks its runner from the `agents:` registry via `agent: <slug>` (the registry only says HOW something runs). Role agents must be **headless** — both roles are synchronous passes — and must honor the file contract (`$SAKUSEN_PROMPT_FILE` in, `$SAKUSEN_RESULT_FILE` out, stdout tail as fallback). Variants (`parent:variant`) and `agent_aliases:` names are valid targets. Both blocks merge **wholesale** across tiers: a project block replaces the global one entirely.
 
 ## Summarizer
 
 ```yaml
 summarizer:
-  command: claude -p --output-format text --model haiku --dangerously-skip-permissions
+  agent: claude:haiku       # headless slug from `agents:`
   max_prompt_bytes: 380000
   title_prompt: "..."       # optional; overrides the built-in AI title prompt
   slug_prompt: "..."        # optional; overrides the built-in AI slug prompt
-  slug_command: "..."       # optional; runs the slug call instead of `command`
+  slug_agent: "..."         # optional; runs the slug call on its own agent
+  # command: "..."          # alternative to `agent:` — mutually exclusive with it
+  # slug_command: "..."     # alternative to `slug_agent:` — mutually exclusive with it
 ```
 
-The utility LLM command Sakusen shells out to for text-in/text-out work: chat/step summaries (`summarize_chat`), the final task summary, AI task titles and slugs, and `sakusen backfill-context`. The prompt arrives on **stdin**; the response must be printed on **stdout**. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`).
+The utility LLM Sakusen shells out to for text-in/text-out work: chat/step summaries (`summarize_chat`), the final task summary, AI task titles and slugs, and `sakusen backfill-context`. `SAKUSEN_PURPOSE` identifies the call site (`summarize`, `summarize_chat`, `summarize_chat_chunk`, `title`, `slug`, `backfill_context`).
 
-`title_prompt` / `slug_prompt` (optional) replace the built-in prompts for those two calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). `slug_command` (optional) runs the slug call on a different command than `command`, falling back to it when unset. The slug answer is used verbatim — never shortened or re-shaped — so it reaches the branch name in full.
+Two runner shapes, mutually exclusive: `agent:` runs a registry agent through the file contract, while `command:` runs a bare shell command with the prompt on **stdin** and the response on **stdout**. Same rule for the slug pair (`slug_agent:` vs `slug_command:`); either falls back to the main setting when unset, and setting one alone enables AI slugs without AI titles or summaries.
+
+`title_prompt` / `slug_prompt` (optional) replace the built-in prompts for those two calls; `{{input}}` is substituted with the task input (a prompt without the placeholder gets the input appended). The slug answer is used verbatim — never shortened or re-shaped — so it reaches the branch name in full.
 
 `max_prompt_bytes` (optional, > 0) bounds a single invocation: larger chat logs are summarized map-reduce style (chunked on line boundaries, each chunk summarized, then reduced). `0`/omitted disables chunking. Omit the whole block to disable summarization (everything degrades gracefully — see v1 limitations).
+
+## Merge conflicts
+
+```yaml
+merge_conflicts:
+  agent: codex              # optional; omit → workflow agent → default_agent → "claude"
+  timeout: 10m              # optional; 10m is the default
+  prompt: |                 # optional; replaces the built-in prompt body entirely
+    Resolve the conflict markers left by merging `{{git.base_branch}}` into `{{task.branch}}`:
+
+    {{conflict.files}}
+
+    Stage each resolved file with `git add`. Do not commit.
+```
+
+Configures the agent-driven conflict resolver used when a task branch is merged. An explicit `agent:` must resolve and be headless (load error otherwise); without one, the cascade falls back to the workflow's agent and then to the `"claude"` slug when that agent is tmux-mode. `timeout` is a Go duration string, validated at load.
+
+`prompt` replaces the built-in body — it is not a preamble or wrapper. `{{conflict.files}}` renders the conflicted files as one `` - `path` `` line each; task and git variables resolve as usual, while step, loop, children and track variables resolve empty (no step ran). The resolver spawn exports the usual step contract with `SAKUSEN_PURPOSE=merge_conflict`.
 
 ## Sharing files into worktrees
 

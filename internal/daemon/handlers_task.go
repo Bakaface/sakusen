@@ -764,9 +764,10 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 
 	var title string
 
-	// AI runs only with an input to describe and a command to describe it with;
-	// each of title/slug additionally yields to a caller-supplied value. Slugs
-	// have their own command override, so they can be enabled independently.
+	// AI runs only with an input to describe and a summarizer to describe it
+	// with; each of title/slug additionally yields to a caller-supplied value.
+	// Slugs have their own runner override, so they can be enabled
+	// independently.
 	wantAITitle := input != "" && projCfg.Summarizer.Configured() && manualTitle == ""
 	wantAISlug := input != "" && projCfg.Summarizer.SlugConfigured() && strings.TrimSpace(explicitSlug) == ""
 
@@ -777,7 +778,7 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 		// Skip AI title generation when input is empty (existing branch with no prompt)
 		title = initialTitle
 	} else if !projCfg.Summarizer.Configured() {
-		// No summarizer command → no AI titles. Degrade to a sanitized,
+		// No summarizer → no AI titles. Degrade to a sanitized,
 		// truncated slice of the input instead of blocking task creation.
 		title = task.SanitizeTitle(truncateTitleInput(input))
 		if title == "" {
@@ -798,14 +799,14 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				title, titleErr = s.generateTitle(ctx, input, &projCfg.Summarizer, projectDir)
+				title, titleErr = s.generateTitle(ctx, input, projCfg, projectDir)
 			}()
 		}
 		if wantAISlug {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				generated, err := s.generateSlug(ctx, input, &projCfg.Summarizer, projectDir)
+				generated, err := s.generateSlug(ctx, input, projCfg, projectDir)
 				if err != nil {
 					// A missing slug is recoverable (Slugify(title) below), so
 					// the task proceeds rather than stalling in init.
@@ -888,14 +889,19 @@ func summarizerPrompt(override, fallback, input string) string {
 	return tmpl + "\n\n" + input
 }
 
-// generateTitle asks the summarizer for a task title. workDir anchors the
-// command in the task's project so context-loading tools (e.g. `claude -p`
-// reading the cwd's CLAUDE.md) see that project rather than wherever the
-// daemon happens to run.
-func (s *Server) generateTitle(ctx context.Context, input string, summarizer *config.SummarizerConfig, workDir string) (string, error) {
-	prompt := summarizerPrompt(summarizer.TitlePrompt, defaultTitlePrompt, input)
+// generateTitle asks the summarizer for a task title. cfg supplies both the
+// summarizer block and the agent registry its `agent:` slug resolves against.
+// workDir anchors the call in the task's project so context-loading tools
+// (e.g. `claude -p` reading the cwd's CLAUDE.md) see that project rather than
+// wherever the daemon happens to run.
+func (s *Server) generateTitle(ctx context.Context, input string, cfg *config.Config, workDir string) (string, error) {
+	prompt := summarizerPrompt(cfg.Summarizer.TitlePrompt, defaultTitlePrompt, input)
 
-	out, err := runner.RunSync(ctx, summarizer.Command, workDir, map[string]string{"SAKUSEN_PURPOSE": "title"}, prompt)
+	inv, ok := cfg.SummarizerInvocation()
+	if !ok {
+		return "", workflow.ErrNoSummarizer
+	}
+	out, err := workflow.RunSummarizer(ctx, inv, prompt, workDir, workDir, "title")
 	if err != nil {
 		return "", fmt.Errorf("title generation failed: %w", err)
 	}
@@ -913,12 +919,16 @@ func (s *Server) generateTitle(ctx context.Context, input string, summarizer *co
 // not apply to generated slugs — so the wording the model chose is the wording
 // that reaches the branch name. Only surrounding whitespace is stripped; an
 // answer that isn't a single path-safe token is rejected, leaving the caller's
-// title-derived fallback in place. workDir anchors the command in the task's
+// title-derived fallback in place. workDir anchors the call in the task's
 // project (see generateTitle).
-func (s *Server) generateSlug(ctx context.Context, input string, summarizer *config.SummarizerConfig, workDir string) (string, error) {
-	prompt := summarizerPrompt(summarizer.SlugPrompt, defaultSlugPrompt, input)
+func (s *Server) generateSlug(ctx context.Context, input string, cfg *config.Config, workDir string) (string, error) {
+	prompt := summarizerPrompt(cfg.Summarizer.SlugPrompt, defaultSlugPrompt, input)
 
-	out, err := runner.RunSync(ctx, summarizer.EffectiveSlugCommand(), workDir, map[string]string{"SAKUSEN_PURPOSE": "slug"}, prompt)
+	inv, ok := cfg.SummarizerSlugInvocation()
+	if !ok {
+		return "", workflow.ErrNoSummarizer
+	}
+	out, err := workflow.RunSummarizer(ctx, inv, prompt, workDir, workDir, "slug")
 	if err != nil {
 		return "", fmt.Errorf("slug generation failed: %w", err)
 	}

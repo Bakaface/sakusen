@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -115,13 +116,59 @@ func (a *AgentConfig) IsTmux() bool {
 	return a.EffectiveMode() == AgentModeTmux
 }
 
-// SummarizerConfig configures the utility LLM command sakusen shells out to for
+// DefaultMergeConflictTimeout bounds a merge-conflict resolver pass when
+// `merge_conflicts.timeout:` is unset.
+const DefaultMergeConflictTimeout = "10m"
+
+// MergeConflictsConfig configures the merge-conflict resolver system role:
+// which registry agent runs it, how long a pass may take, and the prompt it
+// receives. The agent only says HOW the resolver runs — the role-specific
+// knobs live here.
+//
+// Merged wholesale across tiers: a `merge_conflicts:` block in .sakusen.yml
+// replaces the global one entirely rather than being field-merged.
+type MergeConflictsConfig struct {
+	// Agent names the registry agent slug that resolves conflicts. The pass is
+	// synchronous, so the agent must be headless (rejected at load otherwise).
+	// Empty → the workflow's agent, with the implicit "claude" fallback when
+	// that agent is tmux-mode. See Config.MergeConflictAgentFor.
+	Agent string `yaml:"agent,omitempty"`
+
+	// Timeout bounds one resolver pass (duration string). Empty →
+	// DefaultMergeConflictTimeout.
+	Timeout string `yaml:"timeout,omitempty"`
+
+	// Prompt replaces the entire built-in resolver prompt body — it is not a
+	// preamble or wrapper. Task and git template variables resolve as usual,
+	// plus {{conflict.files}} (the conflicted-file list); step, loop, children
+	// and track variables resolve empty (no step ran).
+	Prompt string `yaml:"prompt,omitempty"`
+}
+
+// EffectiveTimeout returns the configured resolver timeout, or the default
+// when unset. Parseability is validated at load.
+func (m *MergeConflictsConfig) EffectiveTimeout() string {
+	if strings.TrimSpace(m.Timeout) != "" {
+		return m.Timeout
+	}
+	return DefaultMergeConflictTimeout
+}
+
+// SummarizerConfig configures the utility LLM sakusen shells out to for
 // text-in/text-out work: chat/step summarization, the final task summarizer,
-// AI title and slug generation, and `sakusen backfill-context`. The command is
-// executed via `sh -c` with the prompt piped on STDIN and must print the
-// response on stdout. SAKUSEN_PURPOSE identifies the call site ("summarize",
-// "summarize_chat", "summarize_chat_chunk", "title", "slug",
-// "backfill_context").
+// AI title and slug generation, and `sakusen backfill-context`.
+// SAKUSEN_PURPOSE identifies the call site ("summarize", "summarize_chat",
+// "summarize_chat_chunk", "title", "slug", "backfill_context").
+//
+// Two ways to pick the runner, mutually exclusive:
+//
+//	agent:   a slug from the `agents:` registry (must be headless). The call
+//	         runs the agent's command through the file contract — the prompt is
+//	         written to SAKUSEN_PROMPT_FILE in a scratch directory and the
+//	         answer is read back from SAKUSEN_RESULT_FILE (stdout-tail
+//	         fallback), with SAKUSEN_PROJECT_PATH and the agent's env exported.
+//	command: a bare shell command run via `sh -c` with the prompt piped on
+//	         STDIN and the response printed on stdout.
 //
 // When no summarizer is configured, everything degrades gracefully: titles
 // fall back to a truncated task input, slugs to a slugified title, summarize
@@ -129,7 +176,16 @@ func (a *AgentConfig) IsTmux() bool {
 // require_context: true), and backfill-context errors out with an instructive
 // message.
 type SummarizerConfig struct {
-	Command string `yaml:"command"`
+	// Agent names the registry agent slug that runs summarizer calls.
+	// Mutually exclusive with Command.
+	Agent string `yaml:"agent,omitempty"`
+
+	Command string `yaml:"command,omitempty"`
+
+	// SlugAgent overrides Agent for slug generation (SAKUSEN_PURPOSE=slug)
+	// only. Mutually exclusive with SlugCommand; falls back to the main
+	// setting when unset.
+	SlugAgent string `yaml:"slug_agent,omitempty"`
 
 	// SlugCommand overrides Command for slug generation
 	// (SAKUSEN_PURPOSE=slug) only, so slugs can run on a different model or
@@ -154,23 +210,40 @@ type SummarizerConfig struct {
 	SlugPrompt string `yaml:"slug_prompt,omitempty"`
 }
 
-// Configured reports whether a summarizer command is set.
+// Configured reports whether a summarizer runner (agent or command) is set.
 func (s *SummarizerConfig) Configured() bool {
-	return strings.TrimSpace(s.Command) != ""
+	return strings.TrimSpace(s.Agent) != "" || strings.TrimSpace(s.Command) != ""
+}
+
+// EffectiveSlugAgent returns the agent slug slug generation runs on:
+// `slug_agent:` when set, otherwise the shared `agent:` — but only when the
+// slug side hasn't been redirected to its own `slug_command:`.
+func (s *SummarizerConfig) EffectiveSlugAgent() string {
+	if strings.TrimSpace(s.SlugAgent) != "" {
+		return s.SlugAgent
+	}
+	if strings.TrimSpace(s.SlugCommand) != "" {
+		return ""
+	}
+	return s.Agent
 }
 
 // EffectiveSlugCommand returns the command slug generation runs: `slug_command:`
-// when set, otherwise the shared `command:`.
+// when set, otherwise the shared `command:` — but only when the slug side
+// hasn't been redirected to its own `slug_agent:`.
 func (s *SummarizerConfig) EffectiveSlugCommand() string {
 	if strings.TrimSpace(s.SlugCommand) != "" {
 		return s.SlugCommand
 	}
+	if strings.TrimSpace(s.SlugAgent) != "" {
+		return ""
+	}
 	return s.Command
 }
 
-// SlugConfigured reports whether AI slug generation has a command to run.
+// SlugConfigured reports whether AI slug generation has a runner to invoke.
 func (s *SummarizerConfig) SlugConfigured() bool {
-	return strings.TrimSpace(s.EffectiveSlugCommand()) != ""
+	return strings.TrimSpace(s.EffectiveSlugAgent()) != "" || strings.TrimSpace(s.EffectiveSlugCommand()) != ""
 }
 
 // ResolveAgent looks up an agent record by slug in the merged registry. The
@@ -226,6 +299,90 @@ func (c *Config) StepAgent(wf *WorkflowConfig, step *StepConfig) (string, AgentC
 			"no agent %q configured: define it under `agents:` in .sakusen.yml (or set `agent:`/`default_agent:` to an existing slug); run `sakusen init` in a fresh project to scaffold defaults", slug)
 	}
 	return slug, agent, nil
+}
+
+// MergeConflictAgentFor resolves the agent that runs the merge-conflict
+// resolver for a workflow, following the cascade: `merge_conflicts.agent:` →
+// workflow.agent → default_agent → "claude". The resolver runs a synchronous
+// pass, so the agent must be headless: an explicit `merge_conflicts.agent:` is
+// rejected at config load when it is tmux-mode, while the lower cascade tiers
+// fall back to the implicit "claude" record when it exists and is headless.
+func (c *Config) MergeConflictAgentFor(wf *WorkflowConfig) (string, AgentConfig, error) {
+	if slug := c.MergeConflicts.Agent; slug != "" {
+		agent, ok := c.ResolveAgent(slug)
+		if !ok {
+			return slug, AgentConfig{}, fmt.Errorf("merge_conflicts.agent: unknown agent %q (no such slug under `agents:`)", slug)
+		}
+		if agent.IsTmux() {
+			return slug, AgentConfig{}, fmt.Errorf("merge_conflicts.agent %q is tmux-mode: conflict resolution requires a headless agent", slug)
+		}
+		return slug, agent, nil
+	}
+	slug, agent, err := c.StepAgent(wf, nil)
+	if err != nil {
+		return slug, AgentConfig{}, err
+	}
+	if agent.IsTmux() {
+		fallback, ok := c.ResolveAgent(DefaultAgentSlug)
+		if !ok || fallback.IsTmux() {
+			return slug, AgentConfig{}, fmt.Errorf("workflow agent %q is tmux-mode and no headless %q agent is configured", slug, DefaultAgentSlug)
+		}
+		return DefaultAgentSlug, fallback, nil
+	}
+	return slug, agent, nil
+}
+
+// SummarizerInvocation describes one resolved summarizer call: the shell
+// command to run plus, when the runner came from the agents registry, its slug
+// and env. A non-empty AgentSlug selects the file contract
+// (SAKUSEN_PROMPT_FILE / SAKUSEN_RESULT_FILE); otherwise the prompt is piped
+// on stdin.
+type SummarizerInvocation struct {
+	AgentSlug string
+	Command   string
+	Env       map[string]string
+}
+
+// UsesAgent reports whether the call runs a registry agent (file contract).
+func (i SummarizerInvocation) UsesAgent() bool {
+	return i.AgentSlug != ""
+}
+
+// SummarizerInvocation resolves the runner for every summarizer call except
+// slug generation. ok is false when no summarizer is configured.
+func (c *Config) SummarizerInvocation() (SummarizerInvocation, bool) {
+	return c.SummarizerInvocationFor(&c.Summarizer)
+}
+
+// SummarizerInvocationFor resolves an explicitly supplied summarizer block
+// against this config's agent registry, for callers that hold their own copy
+// of the block (the workflow engine snapshots one).
+func (c *Config) SummarizerInvocationFor(s *SummarizerConfig) (SummarizerInvocation, bool) {
+	return c.summarizerInvocation(s.Agent, s.Command)
+}
+
+// SummarizerSlugInvocation resolves the runner for slug generation
+// (`slug_agent:`/`slug_command:`, falling back to the shared setting).
+func (c *Config) SummarizerSlugInvocation() (SummarizerInvocation, bool) {
+	return c.summarizerInvocation(c.Summarizer.EffectiveSlugAgent(), c.Summarizer.EffectiveSlugCommand())
+}
+
+// summarizerInvocation prefers the agent slug over the bare command; the two
+// are mutually exclusive at load time, so the preference only matters for
+// configs assembled in code. An unresolvable slug reports "not configured" —
+// load-time validation rejects it long before this.
+func (c *Config) summarizerInvocation(agentSlug, command string) (SummarizerInvocation, bool) {
+	if slug := strings.TrimSpace(agentSlug); slug != "" {
+		agent, ok := c.ResolveAgent(slug)
+		if !ok {
+			return SummarizerInvocation{}, false
+		}
+		return SummarizerInvocation{AgentSlug: slug, Command: agent.Command, Env: agent.Env}, true
+	}
+	if strings.TrimSpace(command) == "" {
+		return SummarizerInvocation{}, false
+	}
+	return SummarizerInvocation{Command: command}, true
 }
 
 // StepIsTmux reports whether a step resolves to a tmux-mode agent. An
@@ -651,6 +808,28 @@ func validateAgentRefs(cfg *Config) error {
 	if err := checkRef(cfg.DefaultAgent, "default_agent"); err != nil {
 		return err
 	}
+	// System roles run synchronous passes, so an explicitly named agent must
+	// resolve AND be headless. The conflict resolver's lower cascade tiers can
+	// still fall back to "claude" (see MergeConflictAgentFor).
+	headlessRoleRefs := []struct{ slug, where string }{
+		{cfg.MergeConflicts.Agent, "merge_conflicts.agent"},
+		{cfg.Summarizer.Agent, "summarizer.agent"},
+		{cfg.Summarizer.SlugAgent, "summarizer.slug_agent"},
+	}
+	for _, ref := range headlessRoleRefs {
+		if err := checkRef(ref.slug, ref.where); err != nil {
+			return err
+		}
+		if ref.slug == "" {
+			continue
+		}
+		if agent, ok := cfg.ResolveAgent(ref.slug); ok && agent.IsTmux() {
+			return fmt.Errorf("%s %q: must be a headless agent (tmux-mode agents cannot run synchronous passes)", ref.where, ref.slug)
+		}
+	}
+	if err := validateRoleBlocks(cfg.MergeConflicts, cfg.Summarizer); err != nil {
+		return err
+	}
 	for i := range cfg.Workflows {
 		wf := &cfg.Workflows[i]
 		if err := checkRef(wf.Agent, fmt.Sprintf("workflow %q", wf.Name)); err != nil {
@@ -681,6 +860,27 @@ func validateAgentRefs(cfg *Config) error {
 		}
 	}
 
+	return nil
+}
+
+// validateRoleBlocks checks the system-role blocks against rules decidable
+// from a single file: a role picks EITHER a registry agent or a bare command,
+// never both, and the conflict-resolver timeout must parse (a typo would
+// otherwise be swallowed by GetStepTimeout's silent fallback). Shared by the
+// full load path and single-file diagnosis; slug existence and headless-ness
+// are cross-tier and checked in validateAgentRefs only.
+func validateRoleBlocks(mc MergeConflictsConfig, sum SummarizerConfig) error {
+	if strings.TrimSpace(sum.Agent) != "" && strings.TrimSpace(sum.Command) != "" {
+		return fmt.Errorf("summarizer: `agent:` and `command:` are mutually exclusive — `agent:` runs a registry agent through the prompt/result file contract, `command:` a bare command on stdin/stdout")
+	}
+	if strings.TrimSpace(sum.SlugAgent) != "" && strings.TrimSpace(sum.SlugCommand) != "" {
+		return fmt.Errorf("summarizer: `slug_agent:` and `slug_command:` are mutually exclusive")
+	}
+	if t := strings.TrimSpace(mc.Timeout); t != "" {
+		if _, err := time.ParseDuration(t); err != nil {
+			return fmt.Errorf("merge_conflicts.timeout: invalid duration %q: %w", mc.Timeout, err)
+		}
+	}
 	return nil
 }
 
@@ -721,6 +921,7 @@ var removedProjectKeys = map[string]string{
 	"yolo":                         "`yolo:` was removed with the `claude:` block: put permission flags (e.g. --dangerously-skip-permissions) directly in your agent's `command`",
 	"system_prompt":                "`system_prompt:` was removed: bake system-prompt flags into your agent's `command` (e.g. claude --append-system-prompt \"...\") or fold the text into step prompts",
 	"allowed_summarization_models": "`allowed_summarization_models` was removed: summarization now runs the top-level `summarizer:` command; pick the model inside that command",
+	"merge_conflict_agent":         "`merge_conflict_agent:` was removed: set `agent:` inside the top-level `merge_conflicts:` block instead (it also holds the resolver's `timeout:` and `prompt:`)",
 }
 
 // checkRemovedProjectKeys scans the top level of a config document for removed

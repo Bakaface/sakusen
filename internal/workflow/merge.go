@@ -31,43 +31,60 @@ func (e *Engine) bindConflictResolver() func(ctx context.Context, t *task.Task, 
 	}
 }
 
+// defaultConflictPrompt is the resolver's built-in prompt body, used when
+// `merge_conflicts.prompt:` is unset. It is a template like any override, so
+// both go through one resolution path.
+const defaultConflictPrompt = "You are resolving merge conflicts in an automated merge pipeline.\n" +
+	"\n" +
+	"The branch `{{git.base_branch}}` is being merged into `{{task.branch}}`, and the following files have conflicts:\n" +
+	"\n" +
+	"{{conflict.files}}\n" +
+	"\n" +
+	"Your job:\n" +
+	"1. Open each conflicted file and resolve all `<<<<<<<`, `=======`, `>>>>>>>` conflict markers\n" +
+	"2. Choose the correct resolution by understanding both sides of the conflict\n" +
+	"3. Run `git add <file>` on each resolved file\n" +
+	"4. Do NOT run `git commit` — the merge commit will be created automatically\n" +
+	"5. Do NOT modify any files that are not conflicted\n" +
+	"6. Verify the code compiles after resolving conflicts (run `go build ./...` or equivalent)\n"
+
 // resolveConflicts spawns a headless agent to resolve merge conflicts in the
-// worktree. The agent is resolved at the workflow level (workflow.agent →
-// default_agent → "claude") and must be headless-mode: an interactive tmux
+// worktree. The agent is resolved via merge_conflicts.agent → workflow.agent →
+// default_agent → "claude" and must be headless-mode: an interactive tmux
 // agent cannot run a synchronous conflict-resolution pass.
 func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFiles []string, outputFn func([]string)) error {
 	wf := e.cfg.GetWorkflow(t.Workflow)
-	slug, agent, err := e.cfg.WorkflowAgent(wf)
+	slug, agent, err := e.cfg.MergeConflictAgent(wf)
 	if err != nil {
 		return fmt.Errorf("failed to resolve merge conflicts: %w", err)
 	}
-	if agent.IsTmux() {
-		// Fall back to the implicit default headless agent when the workflow's
-		// agent is interactive.
-		if fallback, ok := e.cfg.ResolveAgent(config.DefaultAgentSlug); ok && !fallback.IsTmux() {
-			slug, agent = config.DefaultAgentSlug, fallback
-		} else {
-			return fmt.Errorf("failed to resolve merge conflicts: workflow agent %q is tmux-mode and no headless %q agent is configured", slug, config.DefaultAgentSlug)
-		}
+
+	body := e.cfg.MergeConflicts.Prompt
+	if strings.TrimSpace(body) == "" {
+		body = defaultConflictPrompt
 	}
-	var sb strings.Builder
-	sb.WriteString("You are resolving merge conflicts in an automated merge pipeline.\n\n")
-	sb.WriteString(fmt.Sprintf("The branch `%s` is being merged into `%s`, and the following files have conflicts:\n\n", e.cfg.BaseBranch, t.Branch))
-	for _, f := range conflictFiles {
-		sb.WriteString(fmt.Sprintf("- `%s`\n", f))
-	}
-	sb.WriteString("\nYour job:\n")
-	sb.WriteString("1. Open each conflicted file and resolve all `<<<<<<<`, `=======`, `>>>>>>>` conflict markers\n")
-	sb.WriteString("2. Choose the correct resolution by understanding both sides of the conflict\n")
-	sb.WriteString("3. Run `git add <file>` on each resolved file\n")
-	sb.WriteString("4. Do NOT run `git commit` — the merge commit will be created automatically\n")
-	sb.WriteString("5. Do NOT modify any files that are not conflicted\n")
-	sb.WriteString("6. Verify the code compiles after resolving conflicts (run `go build ./...` or equivalent)\n")
-	prompt := sb.String()
+	// No step ran here, so the prompt only gets task, git and conflict vars —
+	// {{steps.*}} / {{loop.*}} / {{children.*}} / {{track.*}} resolve empty.
+	prompt := ResolveTemplate(body, &TemplateContext{
+		Task: TaskVars{
+			ID:      t.ID,
+			Title:   t.Title,
+			Input:   t.Input,
+			Context: t.Context,
+			Slug:    t.Slug,
+			Branch:  t.Branch,
+		},
+		Git: GitVars{
+			BaseBranch:   e.cfg.BaseBranch,
+			TargetBranch: e.effectiveBaseBranch(t),
+			RepoRoot:     e.repoRoot,
+		},
+		Conflict: ConflictVars{Files: conflictFiles},
+	})
 
 	step := config.StepConfig{
 		Name:    "resolve-conflicts",
-		Timeout: "10m",
+		Timeout: e.cfg.MergeConflicts.EffectiveTimeout(),
 	}
 
 	env := map[string]string{

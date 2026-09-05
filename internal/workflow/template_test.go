@@ -270,3 +270,27 @@ func TestResolveTemplate_NowDoesNotAffectOtherVars(t *testing.T) {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }
+
+// TestResolveTemplateConflictFiles verifies {{conflict.files}}: one markdown
+// bullet per conflicted file, and "" in any context without conflicts (every
+// step prompt).
+func TestResolveTemplateConflictFiles(t *testing.T) {
+	tests := []struct {
+		name  string
+		files []string
+		want  string
+	}{
+		{"multiple files", []string{"main.go", "internal/a.go"}, "- `main.go`\n- `internal/a.go`"},
+		{"single file", []string{"main.go"}, "- `main.go`"},
+		{"no conflict context", nil, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &TemplateContext{Conflict: ConflictVars{Files: tt.files}}
+			if got := ResolveTemplate("{{conflict.files}}", ctx); got != tt.want {
+				t.Errorf("ResolveTemplate() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

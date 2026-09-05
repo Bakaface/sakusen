@@ -86,7 +86,10 @@ type ProjectConfig struct {
 	// DefaultAgent names the agent slug steps fall back to when neither the
 	// step nor the workflow sets `agent:`. Empty → "claude".
 	DefaultAgent string `yaml:"default_agent,omitempty"`
-	// Summarizer configures the utility LLM command for summarization/title
+	// MergeConflicts configures the merge-conflict resolver role. See
+	// MergeConflictsConfig.
+	MergeConflicts *MergeConflictsConfig `yaml:"merge_conflicts,omitempty"`
+	// Summarizer configures the utility LLM for summarization/title
 	// generation. See SummarizerConfig.
 	Summarizer *SummarizerConfig `yaml:"summarizer,omitempty"`
 	// OnComplete is the project-level finalization action run after a task's
@@ -729,6 +732,7 @@ type GlobalConfig struct {
 	Agents                   map[string]AgentConfig `yaml:"agents,omitempty"`
 	AgentAliases             map[string]string      `yaml:"agent_aliases,omitempty"`
 	DefaultAgent             string                 `yaml:"default_agent,omitempty"`
+	MergeConflicts           *MergeConflictsConfig  `yaml:"merge_conflicts,omitempty"`
 	Summarizer               *SummarizerConfig      `yaml:"summarizer,omitempty"`
 }
 
@@ -784,7 +788,10 @@ type Config struct {
 	// beats global). Empty means the implicit "claude" fallback.
 	DefaultAgent string
 
-	// Summarizer is the merged utility-LLM command configuration.
+	// MergeConflicts is the merged merge-conflict resolver configuration.
+	MergeConflicts MergeConflictsConfig
+
+	// Summarizer is the merged utility-LLM configuration.
 	Summarizer SummarizerConfig
 
 	// Paths to sync from project root into new worktrees

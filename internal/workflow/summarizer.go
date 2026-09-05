@@ -680,23 +680,47 @@ func RunWorktreeSetupCommands(ctx context.Context, projectRoot, worktreePath str
 // `summarizer:` command is configured. Callers treat it as a degradation:
 // summaries are skipped with a warning (or the task fails when a step demands
 // context via require_context).
-var ErrNoSummarizer = errors.New("no summarizer configured: set a top-level `summarizer:` command in .sakusen.yml (run `sakusen init` in a fresh project for a scaffolded default)")
+var ErrNoSummarizer = errors.New("no summarizer configured: set `summarizer.agent` (a slug from `agents:`) or `summarizer.command` in .sakusen.yml (run `sakusen init` in a fresh project for a scaffolded default)")
 
-// runSummarizerSync runs the configured summarizer command synchronously with
-// the prompt piped on stdin and captures its stdout. workDir sets the working
-// directory so the command can access the task's worktree files. purpose tags
-// the invocation via SAKUSEN_PURPOSE so stubs/scripts can route the call
-// without parsing prompt text.
+// RunSummarizer runs one resolved summarizer invocation synchronously and
+// returns its answer. It is the single place the two invocation shapes branch,
+// shared by every summarizer call site (step/task summaries, AI titles and
+// slugs, backfill-context):
 //
-// The prompt is piped on stdin rather than passed as an argv positional — this
-// sidesteps the OS ARG_MAX ceiling for very large chat logs.
-func (e *Engine) runSummarizerSync(ctx context.Context, prompt string, workDir string, purpose string) (string, error) {
-	if !e.cfg.Summarizer.Configured() {
-		return "", ErrNoSummarizer
+//	agent   — the agent's command runs with the prompt in SAKUSEN_PROMPT_FILE
+//	          and the answer read back from SAKUSEN_RESULT_FILE
+//	command — the command runs with the prompt piped on stdin (which sidesteps
+//	          the OS ARG_MAX ceiling for very large chat logs) and its stdout
+//	          taken as the answer
+//
+// workDir sets the working directory so the runner can reach the task's files;
+// projectPath is exported as SAKUSEN_PROJECT_PATH on the agent path (agent
+// commands routinely locate their scripts through it). purpose tags the
+// invocation via SAKUSEN_PURPOSE so stubs/scripts can route the call without
+// parsing prompt text. Output is never streamed into the task log.
+func RunSummarizer(ctx context.Context, inv config.SummarizerInvocation, prompt, workDir, projectPath, purpose string) (string, error) {
+	if inv.UsesAgent() {
+		return runner.RunAgentSync(ctx, runner.AgentSyncCall{
+			Command:     inv.Command,
+			WorkDir:     workDir,
+			ProjectPath: projectPath,
+			Purpose:     purpose,
+			Env:         inv.Env,
+		}, prompt)
 	}
 	env := map[string]string{}
 	if purpose != "" {
 		env["SAKUSEN_PURPOSE"] = purpose
 	}
-	return runner.RunSync(ctx, e.cfg.Summarizer.Command, workDir, env, prompt)
+	return runner.RunSync(ctx, inv.Command, workDir, env, prompt)
+}
+
+// runSummarizerSync resolves the configured summarizer runner and runs one
+// call against it. See RunSummarizer.
+func (e *Engine) runSummarizerSync(ctx context.Context, prompt string, workDir string, purpose string) (string, error) {
+	inv, ok := e.cfg.SummarizerInvocation()
+	if !ok {
+		return "", ErrNoSummarizer
+	}
+	return RunSummarizer(ctx, inv, prompt, workDir, e.repoRoot, purpose)
 }

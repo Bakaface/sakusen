@@ -57,6 +57,12 @@ type TrackVars struct {
 	OwnContext string // leaf track's own context only
 }
 
+// ConflictVars exposes the merge-conflict resolver's working set via
+// {{conflict.files}}. The zero value (any non-resolver context) renders "".
+type ConflictVars struct {
+	Files []string // repo-relative paths of the conflicted files
+}
+
 type TemplateContext struct {
 	Task     TaskVars
 	Steps    map[string]string // step name -> result text from DB
@@ -64,6 +70,7 @@ type TemplateContext struct {
 	Loop     LoopVars
 	Children ChildrenVars
 	Track    TrackVars
+	Conflict ConflictVars
 	// TaskLookup resolves a task by ID for {{tasks.<id>.<field>}} references.
 	// When nil, such references resolve to "".
 	TaskLookup func(int64) (*task.Task, error)
@@ -112,6 +119,8 @@ func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
 			return ctx.Git.TargetBranch
 		case key == "git.repo_root":
 			return ctx.Git.RepoRoot
+		case key == "conflict.files":
+			return formatConflictFiles(ctx.Conflict.Files)
 		case key == "track.id":
 			if ctx.Track.ID == 0 {
 				return ""
@@ -150,6 +159,16 @@ func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
 			return match // leave unknown placeholders as-is
 		}
 	})
+}
+
+// formatConflictFiles renders the conflicted-file list as one markdown bullet
+// per file, newline-joined. An empty list renders "".
+func formatConflictFiles(files []string) string {
+	lines := make([]string, 0, len(files))
+	for _, f := range files {
+		lines = append(lines, fmt.Sprintf("- `%s`", f))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // FormatTrackChain renders a root-first track chain for {{track.context}}.

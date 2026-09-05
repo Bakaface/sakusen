@@ -144,8 +144,19 @@ func TestInitCmd_ScaffoldedConfigLoads(t *testing.T) {
 		t.Errorf("claude-tmux chat_log_command = %q", tmuxAgent.ChatLogCommand)
 	}
 
-	if cfg.Summarizer.Command != "claude -p --output-format text --model haiku --dangerously-skip-permissions" {
-		t.Errorf("summarizer command = %q", cfg.Summarizer.Command)
+	haiku, ok := cfg.Agents["claude:haiku"]
+	if !ok {
+		t.Fatalf("agents missing the expanded variant %q, got %v", "claude:haiku", cfg.Agents)
+	}
+	if haiku.Env["ANTHROPIC_MODEL"] != "haiku" {
+		t.Errorf("claude:haiku env = %v, want ANTHROPIC_MODEL=haiku", haiku.Env)
+	}
+
+	if cfg.Summarizer.Agent != "claude:haiku" {
+		t.Errorf("summarizer agent = %q, want %q", cfg.Summarizer.Agent, "claude:haiku")
+	}
+	if cfg.Summarizer.Command != "" {
+		t.Errorf("summarizer command = %q, want empty (the scaffold selects an agent)", cfg.Summarizer.Command)
 	}
 	if cfg.Summarizer.MaxPromptBytes != 380000 {
 		t.Errorf("summarizer max_prompt_bytes = %d, want 380000", cfg.Summarizer.MaxPromptBytes)
