@@ -2160,24 +2160,30 @@ func contains(s, substr string) bool {
 	return false
 }
 
-// TestEffectiveOnCompleteLocality verifies scope-aware on_complete precedence
-// through the real loader: a workflow adopted from the global pool carries its
-// on_complete only as a default — an explicit project-level on_complete beats
-// it — while a project-defined workflow's on_complete beats the project-level
-// setting.
-func TestEffectiveOnCompleteLocality(t *testing.T) {
+// TestEffectiveOnCompleteCascade verifies most-specific-wins on_complete
+// precedence through the real loader: an explicit workflow-level on_complete
+// beats the project-level setting whatever scope the workflow came from, and a
+// workflow without one inherits project-level, which in turn beats global.
+func TestEffectiveOnCompleteCascade(t *testing.T) {
+	// Global tier: top-level on_complete "none", one workflow that sets its own
+	// on_complete ("commit") and one that sets none at all.
 	writeGlobal := func(t *testing.T) string {
 		globalDir := t.TempDir()
 		globalPath := filepath.Join(globalDir, ".sakusen.yml")
-		if err := os.WriteFile(globalPath, []byte("workflows:\n  - gwf\n"), 0644); err != nil {
+		globalYml := "on_complete: none\nworkflows:\n  - gwf\n  - gplain\n"
+		if err := os.WriteFile(globalPath, []byte(globalYml), 0644); err != nil {
 			t.Fatal(err)
 		}
 		wfDir := filepath.Join(globalDir, ".sakusen", "workflows")
 		if err := os.MkdirAll(wfDir, 0755); err != nil {
 			t.Fatal(err)
 		}
-		gwf := "on_complete: none\nsteps:\n  - name: s\n    prompt: p\n"
+		gwf := "on_complete: commit\nsteps:\n  - name: s\n    prompt: p\n"
 		if err := os.WriteFile(filepath.Join(wfDir, "gwf.yml"), []byte(gwf), 0644); err != nil {
+			t.Fatal(err)
+		}
+		gplain := "steps:\n  - name: s\n    prompt: p\n"
+		if err := os.WriteFile(filepath.Join(wfDir, "gplain.yml"), []byte(gplain), 0644); err != nil {
 			t.Fatal(err)
 		}
 		return globalPath
@@ -2186,7 +2192,7 @@ func TestEffectiveOnCompleteLocality(t *testing.T) {
 	load := func(t *testing.T, projectYml string) *Config {
 		globalPath := writeGlobal(t)
 		cfg := defaultConfig()
-		if err := loadProjectConfigTier(globalPath, cfg, false); err != nil {
+		if err := loadProjectConfig(globalPath, cfg); err != nil {
 			t.Fatal(err)
 		}
 		cfg.globalPool = snapshotGlobalPool(cfg)
@@ -2200,7 +2206,7 @@ func TestEffectiveOnCompleteLocality(t *testing.T) {
 		if err := os.MkdirAll(localDir, 0755); err != nil {
 			t.Fatal(err)
 		}
-		lwf := "on_complete: commit\nsteps:\n  - name: s\n    prompt: p\n"
+		lwf := "on_complete: none\nsteps:\n  - name: s\n    prompt: p\n"
 		if err := os.WriteFile(filepath.Join(localDir, "lwf.yml"), []byte(lwf), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -2210,12 +2216,9 @@ func TestEffectiveOnCompleteLocality(t *testing.T) {
 		return cfg
 	}
 
-	t.Run("explicit project on_complete beats global workflow", func(t *testing.T) {
-		cfg := load(t, "on_complete: merge\nworkflows:\n  - gwf\n  - lwf\n")
+	t.Run("explicit workflow on_complete beats explicit project on_complete", func(t *testing.T) {
+		cfg := load(t, "on_complete: merge\nworkflows:\n  - gwf\n  - gplain\n  - lwf\n")
 
-		if !cfg.OnCompleteFromProject {
-			t.Fatal("OnCompleteFromProject = false, want true")
-		}
 		gwf := cfg.GetWorkflow("gwf")
 		if !gwf.FromGlobal {
 			t.Error("gwf.FromGlobal = false, want true (adopted from global pool)")
@@ -2224,28 +2227,31 @@ func TestEffectiveOnCompleteLocality(t *testing.T) {
 		if lwf.FromGlobal {
 			t.Error("lwf.FromGlobal = true, want false (project-local file)")
 		}
-		if got := cfg.EffectiveOnComplete("gwf"); got != "merge" {
-			t.Errorf("EffectiveOnComplete(gwf) = %q, want %q (project explicit beats global workflow)", got, "merge")
+		if got := cfg.EffectiveOnComplete("gwf"); got != "commit" {
+			t.Errorf("EffectiveOnComplete(gwf) = %q, want %q (global workflow explicit beats project-level)", got, "commit")
 		}
-		if got := cfg.EffectiveOnComplete("lwf"); got != "commit" {
-			t.Errorf("EffectiveOnComplete(lwf) = %q, want %q (project workflow beats project-level)", got, "commit")
+		if got := cfg.EffectiveOnComplete("lwf"); got != "none" {
+			t.Errorf("EffectiveOnComplete(lwf) = %q, want %q (project workflow explicit beats project-level)", got, "none")
+		}
+		if got := cfg.EffectiveOnComplete("gplain"); got != "merge" {
+			t.Errorf("EffectiveOnComplete(gplain) = %q, want %q (no workflow value: project-level beats global-level)", got, "merge")
 		}
 		if got := cfg.EffectiveOnComplete("unknown"); got != "merge" {
 			t.Errorf("EffectiveOnComplete(unknown) = %q, want %q", got, "merge")
 		}
 	})
 
-	t.Run("global workflow on_complete applies when project inherits", func(t *testing.T) {
-		cfg := load(t, "workflows:\n  - gwf\n  - lwf\n")
+	t.Run("project-level inherits global-level when unset", func(t *testing.T) {
+		cfg := load(t, "workflows:\n  - gwf\n  - gplain\n  - lwf\n")
 
-		if cfg.OnCompleteFromProject {
-			t.Fatal("OnCompleteFromProject = true, want false (project never set it)")
+		if got := cfg.EffectiveOnComplete("gplain"); got != "none" {
+			t.Errorf("EffectiveOnComplete(gplain) = %q, want %q (inherited global-level)", got, "none")
 		}
-		if got := cfg.EffectiveOnComplete("gwf"); got != "none" {
-			t.Errorf("EffectiveOnComplete(gwf) = %q, want %q (global workflow default applies)", got, "none")
+		if got := cfg.EffectiveOnComplete("gwf"); got != "commit" {
+			t.Errorf("EffectiveOnComplete(gwf) = %q, want %q (workflow value still wins)", got, "commit")
 		}
-		if got := cfg.EffectiveOnComplete("unknown"); got != "commit" {
-			t.Errorf("EffectiveOnComplete(unknown) = %q, want %q (built-in default)", got, "commit")
+		if got := cfg.EffectiveOnComplete("unknown"); got != "none" {
+			t.Errorf("EffectiveOnComplete(unknown) = %q, want %q (inherited global-level)", got, "none")
 		}
 	})
 }

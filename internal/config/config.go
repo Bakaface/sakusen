@@ -78,7 +78,7 @@ func loadCommon(cfg *Config) error {
 	// local .sakusen/workflows/ — no self-recursion.
 	globalSakusenYml := getGlobalSakusenYmlPath()
 	if globalSakusenYml != "" {
-		if err := loadProjectConfigTier(globalSakusenYml, cfg, false); err != nil && !os.IsNotExist(err) {
+		if err := loadProjectConfig(globalSakusenYml, cfg); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -233,20 +233,11 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	return nil
 }
 
-// loadProjectConfig loads a .sakusen.yml at the project tier. Kept as a thin
-// wrapper so existing callers (and tests) that always load project-scope
-// files keep their signature; loadCommon loads ~/.sakusen.yml with
-// projectTier=false via loadProjectConfigTier.
+// loadProjectConfig loads a .sakusen.yml-shaped file into cfg. It serves both
+// the project ./.sakusen.yml and the global ~/.sakusen.yml, which share the
+// same format; the caller decides the tier by load order (global first, then
+// project overriding it).
 func loadProjectConfig(path string, cfg *Config) error {
-	return loadProjectConfigTier(path, cfg, true)
-}
-
-// loadProjectConfigTier loads a .sakusen.yml-shaped file into cfg. projectTier
-// distinguishes the project ./.sakusen.yml (true) from the global ~/.sakusen.yml
-// (false), which shares the same format but is a less-local scope: settings
-// explicitly set at the project tier are recorded (OnCompleteFromProject) so
-// finalization can apply locality precedence against global workflows.
-func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -281,9 +272,6 @@ func loadProjectConfigTier(path string, cfg *Config, projectTier bool) error {
 	override(&cfg.Git.BaseBranch, proj.Git.BaseBranch)
 	override(&cfg.Git.BranchTemplate, proj.Git.BranchTemplate)
 	override(&cfg.OnComplete, proj.OnComplete)
-	if projectTier && proj.OnComplete != "" {
-		cfg.OnCompleteFromProject = true
-	}
 	override(&cfg.DefaultPriority, proj.DefaultPriority)
 	overrideFromPtr(&cfg.Verification, proj.Verification)
 	overrideFromPtr(&cfg.Notifications, proj.Notifications)

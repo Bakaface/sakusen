@@ -1452,28 +1452,24 @@ func TestRunTaskStdoutTailFallbackBecomesStepContext(t *testing.T) {
 }
 
 // TestEffectiveOnComplete verifies the on_complete resolution precedence:
-// locality wins. A project-scoped workflow's on_complete beats the project
-// top-level setting; a global workflow's on_complete is only a default that
-// an explicit project-level on_complete overrides.
+// most specific wins. A workflow's explicit on_complete beats the top-level
+// setting whatever scope the workflow was defined in; a workflow without one
+// inherits the top-level setting.
 func TestEffectiveOnComplete(t *testing.T) {
 	cases := []struct {
-		name                  string
-		onCompleteFromProject bool
-		workflow              string
-		want                  string
+		name     string
+		workflow string
+		want     string
 	}{
-		{"workflow inherits project-level", false, "inherits", "merge"},
-		{"project workflow overrides project-level", false, "overrides", "commit"},
-		{"unknown workflow falls back to project-level", false, "nope", "merge"},
-		{"global workflow wins when project on_complete is inherited", false, "global-none", "none"},
-		{"explicit project on_complete beats global workflow", true, "global-none", "merge"},
-		{"project workflow beats explicit project on_complete", true, "overrides", "commit"},
+		{"workflow inherits project-level", "inherits", "merge"},
+		{"project workflow overrides project-level", "overrides", "commit"},
+		{"unknown workflow falls back to project-level", "nope", "merge"},
+		{"global workflow overrides project-level too", "global-none", "none"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.Config{
-				OnComplete:            "merge",
-				OnCompleteFromProject: tc.onCompleteFromProject,
+				OnComplete: "merge",
 				Workflows: []config.WorkflowConfig{
 					{Name: "inherits", Steps: []config.StepConfig{{Name: "s"}}},
 					{Name: "overrides", OnComplete: "commit", Steps: []config.StepConfig{{Name: "s"}}},

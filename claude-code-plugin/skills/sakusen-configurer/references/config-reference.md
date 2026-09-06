@@ -162,18 +162,18 @@ Controls what Sakusen does after a task's workflow finishes:
 - `"none"` — Leaves changes in the worktree branch without action
 
 It can be overridden per-workflow via a workflow-level `on_complete:` key.
-Resolution is **locality-based** — the more locally-defined setting wins:
+Resolution is **most-specific-wins**:
 
-1. A **project-scoped** workflow's `on_complete` (inline in `.sakusen.yml` or a
-   `.sakusen/workflows/` file)
-2. The project `.sakusen.yml` top-level `on_complete`, when explicitly set
-3. A **global** workflow's `on_complete` (`~/.sakusen.yml` inline or
-   `~/.sakusen/workflows/`)
-4. The inherited top-level `on_complete` (`~/.sakusen.yml` or the built-in
-   default `commit`)
+1. The workflow's own `on_complete`, wherever the workflow was defined (project
+   **or** global)
+2. The project `.sakusen.yml` top-level `on_complete`
+3. The global `~/.sakusen.yml` top-level `on_complete`, or the built-in default
+   `commit`
 
-A global workflow's `on_complete` is a cross-project *default*, not an override:
-adopting it must not silently defeat a project's explicit choice.
+`on_complete` is a property of the workflow's shape — whether its last step is a
+human gate — so an explicit workflow value is authoritative in every project that
+adopts it. To use a different value for a global workflow, shadow it by name in
+the project and set `on_complete` there.
 
 > Moved here from the former `git.on_complete`. The old location now errors.
 

@@ -44,22 +44,19 @@ func (c *Config) GetWorkflow(name string) *WorkflowConfig {
 }
 
 // EffectiveOnComplete resolves the finalization action for a task running the
-// named workflow. Precedence is locality-based — the more locally-defined
-// setting wins:
+// named workflow. Precedence is a plain most-specific-wins cascade:
 //
-//  1. a project-scoped workflow's on_complete (inline in .sakusen.yml or a
-//     .sakusen/workflows/ file)
-//  2. the project .sakusen.yml top-level on_complete (explicitly set)
-//  3. a global workflow's on_complete (~/.sakusen.yml inline or
-//     ~/.sakusen/workflows/)
-//  4. the inherited top-level on_complete (~/.sakusen.yml or built-in default)
+//  1. the workflow's own on_complete, wherever the workflow was defined
+//  2. the project .sakusen.yml top-level on_complete
+//  3. the inherited top-level on_complete (~/.sakusen.yml or built-in default)
 //
-// A workflow adopted from the global pool is a cross-project default; adopting
-// it must not silently defeat a project's explicit on_complete choice (a task
-// completing with "none" strands its work uncommitted in the worktree).
+// on_complete is a property of the workflow's shape — whether its last step is
+// a human gate — so an explicit workflow value is authoritative regardless of
+// scope. A project that needs a different value for a global workflow shadows
+// it by name and sets on_complete there.
 func (c *Config) EffectiveOnComplete(workflowName string) string {
 	wf := c.GetWorkflow(workflowName)
-	if wf != nil && wf.OnComplete != "" && !(wf.FromGlobal && c.OnCompleteFromProject) {
+	if wf != nil && wf.OnComplete != "" {
 		return wf.OnComplete
 	}
 	return c.OnComplete

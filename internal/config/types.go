@@ -368,10 +368,9 @@ type WorkflowConfig struct {
 	Agent string `yaml:"agent,omitempty"`
 	// OnComplete, when non-empty, overrides the project-level on_complete action
 	// for tasks running this workflow ("commit" | "merge" | "none"). Empty means
-	// inherit the project-level setting. Precedence is locality-based (see
-	// Config.EffectiveOnComplete): a project-scoped workflow's value beats the
-	// project's top-level on_complete, but a GLOBAL workflow's value is only a
-	// default — an explicit project-level on_complete beats it.
+	// inherit the project-level setting. An explicit value always wins over the
+	// top-level setting, whatever scope the workflow was defined in (see
+	// Config.EffectiveOnComplete).
 	OnComplete            string                  `yaml:"on_complete,omitempty"`
 	Steps                 []StepConfig            `yaml:"steps"`
 	SummarizerPrompt      string                  `yaml:"summarizer_prompt"`
@@ -396,8 +395,7 @@ type WorkflowConfig struct {
 	// FromGlobal marks a workflow whose definition was adopted from the global
 	// scope (~/.sakusen.yml inline, ~/.sakusen/workflows/, or ~/.sakusen/tracks/)
 	// rather than defined by the project. Global workflows carry their settings
-	// along, but locality wins: an explicit project-level on_complete overrides
-	// a FromGlobal workflow's OnComplete (see Config.EffectiveOnComplete).
+	// along unchanged; the flag records provenance for diagnostics.
 	// Not serialized to YAML — populated by the loader.
 	FromGlobal bool `yaml:"-"`
 }
@@ -764,14 +762,8 @@ type Config struct {
 	// EffectiveOnComplete.
 	OnComplete string
 
-	// OnCompleteFromProject records that OnComplete was explicitly set by the
-	// project-tier .sakusen.yml (as opposed to inherited from ~/.sakusen.yml or
-	// the built-in default). When true, the project's OnComplete beats a
-	// FromGlobal workflow's OnComplete in EffectiveOnComplete.
-	// Populated by the loader.
-	OnCompleteFromProject bool
-	Workflows             []WorkflowConfig // flat resolved workflow list
-	Periodic              []PeriodicEntry  // scheduled-task definitions (top-level periodic: section)
+	Workflows []WorkflowConfig // flat resolved workflow list
+	Periodic  []PeriodicEntry  // scheduled-task definitions (top-level periodic: section)
 
 	// Agents is the merged agent registry (global tier overlaid by the
 	// project tier, per slug). See AgentConfig and Config.StepAgent. After
