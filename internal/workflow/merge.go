@@ -65,7 +65,7 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 	}
 	// No step ran here, so the prompt only gets task, git and conflict vars —
 	// {{steps.*}} / {{loop.*}} / {{children.*}} / {{track.*}} resolve empty.
-	prompt := ResolveTemplate(body, &TemplateContext{
+	prompt, err := ResolveTemplate(body, &TemplateContext{
 		Task: TaskVars{
 			ID:      t.ID,
 			Title:   t.Title,
@@ -79,8 +79,12 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 			TargetBranch: e.effectiveBaseBranch(t),
 			RepoRoot:     e.repoRoot,
 		},
-		Conflict: ConflictVars{Files: conflictFiles},
+		Conflict:   ConflictVars{Files: conflictFiles},
+		PromptDirs: e.cfg.PromptDirs,
 	})
+	if err != nil {
+		return fmt.Errorf("merge_conflicts.prompt: %w", err)
+	}
 
 	step := config.StepConfig{
 		Name:    "resolve-conflicts",

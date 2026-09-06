@@ -110,7 +110,7 @@ func TestSplitOnLineBoundary(t *testing.T) {
 // ErrNoSummarizer instead of silently returning an empty summary.
 func TestSummarizeChatLogNoSummarizerConfigured(t *testing.T) {
 	e := &Engine{
-		cfg:      newEngineConfig(&config.Config{}),
+		cfg:      newEngineConfig(&config.Config{}, ""),
 		database: newFakeTaskStore(),
 	}
 	tk := &task.Task{ID: 1, Title: "no summarizer", WorktreePath: t.TempDir()}
@@ -139,7 +139,7 @@ func TestSummarizeChatLogMapReduce(t *testing.T) {
 		cfg := &config.Config{
 			Summarizer: config.SummarizerConfig{Command: cmd, MaxPromptBytes: maxPromptBytes},
 		}
-		return &Engine{cfg: newEngineConfig(cfg), database: newFakeTaskStore()}, callLog
+		return &Engine{cfg: newEngineConfig(cfg, ""), database: newFakeTaskStore()}, callLog
 	}
 	readCalls := func(t *testing.T, callLog string) []string {
 		t.Helper()
@@ -220,7 +220,7 @@ func TestLoadStepChatContentTmuxEnvContract(t *testing.T) {
 			}},
 		}
 		store := newFakeTaskStore()
-		e := &Engine{cfg: newEngineConfig(cfg), database: store}
+		e := &Engine{cfg: newEngineConfig(cfg, ""), database: store}
 		tk := &task.Task{ID: 42, WorktreePath: wt}
 		wf := cfg.GetWorkflow("wf")
 		return e, wf, wf.Steps[0], store, tk
@@ -301,7 +301,7 @@ func TestSummarizeChatLogMapReduceHeadroom(t *testing.T) {
 	cfg := &config.Config{
 		Summarizer: config.SummarizerConfig{Command: cmd, MaxPromptBytes: maxPromptBytes},
 	}
-	e := &Engine{cfg: newEngineConfig(cfg), database: newFakeTaskStore()}
+	e := &Engine{cfg: newEngineConfig(cfg, ""), database: newFakeTaskStore()}
 	tk := &task.Task{ID: 1, Title: "headroom"}
 
 	// ~46KB of 20-char lines: over the 40KB ceiling, and sized to need
@@ -555,14 +555,17 @@ func TestStepAgentOutput(t *testing.T) {
 // name, task id, and chat content.
 func TestBuildSummarizePrompt(t *testing.T) {
 	engine := &Engine{
-		cfg:      newEngineConfig(&config.Config{}),
+		cfg:      newEngineConfig(&config.Config{}, ""),
 		database: newFakeTaskStore(),
 	}
 	tk := &task.Task{ID: 7, Title: "fix the widget"}
 
 	t.Run("custom prompt with chat placeholder", func(t *testing.T) {
-		got := engine.buildSummarizePrompt(tk, "implement",
+		got, err := engine.buildSummarizePrompt(tk, "implement",
 			"Summarize task {{task.id}} ({{task.title}}):\n{{chat}}\nEND", "THE CHAT LOG")
+		if err != nil {
+			t.Fatalf("buildSummarizePrompt: %v", err)
+		}
 		want := "Summarize task 7 (fix the widget):\nTHE CHAT LOG\nEND"
 		if got != want {
 			t.Errorf("prompt = %q, want %q", got, want)
@@ -573,7 +576,10 @@ func TestBuildSummarizePrompt(t *testing.T) {
 	})
 
 	t.Run("custom prompt without placeholder appends the log", func(t *testing.T) {
-		got := engine.buildSummarizePrompt(tk, "implement", "Summarize this.", "THE CHAT LOG")
+		got, err := engine.buildSummarizePrompt(tk, "implement", "Summarize this.", "THE CHAT LOG")
+		if err != nil {
+			t.Fatalf("buildSummarizePrompt: %v", err)
+		}
 		want := "Summarize this.\n\n--- CONVERSATION LOG ---\nTHE CHAT LOG"
 		if got != want {
 			t.Errorf("prompt = %q, want %q", got, want)
@@ -581,7 +587,10 @@ func TestBuildSummarizePrompt(t *testing.T) {
 	})
 
 	t.Run("empty custom prompt uses the default", func(t *testing.T) {
-		got := engine.buildSummarizePrompt(tk, "implement", "", "THE CHAT LOG")
+		got, err := engine.buildSummarizePrompt(tk, "implement", "", "THE CHAT LOG")
+		if err != nil {
+			t.Fatalf("buildSummarizePrompt: %v", err)
+		}
 		for _, want := range []string{`"implement"`, "#7", "fix the widget", "--- CONVERSATION LOG ---\nTHE CHAT LOG"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("default prompt missing %q:\n%s", want, got)

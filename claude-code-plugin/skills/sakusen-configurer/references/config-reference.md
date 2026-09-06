@@ -14,6 +14,7 @@
 - [Worktree Sync Paths](#worktree-sync-paths)
 - [Worktree Setup Commands](#worktree-setup-commands)
 - [Tmux Setup Command](#tmux-setup-command)
+- [Prompt Includes (`.sakusen/prompts/`)](#prompt-includes-sakusenprompts)
 - [Step Configuration, Loops, Cross-Task and Child References](#step-configuration-loops-cross-task-and-child-references) — moved to [workflow-building.md](workflow-building.md)
 - [Task States](#task-states)
 - [Task Priorities](#task-priorities)
@@ -334,6 +335,43 @@ Variables:
 The command runs via `sh -c` with the **worktree** as `cwd`; a non-zero exit fails the session launch.
 
 **Agent-launch control:** when the command contains `{{run_agent}}` or `{{agent_command}}`, Sakusen assumes *you* place the agent (as in the example above) and does not auto-start it. When neither appears, Sakusen starts the agent itself in window 0 after your command runs. If you do not set `tmux-setup-command` at all, Sakusen uses a minimal default that just starts the agent.
+
+---
+
+## Prompt Includes (`.sakusen/prompts/`)
+
+Not a YAML section — a directory. Any templated prompt string can inline a shared passage of
+text with `{{prompt.<name>}}`, resolved to `<name>.md` and searched project-first, first hit
+wins:
+
+1. `<project>/.sakusen/prompts/<name>.md`
+2. `~/.sakusen/prompts/<name>.md`
+
+```yaml
+merge_conflicts:
+  prompt: "{{prompt.conflict-rules}}"        # .sakusen/prompts/conflict-rules.md
+workflows:
+  - name: sensible
+    summarizer_prompt: "{{prompt.wrap-up}}"
+    steps:
+      - name: implementing
+        prompt: |
+          Apply the plan for task #{{task.id}}.
+          {{prompt.implementer-core}}
+        summarization_prompt: "{{prompt.summary-rules}}\n<chat>{{chat}}</chat>"
+```
+
+| Rule | Behavior |
+|---|---|
+| Valid names | `[A-Za-z0-9_-]+` (kebab-case by convention); anything else is a load error |
+| Where it works | step `prompt`, step `summarization_prompt`, workflow `summarizer_prompt`, `merge_conflicts.prompt` — **not** `git.branch_template`, `worktree-setup-command`, or `tmux-setup-command` |
+| Resolution order | The include is substituted first, then all other placeholders resolve over the combined text — so an included file may itself use `{{task.id}}`, `{{steps.<name>.context}}`, … |
+| Nesting | Depth 1 — an included file containing `{{prompt.*}}` is a load error |
+| Whitespace | One trailing newline is stripped; other leading/trailing whitespace is preserved |
+| Missing file | Hard error at config load and from `sakusen validate`, naming the workflow, step, field and both searched paths |
+
+There is no top-level `prompts:` map and no agent-level prompt — files only. See
+[workflow-building.md → Prompt Includes](workflow-building.md#prompt-includes).
 
 ---
 

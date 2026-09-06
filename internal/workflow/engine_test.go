@@ -245,7 +245,7 @@ func TestTemplateTaskImages(t *testing.T) {
 		},
 	}
 
-	result := ResolveTemplate("Images:\n{{task.images}}", ctx)
+	result := mustResolveTemplate(t, "Images:\n{{task.images}}", ctx)
 	expected := "Images:\n.sakusen/images/screenshot.png\n.sakusen/images/diagram.jpg"
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
@@ -260,7 +260,7 @@ func TestTemplateTaskImagesEmpty(t *testing.T) {
 		},
 	}
 
-	result := ResolveTemplate("Images: {{task.images}}", ctx)
+	result := mustResolveTemplate(t, "Images: {{task.images}}", ctx)
 	if result != "Images: " {
 		t.Errorf("expected 'Images: ', got %q", result)
 	}
@@ -412,7 +412,7 @@ func TestTemplateLoopVars(t *testing.T) {
 		Loop: LoopVars{Iteration: 3, MaxIterations: 5},
 	}
 
-	result := ResolveTemplate("Iteration {{loop.iteration}} of {{loop.max_iterations}}", ctx)
+	result := mustResolveTemplate(t, "Iteration {{loop.iteration}} of {{loop.max_iterations}}", ctx)
 	expected := "Iteration 3 of 5"
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
@@ -425,7 +425,7 @@ func TestTemplateLoopVarsZero(t *testing.T) {
 		Loop: LoopVars{Iteration: 0, MaxIterations: 0},
 	}
 
-	result := ResolveTemplate("Iteration {{loop.iteration}} of {{loop.max_iterations}}", ctx)
+	result := mustResolveTemplate(t, "Iteration {{loop.iteration}} of {{loop.max_iterations}}", ctx)
 	expected := "Iteration 0 of 0"
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
@@ -1480,7 +1480,7 @@ func TestEffectiveOnComplete(t *testing.T) {
 					{Name: "global-none", OnComplete: "none", FromGlobal: true, Steps: []config.StepConfig{{Name: "s"}}},
 				},
 			}
-			e := &Engine{cfg: newEngineConfig(cfg)}
+			e := &Engine{cfg: newEngineConfig(cfg, "")}
 			got := e.effectiveOnComplete(&task.Task{Workflow: tc.workflow})
 			if got != tc.want {
 				t.Errorf("effectiveOnComplete(%q) = %q, want %q", tc.workflow, got, tc.want)

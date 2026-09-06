@@ -30,6 +30,12 @@ type engineConfig struct {
 	ProjectName      string
 	TmuxSetupCommand string
 
+	// PromptDirs are the ordered {{prompt.<name>}} include search roots
+	// (project then global). Snapshotted like every other value here; the
+	// FILES themselves are re-read at every step launch, so editing a shared
+	// passage takes effect without a config reload.
+	PromptDirs []string
+
 	// full is retained so the delegate methods below can reuse
 	// config.Config's own workflow-lookup / branch-template / agent
 	// resolution instead of duplicating it.
@@ -37,13 +43,20 @@ type engineConfig struct {
 }
 
 // newEngineConfig snapshots the fields/methods Engine needs from cfg.
-func newEngineConfig(cfg *config.Config) *engineConfig {
+// repoRoot anchors the project tier of the prompt-include search when the
+// config carries no ProjectDir (standalone/test construction).
+func newEngineConfig(cfg *config.Config, repoRoot string) *engineConfig {
+	projectDir := cfg.ProjectDir
+	if projectDir == "" {
+		projectDir = repoRoot
+	}
 	return &engineConfig{
 		BaseBranch:       cfg.Git.BaseBranch,
 		MergeConflicts:   cfg.MergeConflicts,
 		Summarizer:       cfg.Summarizer,
 		ProjectName:      cfg.Project.Name,
 		TmuxSetupCommand: cfg.TmuxSetupCommand,
+		PromptDirs:       config.PromptDirs(projectDir),
 		full:             cfg,
 	}
 }

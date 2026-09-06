@@ -227,7 +227,11 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 			Slug:    t.Slug,
 			Branch:  t.Branch,
 		}, stepContexts, LoopVars{})
-		prompt = ResolveTemplate(wf.SummarizerPrompt, tmplCtx)
+		var perr error
+		prompt, perr = ResolveTemplate(wf.SummarizerPrompt, tmplCtx)
+		if perr != nil {
+			return fmt.Errorf("workflow %q: summarizer_prompt: %w", wf.Name, perr)
+		}
 		var names []string
 		for name := range stepContexts {
 			names = append(names, name)
@@ -497,7 +501,10 @@ func (e *Engine) summarizeChatLog(ctx context.Context, t *task.Task, stepName, c
 		return "", nil
 	}
 
-	prompt := e.buildSummarizePrompt(t, stepName, customPrompt, chatContent)
+	prompt, err := e.buildSummarizePrompt(t, stepName, customPrompt, chatContent)
+	if err != nil {
+		return "", err
+	}
 
 	maxBytes := e.cfg.Summarizer.MaxPromptBytes
 	if maxBytes > 0 && len(prompt) > maxBytes {
@@ -507,7 +514,10 @@ func (e *Engine) summarizeChatLog(ctx context.Context, t *task.Task, stepName, c
 			return "", err
 		}
 		reduced := strings.Join(chunkSummaries, "\n\n--- CHUNK BOUNDARY ---\n\n")
-		prompt = e.buildSummarizePrompt(t, stepName, customPrompt, reduced)
+		prompt, err = e.buildSummarizePrompt(t, stepName, customPrompt, reduced)
+		if err != nil {
+			return "", err
+		}
 		log.Printf("summarize_chat: map-reduce reduce step for step %q of task #%d (%d chunk summaries, %d chars)", stepName, t.ID, len(chunkSummaries), len(reduced))
 	}
 
@@ -524,7 +534,7 @@ func (e *Engine) summarizeChatLog(ctx context.Context, t *task.Task, stepName, c
 // buildSummarizePrompt resolves the summarization prompt for the given chat content,
 // using customPrompt (template, with optional {{chat}} placeholder) if non-empty,
 // or a sensible default otherwise.
-func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chatContent string) string {
+func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chatContent string) (string, error) {
 	if customPrompt != "" {
 		tmplCtx := e.buildTemplateContext(t, TaskVars{
 			ID:      t.ID,
@@ -534,12 +544,15 @@ func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chat
 			Slug:    t.Slug,
 			Branch:  t.Branch,
 		}, nil, LoopVars{})
-		resolved := ResolveTemplate(customPrompt, tmplCtx)
+		resolved, err := ResolveTemplate(customPrompt, tmplCtx)
+		if err != nil {
+			return "", fmt.Errorf("step %q: summarization_prompt: %w", stepName, err)
+		}
 
 		if strings.Contains(resolved, "{{chat}}") {
-			return strings.ReplaceAll(resolved, "{{chat}}", chatContent)
+			return strings.ReplaceAll(resolved, "{{chat}}", chatContent), nil
 		}
-		return resolved + "\n\n--- CONVERSATION LOG ---\n" + chatContent
+		return resolved + "\n\n--- CONVERSATION LOG ---\n" + chatContent, nil
 	}
 
 	return fmt.Sprintf(
@@ -551,7 +564,7 @@ func (e *Engine) buildSummarizePrompt(t *task.Task, stepName, customPrompt, chat
 			"- Prioritise actionable detail over narrative; this summary becomes context for later workflow steps.\n\n"+
 			"--- CONVERSATION LOG ---\n%s",
 		stepName, t.ID, t.Title, chatContent,
-	)
+	), nil
 }
 
 // chunkHeadroomBytes is subtracted from summarizer.max_prompt_bytes when

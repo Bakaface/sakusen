@@ -9,6 +9,17 @@ import (
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
+// mustResolveTemplate resolves tmpl and fails the test on a prompt-include
+// error, keeping assertions on the resolved string uncluttered.
+func mustResolveTemplate(t *testing.T, tmpl string, ctx *TemplateContext) string {
+	t.Helper()
+	got, err := ResolveTemplate(tmpl, ctx)
+	if err != nil {
+		t.Fatalf("ResolveTemplate(%q): %v", tmpl, err)
+	}
+	return got
+}
+
 func makeLookup(tasks map[int64]*task.Task) func(int64) (*task.Task, error) {
 	return func(id int64) (*task.Task, error) {
 		t, ok := tasks[id]
@@ -44,7 +55,7 @@ func TestResolveTemplate_TaskRefFields(t *testing.T) {
 	ctx := &TemplateContext{TaskLookup: makeLookup(tasks)}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveTemplate(tc.tmpl, ctx)
+			got := mustResolveTemplate(t, tc.tmpl, ctx)
 			if got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
@@ -57,7 +68,7 @@ func TestResolveTemplate_TaskContextField(t *testing.T) {
 	ctx := &TemplateContext{
 		Task: TaskVars{Context: "prior summary text"},
 	}
-	got := ResolveTemplate("ctx={{task.context}}", ctx)
+	got := mustResolveTemplate(t, "ctx={{task.context}}", ctx)
 	if got != "ctx=prior summary text" {
 		t.Errorf("got %q", got)
 	}
@@ -65,7 +76,7 @@ func TestResolveTemplate_TaskContextField(t *testing.T) {
 
 func TestResolveTemplate_MissingTaskID(t *testing.T) {
 	ctx := &TemplateContext{TaskLookup: makeLookup(nil)}
-	got := ResolveTemplate("x={{tasks.99.title}}", ctx)
+	got := mustResolveTemplate(t, "x={{tasks.99.title}}", ctx)
 	if got != "x=" {
 		t.Errorf("missing id should resolve empty, got %q", got)
 	}
@@ -73,7 +84,7 @@ func TestResolveTemplate_MissingTaskID(t *testing.T) {
 
 func TestResolveTemplate_NilLookup(t *testing.T) {
 	ctx := &TemplateContext{}
-	got := ResolveTemplate("x={{tasks.5.title}}", ctx)
+	got := mustResolveTemplate(t, "x={{tasks.5.title}}", ctx)
 	if got != "x=" {
 		t.Errorf("nil lookup should resolve empty, got %q", got)
 	}
@@ -87,7 +98,7 @@ func TestResolveTemplate_MalformedRef(t *testing.T) {
 		"{{tasks.}}",
 	}
 	for _, c := range cases {
-		got := ResolveTemplate(c, ctx)
+		got := mustResolveTemplate(t, c, ctx)
 		if got != c {
 			t.Errorf("malformed ref %q should stay verbatim, got %q", c, got)
 		}
@@ -98,7 +109,7 @@ func TestResolveTemplate_UnsupportedField(t *testing.T) {
 	tasks := map[int64]*task.Task{1: {ID: 1, Title: "t"}}
 	ctx := &TemplateContext{TaskLookup: makeLookup(tasks)}
 	// Unsupported field resolves to "" (validator is the user-facing gate).
-	got := ResolveTemplate("x={{tasks.1.slug}}", ctx)
+	got := mustResolveTemplate(t, "x={{tasks.1.slug}}", ctx)
 	if got != "x=" {
 		t.Errorf("unsupported field should resolve empty, got %q", got)
 	}
@@ -111,7 +122,7 @@ func TestResolveTemplate_SelfReference(t *testing.T) {
 		Task:       TaskVars{ID: 7, Title: "Self-task", Input: "self desc"},
 		TaskLookup: makeLookup(map[int64]*task.Task{7: self}),
 	}
-	got := ResolveTemplate("{{tasks.7.title}}", ctx)
+	got := mustResolveTemplate(t, "{{tasks.7.title}}", ctx)
 	if got != "Self-task" {
 		t.Errorf("self ref got %q", got)
 	}
@@ -135,7 +146,7 @@ func TestResolveTaskRefs_EndToEnd(t *testing.T) {
 		// TaskLookup intentionally left nil here — pre-resolution should make
 		// the final ResolveTemplate pass independent of the lookup table.
 	}
-	final := ResolveTemplate("{{task.input}}", ctx)
+	final := mustResolveTemplate(t, "{{task.input}}", ctx)
 	if final != "Build on top of: Underlying refactor" {
 		t.Errorf("final template got %q", final)
 	}
@@ -182,7 +193,7 @@ func TestResolveTemplate_ChildrenFields(t *testing.T) {
 		{"x={{children.99.title}}", "x="},
 	}
 	for _, tc := range cases {
-		if got := ResolveTemplate(tc.tmpl, ctx); got != tc.want {
+		if got := mustResolveTemplate(t, tc.tmpl, ctx); got != tc.want {
 			t.Errorf("ResolveTemplate(%q) = %q, want %q", tc.tmpl, got, tc.want)
 		}
 	}
@@ -195,7 +206,7 @@ func TestResolveTemplate_ChildrenSummary_DeterministicOrder(t *testing.T) {
 			3:  {ID: 3, Title: "three", Status: "failed", Context: "beta"},
 		}},
 	}
-	got := ResolveTemplate("{{children.summary}}", ctx)
+	got := mustResolveTemplate(t, "{{children.summary}}", ctx)
 	// IDs sorted ascending: 3 first, 11 second
 	if !strings.Contains(got, "## Child task #3") {
 		t.Errorf("summary missing #3:\n%s", got)
@@ -213,7 +224,7 @@ func TestResolveTemplate_ChildrenSummary_DeterministicOrder(t *testing.T) {
 
 func TestResolveTemplate_ChildrenSummary_EmptyMap(t *testing.T) {
 	ctx := &TemplateContext{Children: ChildrenVars{}}
-	if got := ResolveTemplate("x={{children.summary}}", ctx); got != "x=" {
+	if got := mustResolveTemplate(t, "x={{children.summary}}", ctx); got != "x=" {
 		t.Errorf("empty children summary should be empty, got %q", got)
 	}
 }
@@ -223,7 +234,7 @@ func TestResolveTemplate_ChildrenUnsupportedField(t *testing.T) {
 		Children: ChildrenVars{ByID: map[int64]ChildVars{1: {ID: 1, Title: "x", Status: "completed"}}},
 	}
 	// Unsupported field resolves to "" rather than crashing.
-	if got := ResolveTemplate("x={{children.1.nope}}", ctx); got != "x=" {
+	if got := mustResolveTemplate(t, "x={{children.1.nope}}", ctx); got != "x=" {
 		t.Errorf("unsupported children field should resolve empty, got %q", got)
 	}
 }
@@ -252,7 +263,7 @@ func TestValidateTaskRefs(t *testing.T) {
 
 func TestResolveTemplate_Now(t *testing.T) {
 	ctx := &TemplateContext{}
-	out := ResolveTemplate("fired at {{now}}", ctx)
+	out := mustResolveTemplate(t, "fired at {{now}}", ctx)
 	const prefix = "fired at "
 	if !strings.HasPrefix(out, prefix) {
 		t.Fatalf("unexpected output: %q", out)
@@ -265,7 +276,7 @@ func TestResolveTemplate_Now(t *testing.T) {
 
 func TestResolveTemplate_NowDoesNotAffectOtherVars(t *testing.T) {
 	ctx := &TemplateContext{Task: TaskVars{Title: "hello"}}
-	out := ResolveTemplate("{{task.title}} {{unknown}}", ctx)
+	out := mustResolveTemplate(t, "{{task.title}} {{unknown}}", ctx)
 	if out != "hello {{unknown}}" {
 		t.Fatalf("unexpected output: %q", out)
 	}
@@ -288,7 +299,7 @@ func TestResolveTemplateConflictFiles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := &TemplateContext{Conflict: ConflictVars{Files: tt.files}}
-			if got := ResolveTemplate("{{conflict.files}}", ctx); got != tt.want {
+			if got := mustResolveTemplate(t, "{{conflict.files}}", ctx); got != tt.want {
 				t.Errorf("ResolveTemplate() = %q, want %q", got, tt.want)
 			}
 		})

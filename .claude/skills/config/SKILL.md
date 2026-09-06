@@ -214,6 +214,17 @@ workflows:
 
 Per-track workflow files live under `.sakusen/tracks/<slug>/workflows/*.yml` (project tier) and `~/.sakusen/tracks/<slug>/workflows/*.yml` (global tier). `appendTrackWorkflows` (called from `Load()`/`LoadForProject()` AFTER project-level resolution — never inside `loadProjectConfig`) registers them as `Hidden: true` workflows named `<slug>:<name>`; project shadows global on identical namespaced names. They follow the same file rules as `.sakusen/workflows/` (flat, kebab-case, no `name:` field) and go through the same pin/loop/step validation. See `internal/config/CLAUDE.md` for the full invariant.
 
+### Prompt Includes
+
+`{{prompt.<name>}}` in any templated prompt string — step `prompt`, step `summarization_prompt`, workflow `summarizer_prompt`, `merge_conflicts.prompt` — inlines the contents of `<name>.md`, so several workflows can share one passage of prompt text. There is NO `prompts:` YAML map and no agent-level prompt: the unit of reuse is a passage of text, not a step or an agent.
+
+Lookup mirrors the workflow tiers, first hit wins (`PromptDirs(projectDir)`):
+
+1. `<project>/.sakusen/prompts/<name>.md`
+2. `~/.sakusen/prompts/<name>.md`
+
+`<name>` allows `[A-Za-z0-9_-]+` (kebab-case by convention). `ExpandPromptIncludes` strips a single trailing newline, and includes are one level deep — an included file containing `{{prompt.*}}` is an error. `validatePromptIncludes` runs in `Load()`/`LoadForProject()` (after track workflows and agent resolution) and in `validateProject`, so a missing file / bad name / nested include is a hard load and `sakusen validate` error naming the workflow, step, field and searched paths. Validation does not rewrite the config — `internal/workflow` re-reads the file at every step launch, so editing a shared passage needs no reload. See `internal/config/CLAUDE.md`.
+
 ## StepConfig
 
 ```go
@@ -313,6 +324,7 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 | `config.go` | Loading, parsing, merging, defaults (`Load()`, `LoadForProject()`, `defaultConfig()`, `resolveWorkflows()`) |
 | `agents.go` | `AgentConfig`/`SummarizerConfig`, the step→workflow→default_agent→"claude" cascade (`StepAgent` etc.), `validateAgents`, `mergeAgents`, `checkRemovedProjectKeys` (removed-key migration errors) |
 | `accessors.go` | Workflow accessors, branch templates, save (`GetWorkflow()`, `ListWorkflowNames()`, `ResolveBranchTemplate()`, `Save()`) |
+| `prompts.go` | `{{prompt.<name>}}` includes — `PromptDirs()`, `ExpandPromptIncludes()`, `validatePromptIncludes()` |
 | `detect.go` | Project type detection (`DetectProject()`) |
 | `validate.go` | Single-file validation for `sakusen validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |
 

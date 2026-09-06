@@ -35,7 +35,7 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 		// The workflow references a slug with no record at all, so agent
 		// resolution fails before any prompt is built.
 		cfg := newWorkflowConfig(nil)
-		e := &Engine{cfg: newEngineConfig(cfg)}
+		e := &Engine{cfg: newEngineConfig(cfg, "")}
 		tk := &task.Task{ID: 7, Workflow: "wf"}
 
 		err := e.resolveConflicts(context.Background(), tk, []string{"main.go"}, nil)
@@ -51,7 +51,7 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 		cfg := newWorkflowConfig(map[string]config.AgentConfig{
 			"my-tmux": {Mode: config.AgentModeTmux, Command: "true"},
 		})
-		e := &Engine{cfg: newEngineConfig(cfg)}
+		e := &Engine{cfg: newEngineConfig(cfg, "")}
 		tk := &task.Task{ID: 7, Workflow: "wf"}
 
 		err := e.resolveConflicts(context.Background(), tk, []string{"main.go"}, nil)
@@ -73,7 +73,7 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 			"my-tmux": {Mode: config.AgentModeTmux, Command: "true"},
 			"claude":  {Mode: config.AgentModeTmux, Command: "true"},
 		})
-		e := &Engine{cfg: newEngineConfig(cfg)}
+		e := &Engine{cfg: newEngineConfig(cfg, "")}
 		tk := &task.Task{ID: 7, Workflow: "wf"}
 
 		err := e.resolveConflicts(context.Background(), tk, []string{"main.go"}, nil)
@@ -96,7 +96,7 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 		})
 		cfg.MergeConflicts = config.MergeConflictsConfig{Agent: "fixer"}
 		e := &Engine{
-			cfg:      newEngineConfig(cfg),
+			cfg:      newEngineConfig(cfg, ""),
 			dataDir:  filepath.Join(t.TempDir(), "data"),
 			repoRoot: worktree,
 		}
@@ -125,7 +125,7 @@ func TestResolveConflictsAgentSelection(t *testing.T) {
 			"claude": {Command: `printf '%s' "$SAKUSEN_AGENT" > agent-slug.txt; printf resolved > "$SAKUSEN_RESULT_FILE"`},
 		})
 		e := &Engine{
-			cfg:      newEngineConfig(cfg),
+			cfg:      newEngineConfig(cfg, ""),
 			dataDir:  filepath.Join(t.TempDir(), "data"),
 			repoRoot: worktree,
 		}
@@ -161,7 +161,7 @@ func conflictPromptFor(t *testing.T, mc config.MergeConflictsConfig, tk *task.Ta
 		MergeConflicts: mc,
 	}
 	e := &Engine{
-		cfg:      newEngineConfig(cfg),
+		cfg:      newEngineConfig(cfg, ""),
 		dataDir:  filepath.Join(t.TempDir(), "data"),
 		repoRoot: worktree,
 	}
@@ -243,7 +243,7 @@ func TestResolveConflictsTimeoutApplied(t *testing.T) {
 		MergeConflicts: config.MergeConflictsConfig{Timeout: "100ms"},
 	}
 	e := &Engine{
-		cfg:      newEngineConfig(cfg),
+		cfg:      newEngineConfig(cfg, ""),
 		dataDir:  filepath.Join(t.TempDir(), "data"),
 		repoRoot: worktree,
 	}

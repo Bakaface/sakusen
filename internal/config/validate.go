@@ -99,7 +99,7 @@ func Diagnose(path string) ([]Diagnostic, error) {
 		return nil, fmt.Errorf("load global config: %w", err)
 	}
 
-	return validateProject(&proj, filePool, globalPool)
+	return validateProject(&proj, filePool, globalPool, baseDir)
 }
 
 // loadGlobalPoolForValidation resolves the global ~/.sakusen.yml into a
@@ -142,7 +142,10 @@ func loadGlobalPoolForValidation(skipPath string) (*globalWorkflowPool, error) {
 // globalPool, when non-nil, supplies workflows defined in the global
 // ~/.sakusen.yml so that project-level string refs to global workflows
 // validate without surfacing "missing file" errors.
-func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool *globalWorkflowPool) ([]Diagnostic, error) {
+//
+// baseDir is the directory holding the file under validation; it anchors the
+// project tier of the {{prompt.<name>}} include search.
+func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool *globalWorkflowPool, baseDir string) ([]Diagnostic, error) {
 	// Enum sanity
 	if !validOnCompleteValues[proj.OnComplete] {
 		return nil, fmt.Errorf(`on_complete: invalid value %q (must be "commit", "merge", or "none")`, proj.OnComplete)
@@ -195,6 +198,15 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	}
 
 	if err := validateUniqueNames(cfg); err != nil {
+		return nil, err
+	}
+
+	// Every {{prompt.<name>}} include must resolve to a file on disk — an
+	// unresolved include would reach an agent as literal placeholder text.
+	// merge_conflicts is carried over by hand: cfg here is a bare
+	// defaultConfig() that resolveWorkflows never populates from proj.
+	cfg.MergeConflicts = mergeConflicts
+	if err := validatePromptIncludes(cfg, PromptDirs(baseDir)); err != nil {
 		return nil, err
 	}
 

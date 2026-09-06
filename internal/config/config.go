@@ -130,6 +130,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	// Prompt includes resolve against the project root, so they are checked
+	// once every workflow (project, global and track) has been assembled.
+	if err := validatePromptIncludes(cfg, PromptDirs(cfg.ProjectDir)); err != nil {
+		return nil, err
+	}
+
 	cfg.Project.AutoDetect = true
 
 	if cfg.ProjectDir != "" {
@@ -166,6 +172,11 @@ func LoadForProject(projectDir string) (*Config, error) {
 
 	// See the matching call in Load().
 	if err := resolveAndValidateAgents(cfg); err != nil {
+		return nil, err
+	}
+
+	// See the matching call in Load().
+	if err := validatePromptIncludes(cfg, PromptDirs(cfg.ProjectDir)); err != nil {
 		return nil, err
 	}
 
@@ -532,16 +543,26 @@ func loadTrackWorkflows(tracksDir string) ([]WorkflowConfig, error) {
 	return out, nil
 }
 
-// globalTracksDir returns the global track-workflow root (~/.sakusen/tracks).
+// globalSakusenDir returns the global sakusen data root (~/.sakusen), which
+// holds the global tiers of track workflows and prompt includes.
 // Deliberately NOT derived from getGlobalSakusenYmlPath(): that helper returns
-// "" when ~/.sakusen.yml doesn't exist, and global track workflows must resolve
+// "" when ~/.sakusen.yml doesn't exist, and those tiers must resolve
 // regardless of whether a global config file is present.
-func globalTracksDir() (string, error) {
+func globalSakusenDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".sakusen", "tracks"), nil
+	return filepath.Join(home, ".sakusen"), nil
+}
+
+// globalTracksDir returns the global track-workflow root (~/.sakusen/tracks).
+func globalTracksDir() (string, error) {
+	dir, err := globalSakusenDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "tracks"), nil
 }
 
 // appendTrackWorkflows appends project-tier (<projectBaseDir>/.sakusen/tracks)

@@ -37,13 +37,19 @@ description: >
 | `stepcontext.go` | Step-context precedence (manual > last_message > summarize_chat): `captureHeadlessStepContext()`, `PublishManualStepContext()`, `RecordTmuxStepSentinelSession()` |
 | `merge.go` | Engine-side glue to `internal/merge`: `executeOnComplete()` (calls `e.coord.Finalize()`), `bindConflictResolver()` (wires the agent-driven resolver into the Coordinator), `resolveConflicts()` (the resolver itself), `cleanupMergedWorktree()`. **Per-repo locking, retry, and target-clean wait live in `internal/merge`, not here.** |
 | `summarizer.go` | Summarization + finalization: `FinalizeTask()`, `runSummarizer()`, `summarizeChatLog()`, `loadStepChatContent()`, `RunWorktreeSetupCommand()`, `runSummarizerSync()` |
-| `template.go` | `{{placeholder}}` interpolation via `ResolveTemplate()` |
+| `template.go` | `{{placeholder}}` interpolation via `ResolveTemplate()`; `{{prompt.<name>}}` file includes |
 | `artifact.go` | Directory management, image copying |
 | `sync.go` | `SyncPathsToWorktree(srcRoot, dstRoot string, paths config.WorktreeSyncPathsConfig) error` — copies/links configured paths |
 
 ## Template System
 
 See [references/templates.md](references/templates.md) for supported placeholders and context struct.
+
+`ResolveTemplate(tmpl, ctx) (string, error)` first expands `{{prompt.<name>}}` includes against
+`ctx.PromptDirs` (`config.PromptDirs`: `<project>/.sakusen/prompts` then `~/.sakusen/prompts`),
+then resolves every other placeholder over the combined text. It returns an error only for a
+broken include — a missing file, a malformed name, or a nested `{{prompt.*}}` — and callers fail
+the step / summarizer pass rather than shipping a half-resolved prompt.
 
 ## Agent Spawning Contract
 

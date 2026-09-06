@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
@@ -74,6 +75,10 @@ type TemplateContext struct {
 	// TaskLookup resolves a task by ID for {{tasks.<id>.<field>}} references.
 	// When nil, such references resolve to "".
 	TaskLookup func(int64) (*task.Task, error)
+	// PromptDirs are the ordered search roots for {{prompt.<name>}} includes
+	// (see config.PromptDirs). Nil disables includes: a template containing one
+	// then fails rather than resolving it against an unintended tier.
+	PromptDirs []string
 }
 
 var templatePattern = regexp.MustCompile(`\{\{([a-zA-Z0-9_.]+)\}\}`)
@@ -90,7 +95,24 @@ type TaskRef struct {
 }
 
 // ResolveTemplate replaces {{dotted.path}} placeholders in the template string.
-func ResolveTemplate(tmpl string, ctx *TemplateContext) string {
+//
+// {{prompt.<name>}} includes are expanded FIRST, against ctx.PromptDirs, and
+// the rest of the placeholders are then resolved over the combined text — so an
+// included passage may itself use {{task.id}} and friends. A missing include
+// file, a malformed name, or a nested include is returned as an error: unlike
+// an unknown placeholder (left verbatim), a half-resolved include must never
+// reach an agent, so callers fail the step instead.
+func ResolveTemplate(tmpl string, ctx *TemplateContext) (string, error) {
+	expanded, err := config.ExpandPromptIncludes(tmpl, ctx.PromptDirs)
+	if err != nil {
+		return "", err
+	}
+	return resolveVars(expanded, ctx), nil
+}
+
+// resolveVars performs the single placeholder-substitution pass over text whose
+// {{prompt.*}} includes have already been expanded.
+func resolveVars(tmpl string, ctx *TemplateContext) string {
 	return templatePattern.ReplaceAllStringFunc(tmpl, func(match string) string {
 		key := match[2 : len(match)-2] // strip {{ and }}
 

@@ -182,6 +182,22 @@ Available in any step `prompt`:
 - `{{git.base_branch}}`
 - `{{steps.<step_name>.context}}` — captured output of a prior step
 - `{{loop.iteration}}`, `{{loop.max_iterations}}` (inside a loop body)
+- `{{prompt.<name>}}` — inlines the contents of a shared prompt file, so several workflows can reuse
+  one passage of text (craft guidance, review rules, commit hygiene) without duplicating it.
+  `<name>` is a file basename (`[A-Za-z0-9_-]+`, kebab-case by convention) resolved to `<name>.md`,
+  searched project-first:
+  1. `<project>/.sakusen/prompts/<name>.md`
+  2. `~/.sakusen/prompts/<name>.md`
+
+  The file's contents are substituted first and the combined text resolved in the same pass, so an
+  included passage may itself use `{{task.id}}` and friends. Includes are one level deep — an
+  included file may not contain `{{prompt.*}}`. A single trailing newline is stripped so inline
+  placement adds no blank line. Unlike other placeholders, an include that can't be resolved is
+  never left verbatim: a missing file, a malformed name, or a nested include fails config loading
+  and `sakusen validate` (naming the workflow, step, field and searched paths).
+
+  Works in step `prompt`, step `summarization_prompt`, workflow `summarizer_prompt`, and
+  `merge_conflicts.prompt`.
 
 ### Worktree provisioning
 

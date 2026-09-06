@@ -216,7 +216,7 @@ func TestResolveActiveStep(t *testing.T) {
 		},
 	}
 	cfg := &config.Config{Workflows: []config.WorkflowConfig{wf}}
-	e := &Engine{database: newFakeTaskStore(), cfg: newEngineConfig(cfg)}
+	e := &Engine{database: newFakeTaskStore(), cfg: newEngineConfig(cfg, "")}
 
 	t.Run("running agent step: CurrentStep wins, not paused", func(t *testing.T) {
 		tk := &task.Task{Workflow: "wf", CurrentStep: "planning", Status: task.StatusRunning}

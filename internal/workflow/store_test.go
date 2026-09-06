@@ -101,7 +101,13 @@ func (f *fakeTaskStore) UpdateTaskStepContext(taskID int64, stepName string, con
 	return nil
 }
 func (f *fakeTaskStore) GetTaskStepContexts(taskID int64, stepNames []string) (map[string]string, error) {
-	return nil, nil
+	out := make(map[string]string)
+	for _, name := range stepNames {
+		if v, ok := f.stepContexts[taskID][name]; ok {
+			out[name] = v
+		}
+	}
+	return out, nil
 }
 func (f *fakeTaskStore) GetRunningTaskStepContext(taskID int64, stepName string) (string, error) {
 	return f.runningStepContexts[taskID][stepName], nil

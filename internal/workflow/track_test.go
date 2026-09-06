@@ -21,7 +21,7 @@ func TestResolveTemplateTrackVars(t *testing.T) {
 		},
 	}
 	tmpl := "id={{track.id}} name={{track.name}}\n{{track.context}}\nown:{{track.own_context}}"
-	got := ResolveTemplate(tmpl, ctx)
+	got := mustResolveTemplate(t, tmpl, ctx)
 	want := "id=7 name=Payments API\n## Track: Payments API\n\nchain context\nown:own context"
 	if got != want {
 		t.Errorf("resolved = %q, want %q", got, want)
@@ -31,7 +31,7 @@ func TestResolveTemplateTrackVars(t *testing.T) {
 func TestResolveTemplateTrackVarsTrackless(t *testing.T) {
 	// Zero-value TrackVars (trackless task) resolves every {{track.*}} var to
 	// "" — including {{track.id}}, which must not render "0".
-	got := ResolveTemplate("[{{track.id}}][{{track.name}}][{{track.context}}][{{track.own_context}}]", &TemplateContext{})
+	got := mustResolveTemplate(t, "[{{track.id}}][{{track.name}}][{{track.context}}][{{track.own_context}}]", &TemplateContext{})
 	if got != "[][][][]" {
 		t.Errorf("resolved = %q, want %q", got, "[][][][]")
 	}

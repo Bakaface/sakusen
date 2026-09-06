@@ -578,9 +578,11 @@ see [Wrapping Multi-Line Interpolations](#wrapping-multi-line-interpolations).
 | `{{tasks.<id>.<field>}}` | Field of **another task** by numeric ID. Fields: `title`, `branch`, `input`, `context`. See [Cross-Task References](#cross-task-references). |
 | `{{children.summary}}` | Digest of all child tasks after a `create_tasks_and_wait` resume **(multi-line — wrap in `<children-summary>`)** |
 | `{{children.<id>.<field>}}` | Field of a specific child task. Fields: `id`, `title`, `status` (`completed`/`failed`), `context`. See [MCP Orchestration Patterns](#mcp-orchestration-patterns). |
+| `{{prompt.<name>}}` | Contents of a shared prompt file. See [Prompt Includes](#prompt-includes). |
 
 Unknown placeholders are left in the rendered prompt verbatim, so a typo shows up as literal
-`{{taks.id}}` text rather than an error.
+`{{taks.id}}` text rather than an error. `{{prompt.<name>}}` is the one exception — it must
+resolve or the config fails to load.
 
 **Step `summarization_prompt:`** — same variables as above, plus:
 
@@ -604,6 +606,52 @@ available. Commands run with the **project root** (not the worktree) as cwd; a n
 If the command contains `{{run_agent}}` or `{{agent_command}}`, **you control where the agent
 runs** — Sakusen will not auto-start it in window 0. Omit both and Sakusen launches the agent
 itself after your layout command runs.
+
+## Prompt Includes
+
+When several workflows repeat the same passage of prompt text — implementer craft guidance, a
+"take NO action on your own" review rules block, commit/attribution hygiene — factor it into a
+markdown file and reference it with `{{prompt.<name>}}`:
+
+```yaml
+# ~/.sakusen/prompts/implementer-core.md holds the shared craft guidance
+steps:
+  - name: implementing
+    prompt: |
+      Apply the plan for task #{{task.id}}.
+
+      <plan>
+      {{steps.planning.context}}
+      </plan>
+
+      {{prompt.implementer-core}}
+```
+
+`<name>` is a file basename — letters, digits, dashes and underscores; kebab-case by convention —
+resolved to `<name>.md` and searched project-first, first hit wins:
+
+1. `<project>/.sakusen/prompts/<name>.md`
+2. `~/.sakusen/prompts/<name>.md`
+
+So a project can override a globally-shared passage by dropping a same-named file in its own tree.
+
+Rules:
+
+- Works in step `prompt`, step `summarization_prompt`, workflow `summarizer_prompt`, and
+  `merge_conflicts.prompt` — anything that interpolates template variables.
+- The file's contents are substituted first and the whole combined text is resolved in the same
+  pass, so an included passage may itself use `{{task.id}}`, `{{steps.<name>.context}}`, etc.
+- **Depth is 1** — an included file may not contain `{{prompt.*}}`.
+- A single trailing newline is stripped, so inline placement (`Foo {{prompt.x}} bar`) adds no
+  blank line.
+- A missing file, a malformed name, or a nested include is a **hard load / `sakusen validate`
+  error** naming the workflow, step, field and the paths searched — a half-resolved prompt never
+  reaches an agent.
+- There is no `prompts:` YAML map and no agent-level prompt: an agent answers "what runs this
+  step", a prompt file answers "what to say at this position in this workflow". Keep the
+  step-context wiring (`{{steps.<name>.context}}` blocks) and scope-policy sentences inline —
+  those deliberately differ per workflow. Factor out only the passages that are genuinely
+  identical.
 
 **Environment variables** — every step's agent process (and anything it spawns) gets the
 `SAKUSEN_*` contract described in SKILL.md → Agents → Environment contract:

@@ -69,7 +69,7 @@ func NewEngine(cfg *config.Config, database taskStore, notifier *notify.Notifier
 		lk = &merge.Lock{}
 	}
 	e := &Engine{
-		cfg:      newEngineConfig(cfg),
+		cfg:      newEngineConfig(cfg, repoRoot),
 		database: database,
 		notifier: notifier,
 		repoRoot: repoRoot,
@@ -118,6 +118,7 @@ func (e *Engine) buildTemplateContext(t *task.Task, taskVars TaskVars, stepConte
 		},
 		Loop:       loopVars,
 		TaskLookup: e.database.GetTask,
+		PromptDirs: e.cfg.PromptDirs,
 	}
 }
 
@@ -475,7 +476,15 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		}
 	}
 
-	resolvedPrompt := ResolveTemplate(step.Prompt, tmplCtx)
+	// A {{prompt.<name>}} include that can't be read (file deleted since the
+	// config was loaded, bad name) fails the step — shipping a prompt with a
+	// literal placeholder in it would be worse than not running.
+	resolvedPrompt, err := ResolveTemplate(step.Prompt, tmplCtx)
+	if err != nil {
+		promptErr := fmt.Errorf("step %q: prompt: %w", step.Name, err)
+		e.database.UpdateTaskExitCode(t.ID, 1, promptErr.Error())
+		return stepResult{}, promptErr
+	}
 
 	// Surface attached images by appending a pointer section to the prompt —
 	// there is no agent-agnostic system-prompt channel to inject them through.

@@ -349,7 +349,7 @@ workflows:
 
 A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`), `agent`, `on_complete`, `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop`. **Execution mode comes from the resolved agent record, never from the step.**
 
-Prompts interpolate `{{task.*}}`, `{{git.*}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`, and `{{children.*}}`. **Every multi-line variable must be wrapped in a semantic XML-style tag** (`<task-input>`, `<step-context name="...">`, `<track-context>`, `<chat>`, …) so the receiving agent can tell fixed prompt text from interpolated content. Do not hard-wrap prompt prose — see the reference for the canonical tag table, the full variable catalog, and prompt-formatting rules.
+Prompts interpolate `{{task.*}}`, `{{git.*}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`, `{{children.*}}`, and `{{prompt.<name>}}` (inlines `<project>/.sakusen/prompts/<name>.md`, falling back to `~/.sakusen/prompts/<name>.md`, for passages shared across workflows). **Every multi-line variable must be wrapped in a semantic XML-style tag** (`<task-input>`, `<step-context name="...">`, `<track-context>`, `<chat>`, …) so the receiving agent can tell fixed prompt text from interpolated content. Do not hard-wrap prompt prose — see the reference for the canonical tag table, the full variable catalog, and prompt-formatting rules.
 
 ## Decision Tree
 
@@ -370,7 +370,8 @@ When the user describes what they want, follow this:
 13. **"Reference another task's output"** ("build on task 42", "after #17 merges") → Use `{{tasks.<id>.<field>}}` in the task input — active refs auto-block until the referenced task completes
 14. **"Talk to me first, then run unattended"** (interview / plan approval / human gate) → A tmux step that publishes a decision record via `update_step_context` and self-advances via `advance_task`, followed by headless steps templating that step's context — see `references/workflow-building.md` → The human-gated step
 15. **"Carry standing context across a stream of related tasks"** (sprint/epic/feature-area context) → Interpolate `{{track.context}}` in step prompts (explicit opt-in, empty for trackless tasks) and optionally write back with `update_track_context` — see `references/workflow-building.md` → Tracks in Workflows
-16. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
+16. **"Several workflows repeat the same block of prompt text"** (craft guidance, review rules, commit hygiene) → Put the passage in `.sakusen/prompts/<name>.md` (or `~/.sakusen/prompts/` to share across projects) and reference it as `{{prompt.<name>}}`. Keep step-context wiring and scope-policy sentences inline — see `references/workflow-building.md` → Prompt Includes
+17. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
 
 ## Discovering undocumented fields
 
@@ -392,7 +393,8 @@ This lists every YAML field name the binary will accept. Cross-reference unknown
 - Loop ranges cannot overlap
 - `on_complete` (top-level, or per-workflow override) values: `"commit"`, `"merge"`, `"none"` — moved out of `git:`; `git.on_complete` is now an error
 - Never emit the removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`, `print:`, `tmux:`) — all are hard load errors. See [Removed keys](#removed-keys-hard-load-errors--never-emit-these).
-- `git.branch_template` supports: `{{task_id}}`, `{{task_slug}}`, `{{task.id}}`, `{{task.title}}`, `{{task.slug}}`
+- `git.branch_template` supports: `{{task_id}}`, `{{task_slug}}`, `{{task.id}}`, `{{task.title}}`, `{{task.slug}}` — `{{prompt.<name>}}` does NOT work here (prompt fields only)
+- Every `{{prompt.<name>}}` must have a matching `.md` file under `.sakusen/prompts/` or `~/.sakusen/prompts/`; a missing file, a bad name (`[A-Za-z0-9_-]+` only), or an included file that itself contains `{{prompt.*}}` is a hard load error
 - The file goes at the project root as `.sakusen.yml`
 - The `input` pin supplies the task input when the New Task screen is skipped; `description` is separate metadata
 - If both `worktree-setup-command` and `worktree-setup-commands` are set, **both run** (singular first, then the list, in order); any non-zero exit fails the task. `worktree-sync-paths` failures, by contrast, only log a warning.
