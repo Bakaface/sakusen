@@ -23,7 +23,7 @@ Sakusen is a daemon that orchestrates multiple user-configured coding agents wor
 
 | File | Load when |
 |---|---|
-| `references/workflow-building.md` | **Creating or editing any workflow, step, prompt, loop, parallel group, or template variable.** Complete authoring reference: entry shapes, pins, file-based/hidden/global/track workflows, step references, every workflow and step field, summarization, loops, parallel groups, prompt wrapping, the full template-variable catalog, tracks in prompts, cross-task refs, and MCP orchestration patterns. |
+| `references/workflow-building.md` | **Creating or editing any workflow, routine, step, prompt, loop, parallel group, or template variable.** Complete authoring reference: entry shapes, pins, routines (invocation bindings), file-based/hidden/global/track workflows, step references, every workflow and step field, summarization, loops, parallel groups, prompt wrapping, the full template-variable catalog, tracks in prompts, cross-task refs, and MCP orchestration patterns. |
 | `references/config-reference.md` | Working on non-workflow config: agents, summarizer, git, worktree sync/setup, tmux setup, notifications, options, task states/priorities, legacy formats, and a complete example config. |
 
 ## Config Loading Order (later overrides earlier)
@@ -345,7 +345,20 @@ workflows:
         prompt: "Audit and clean the codebase."
 ```
 
-"Kind" is an emergent property of pinning: a workflow that pins every New Task field (`input` + `worktree` + `branch`/`checkout` + `target`) creates its task immediately instead of showing the form.
+"Kind" is an emergent property of pinning and of binding: a workflow that pins every New Task field (`input` + `worktree` + `branch`/`checkout` + `target`) creates its task immediately instead of showing the form, and a workflow named by a `routines:` entry additionally becomes runnable by that routine's name.
+
+The sibling top-level `routines:` key holds INVOCATION BINDINGS — a name, the workflow it runs, pins that override the workflow's own, and an optional `cadence`. A routine never defines steps; with a cadence it is scheduled, without one it is on-demand (`:RunRoutine`, `sakusen routines run <name>`, MCP `run_routine`):
+
+```yaml
+routines:
+  - name: compose-wiki
+    description: Rebuild the wiki
+    workflow: wiki-compose               # required; may name a hidden pool file
+    branch: sakusen/wiki-{{task.id}}     # pins beat the workflow's, branch/checkout as a pair
+  - name: nightly-sweep                  # same workflow, scheduled binding
+    workflow: wiki-compose
+    cadence: "0 3 * * *"
+```
 
 A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`), `agent`, `on_complete`, `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop` — or, instead of `prompt`, a `parallel:` block that fans out to concurrent headless branches on the same worktree (see the reference's Parallel Groups section). **Execution mode comes from the resolved agent record, never from the step.**
 
@@ -372,7 +385,8 @@ When the user describes what they want, follow this:
 15. **"Carry standing context across a stream of related tasks"** (sprint/epic/feature-area context) → Interpolate `{{track.context}}` in step prompts (explicit opt-in, empty for trackless tasks) and optionally write back with `update_track_context` — see `references/workflow-building.md` → Tracks in Workflows
 16. **"Several workflows repeat the same block of prompt text"** (craft guidance, review rules, commit hygiene) → Put the passage in `.sakusen/prompts/<name>.md` (or `~/.sakusen/prompts/` to share across projects) and reference it as `{{prompt.<name>}}`. Keep step-context wiring and scope-policy sentences inline — see `references/workflow-building.md` → Prompt Includes
 17. **"Run the same review with two different models"** / "redundant checks in parallel" / "several agents look at the same diff at once" → A `parallel:` group step: branches run concurrently on the one worktree, `require:` sets the join policy, and the group publishes one aggregated `{{steps.<group>.context}}` for a following synthesis step. Branches must be read-only — for concurrent work that WRITES, use child tasks (`create_tasks_and_wait`) instead. See `references/workflow-building.md` → Parallel Groups
-18. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
+18. **"Run this workflow on a schedule"** / **"give this predefined job a name I can invoke"** ("compose the wiki", "nightly digest", "weekly dependency bump") → A `routines:` entry naming the workflow, with pins and an optional `cadence`. One workflow can back several routines with different pins — see `references/workflow-building.md` → Routines — Invocation Bindings
+19. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
 
 ## Discovering undocumented fields
 

@@ -217,3 +217,71 @@ func TestListDuePeriodics(t *testing.T) {
 		t.Fatalf("expected only 'due', got %+v", due)
 	}
 }
+
+// An on-demand routine (empty cadence) is stored like any other, but never
+// becomes due — the next_fire_at column is NOT NULL, so it always holds a
+// value the due-query and the claim must both ignore.
+func TestUpsertPeriodicDef_EmptyCadenceNeverDue(t *testing.T) {
+	database, projID := newPeriodicTestDB(t)
+	past := time.Now().Add(-time.Hour)
+
+	d, err := database.UpsertPeriodicDef(projID, "compose-wiki", "", "wiki-compose", "", "", false, past)
+	if err != nil {
+		t.Fatalf("upsert on-demand: %v", err)
+	}
+	if d.Cadence != "" || d.WorkflowRef != "wiki-compose" {
+		t.Fatalf("unexpected row: %+v", d)
+	}
+
+	due, err := database.ListDuePeriodics(time.Now())
+	if err != nil {
+		t.Fatalf("list due: %v", err)
+	}
+	for _, x := range due {
+		if x.Name == "compose-wiki" {
+			t.Fatal("an on-demand routine must never be due")
+		}
+	}
+
+	claimed, err := database.ClaimPeriodicFire(d.ID, time.Now(), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed {
+		t.Fatal("an on-demand routine must not be claimable")
+	}
+}
+
+// Adding a cadence to an on-demand routine is a cadence change like any other,
+// so the schedule is computed rather than left at the filler value.
+func TestUpsertPeriodicDef_EmptyToSetCadenceRecomputesFire(t *testing.T) {
+	database, projID := newPeriodicTestDB(t)
+	filler := time.Now().Add(-time.Hour).Truncate(time.Second)
+
+	if _, err := database.UpsertPeriodicDef(projID, "wiki", "", "wiki-compose", "", "", false, filler); err != nil {
+		t.Fatalf("upsert on-demand: %v", err)
+	}
+
+	scheduled := time.Now().Add(3 * time.Hour).Truncate(time.Second)
+	d, err := database.UpsertPeriodicDef(projID, "wiki", "0 3 * * *", "wiki-compose", "", "", false, scheduled)
+	if err != nil {
+		t.Fatalf("upsert scheduled: %v", err)
+	}
+	if !d.NextFireAt.Equal(scheduled) {
+		t.Errorf("next_fire_at = %v, want it recomputed to %v", d.NextFireAt, scheduled)
+	}
+
+	due, err := database.ListDuePeriodics(time.Now().Add(4 * time.Hour))
+	if err != nil {
+		t.Fatalf("list due: %v", err)
+	}
+	found := false
+	for _, x := range due {
+		if x.Name == "wiki" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a routine that gained a cadence must become due")
+	}
+}

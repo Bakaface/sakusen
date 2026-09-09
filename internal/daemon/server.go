@@ -98,7 +98,7 @@ type Server struct {
 	// periodicMu guards periodicReconciled.
 	periodicMu sync.Mutex
 	// periodicReconciled maps projectID → the .sakusen.yml mod-time at the last
-	// successful periodic reconcile. The scheduler uses it to skip reconciling
+	// successful routine reconcile. The scheduler uses it to skip reconciling
 	// projects whose config has not changed since the previous pass.
 	periodicReconciled map[int64]time.Time
 

@@ -176,9 +176,9 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		targetBranch = wf.Target
 	}
 
-	// Periodic fires are exempt from the empty-input rule: a periodic entry
-	// without `input` is validated at config load to never reference
-	// {{task.input}} in its step prompts.
+	// Routine fires are exempt from the empty-input rule: a routine whose
+	// effective input is empty either never references {{task.input}}, or it
+	// requires the caller to pass one (enforced in fireRoutine).
 	if input == "" && checkoutBranch == "" && !tmuxFirst && req.PeriodicID == nil {
 		return nil, "", fmt.Errorf("input cannot be empty")
 	}
@@ -235,9 +235,8 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	// Persist form preferences for this project. Only user-driven choices
 	// (explicit request values) should overwrite the saved project defaults —
 	// pin-derived worktree values must not leak into the persisted default.
-	// Skipped for scheduler-materialized periodic fires — those must not
-	// clobber the user's interactive "new task" defaults (worktree / branch
-	// mode / workflow).
+	// Skipped for routine fires — those must not clobber the user's
+	// interactive "new task" defaults (worktree / branch mode / workflow).
 	if req.PeriodicID == nil {
 		persistWorktree := proj.DefaultWorktree
 		if req.Worktree != nil {
@@ -261,7 +260,7 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		return nil, "", fmt.Errorf("failed to create task: %v", err)
 	}
 
-	// Link the task to its periodic definition (scheduler-materialized fires).
+	// Link the task to the routine that fired it.
 	if req.PeriodicID != nil {
 		if err := s.database.SetTaskPeriodicID(t.ID, *req.PeriodicID); err != nil {
 			log.Printf("%sFailed to set periodic_id for task #%d: %v", s.projectLogPrefix(proj.ID), t.ID, err)

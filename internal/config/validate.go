@@ -201,6 +201,18 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 		return nil, err
 	}
 
+	// Routines may bind "<slug>:<name>" track workflows, which the full load
+	// appends after project resolution. They are assembled on a scratch copy
+	// so the hidden-workflow warning below keeps ignoring them.
+	routineCfg := *cfg
+	routineCfg.Workflows = append([]WorkflowConfig(nil), cfg.Workflows...)
+	if err := appendTrackWorkflows(&routineCfg, baseDir); err != nil {
+		return nil, err
+	}
+	if err := validateRoutines(&routineCfg); err != nil {
+		return nil, err
+	}
+
 	// Every {{prompt.<name>}} include must resolve to a file on disk — an
 	// unresolved include would reach an agent as literal placeholder text.
 	// merge_conflicts is carried over by hand: cfg here is a bare
@@ -215,15 +227,15 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	// Sub-minute @every cadences parse fine but the scheduler polls on a 30s
 	// tick, so they are observed at tick resolution — surface that as a
 	// warning rather than silently under-delivering.
-	for i := range cfg.Periodic {
-		p := &cfg.Periodic[i]
-		if rest, ok := strings.CutPrefix(p.Cadence, "@every "); ok {
+	for i := range cfg.Routines {
+		r := &cfg.Routines[i]
+		if rest, ok := strings.CutPrefix(r.Cadence, "@every "); ok {
 			if d, err := time.ParseDuration(strings.TrimSpace(rest)); err == nil && d < time.Minute {
 				diagnostics = append(diagnostics, Diagnostic{
 					Severity: "warning",
 					Message: fmt.Sprintf(
-						"periodic %q: sub-minute cadence %q is observed at the scheduler's ~30s tick resolution, not to the second",
-						p.Name, p.Cadence),
+						"routine %q: sub-minute cadence %q is observed at the scheduler's ~30s tick resolution, not to the second",
+						r.Name, r.Cadence),
 				})
 			}
 		}
@@ -239,11 +251,15 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 		})
 	} else {
 		// Otherwise surface a warning for each unreferenced file-based workflow.
-		// Inline periodic entries are registered as hidden workflows by design
-		// (see buildResolvedConfig) and fire regardless of Hidden, so they are
-		// never "unreferenced" — and listing them would be wrong advice.
+		// A workflow a routine binds is reachable by design — the routine is
+		// what makes it startable — so it is never "unreferenced", and telling
+		// the user to list it would be wrong advice.
+		referenced := make(map[string]bool, len(cfg.Routines))
+		for i := range cfg.Routines {
+			referenced[cfg.Routines[i].Workflow] = true
+		}
 		for _, wf := range cfg.Workflows {
-			if wf.Hidden && wf.Source != "periodic" {
+			if wf.Hidden && !referenced[wf.Name] {
 				diagnostics = append(diagnostics, Diagnostic{
 					Severity: "warning",
 					Message: fmt.Sprintf(
@@ -257,86 +273,86 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	return diagnostics, nil
 }
 
-// validatePeriodic checks the resolved periodic definitions for correctness:
-//  1. cadence parses with the periodic cron parser
-//  2. exactly one of workflow / steps is set
-//  3. ref-mode: the referenced workflow exists
-//  4. when input is empty, no step prompt of the effective workflow may
-//     reference {{task.input}} (it would resolve to the empty string)
-//  5. names are unique and non-empty
-func validatePeriodic(cfg *Config) error {
-	seen := make(map[string]bool, len(cfg.Periodic))
-	for i := range cfg.Periodic {
-		p := &cfg.Periodic[i]
-		if p.Name == "" {
-			return fmt.Errorf("periodic: entry %d is missing a name", i)
+// validateRoutines checks the resolved routines: bindings for correctness:
+//  1. names are non-empty, kebab-case and unique
+//  2. the referenced workflow is set and resolves
+//  3. the cadence, when set, parses with the routine cron parser
+//  4. the priority is a known value
+//  5. the effective pins (routine over workflow) are internally consistent
+//  6. a SCHEDULED routine whose effective input is empty may not reference
+//     {{task.input}} anywhere in the workflow — a schedule has nobody to ask.
+//     An on-demand routine in that state is legal: its run surfaces require the
+//     input argument instead (see Config.RoutineRequiresInput).
+func validateRoutines(cfg *Config) error {
+	seen := make(map[string]bool, len(cfg.Routines))
+	for i := range cfg.Routines {
+		r := &cfg.Routines[i]
+		if r.Name == "" {
+			return fmt.Errorf("routines: entry %d is missing a name", i)
 		}
-		if seen[p.Name] {
-			return fmt.Errorf("periodic: duplicate name %q", p.Name)
+		if !validKebabCaseName.MatchString(r.Name) {
+			return fmt.Errorf("routines: invalid name %q (must be kebab-case)", r.Name)
 		}
-		seen[p.Name] = true
+		if seen[r.Name] {
+			return fmt.Errorf("routines: duplicate name %q", r.Name)
+		}
+		seen[r.Name] = true
 
-		if p.Cadence == "" {
-			return fmt.Errorf("periodic %q: cadence is required", p.Name)
+		if r.Workflow == "" {
+			return fmt.Errorf("routine %q: `workflow` is required (routines are bindings: define steps under `workflows:`)", r.Name)
 		}
-		if _, err := ParsePeriodicCadence(p.Cadence); err != nil {
-			return fmt.Errorf("periodic %q: invalid cadence %q: %w", p.Name, p.Cadence, err)
-		}
-
-		hasWorkflow := p.Workflow != ""
-		hasSteps := len(p.Steps) > 0
-		switch {
-		case hasWorkflow && hasSteps:
-			return fmt.Errorf("periodic %q: set exactly one of `workflow` or `steps`, not both", p.Name)
-		case !hasWorkflow && !hasSteps:
-			return fmt.Errorf("periodic %q: set exactly one of `workflow` or `steps`", p.Name)
+		wf := findWorkflowByName(cfg, r.Workflow)
+		if wf == nil {
+			return fmt.Errorf("routine %q: referenced workflow %q does not exist", r.Name, r.Workflow)
 		}
 
-		if p.Priority != "" && !validPriorities[p.Priority] {
-			return fmt.Errorf("periodic %q: invalid priority %q (must be \"low\", \"medium\", \"high\", or \"urgent\")", p.Name, p.Priority)
-		}
-
-		// Resolve the effective steps for the empty-input guard. A ref-mode
-		// workflow with its own input pin (WorkflowConfig.Input) satisfies the
-		// guard too — createTaskFromRequest falls back to the pin when the
-		// request input is empty.
-		var steps []StepConfig
-		inputPinned := false
-		if hasWorkflow {
-			wf := findWorkflowByName(cfg, p.Workflow)
-			if wf == nil {
-				return fmt.Errorf("periodic %q: referenced workflow %q does not exist", p.Name, p.Workflow)
+		if r.Cadence != "" {
+			if _, err := ParseRoutineCadence(r.Cadence); err != nil {
+				return fmt.Errorf("routine %q: invalid cadence %q: %w", r.Name, r.Cadence, err)
 			}
-			steps = wf.Steps
-			inputPinned = wf.Input != ""
-		} else {
-			steps = p.Steps
 		}
 
-		if p.Input == "" && !inputPinned {
-			for i := range steps {
-				step := &steps[i]
-				if strings.Contains(step.Prompt, "{{task.input}}") {
-					return fmt.Errorf("periodic %q: step %q references {{task.input}} but no `input` is set", p.Name, step.Name)
-				}
-				if !step.IsParallel() {
-					continue
-				}
-				for _, b := range step.Parallel.Branches {
-					if strings.Contains(b.Prompt, "{{task.input}}") {
-						return fmt.Errorf("periodic %q: step %q branch %q references {{task.input}} but no `input` is set", p.Name, step.Name, b.Name)
-					}
-				}
+		if r.Priority != "" && !validPriorities[r.Priority] {
+			return fmt.Errorf("routine %q: invalid priority %q (must be \"low\", \"medium\", \"high\", or \"urgent\")", r.Name, r.Priority)
+		}
+
+		if err := r.ValidatePins(wf); err != nil {
+			return err
+		}
+
+		if r.IsScheduled() && r.EffectivePins(wf).Input == "" {
+			if ref, ok := findTaskInputRef(wf); ok {
+				return fmt.Errorf("routine %q: %s references {{task.input}} but no input is set and the routine has a cadence", r.Name, ref)
 			}
 		}
 	}
 	return nil
 }
 
+// findTaskInputRef locates the first {{task.input}} reference in a workflow's step
+// (or parallel-branch) prompts, describing it for error messages.
+func findTaskInputRef(wf *WorkflowConfig) (string, bool) {
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if strings.Contains(step.Prompt, "{{task.input}}") {
+			return fmt.Sprintf("step %q", step.Name), true
+		}
+		if !step.IsParallel() {
+			continue
+		}
+		for _, b := range step.Parallel.Branches {
+			if strings.Contains(b.Prompt, "{{task.input}}") {
+				return fmt.Sprintf("step %q branch %q", step.Name, b.Name), true
+			}
+		}
+	}
+	return "", false
+}
+
 // findWorkflowByName locates a workflow by an exact name match in the resolved
 // flat engine list (cfg.Workflows — which also carries hidden entries such as
-// "periodic:<name>" inline workflows and "<slug>:<name>" track workflows). It
-// does NOT add or strip prefixes.
+// unreferenced pool files and "<slug>:<name>" track workflows). It does NOT
+// add or strip prefixes.
 func findWorkflowByName(cfg *Config, name string) *WorkflowConfig {
 	for i := range cfg.Workflows {
 		if cfg.Workflows[i].Name == name {

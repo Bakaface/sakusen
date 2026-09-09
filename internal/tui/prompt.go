@@ -108,6 +108,12 @@ type promptView struct {
 	// so the cycler is naturally hidden — the field exists only as a flag for
 	// callers that need to know the prompt is locked.
 	preselectedWorkflow string
+
+	// routineName, when non-empty, puts the prompt in its input-only mode: the
+	// form collects nothing but the argument for that routine, because the
+	// routine's binding already fixes the workflow and every pin. Submitting
+	// runs the routine rather than creating a task directly.
+	routineName string
 }
 
 func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBaseBranch, branchTemplate string) promptView {
@@ -263,6 +269,7 @@ func (p *promptView) Reset() {
 	p.validationError = ""
 	p.pins = promptPins{}
 	p.saved = promptSaved{}
+	p.routineName = ""
 	// Restore workflowCursor to the saved default workflow position
 	p.workflowCursor = p.defaultWorkflowCursor()
 	p.focusInput(promptFieldInput)
@@ -433,6 +440,9 @@ func (p *promptView) focusInput(field promptField) {
 // visibleFields returns the ordered list of tab-cyclable fields
 // based on the current worktree and branch mode state.
 func (p *promptView) visibleFields() []promptField {
+	if p.routineName != "" {
+		return []promptField{promptFieldInput}
+	}
 	fields := []promptField{promptFieldTitle, promptFieldSlug}
 	if !p.pins.input {
 		fields = append(fields, promptFieldInput)
@@ -779,6 +789,10 @@ func (p *promptView) renderWorkflowList() string {
 }
 
 func (p *promptView) View() string {
+	if p.routineName != "" {
+		return p.renderRoutineInput()
+	}
+
 	var b strings.Builder
 
 	focusedLabel := lipgloss.NewStyle().Bold(true).Foreground(highlight)
@@ -1133,4 +1147,33 @@ func (p *promptView) renderHelp() string {
 	}
 
 	return help.String()
+}
+
+// renderRoutineInput is the prompt's input-only mode: a routine that needs an
+// argument asks for just that. No title/slug/git/workflow rows — the routine's
+// binding already decides everything else about the task.
+func (p *promptView) renderRoutineInput() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(fmt.Sprintf(" Run Routine: %s ", p.routineName)))
+	b.WriteString("\n\n")
+
+	maxH := p.maxHeight()
+	p.textarea.SetHeight(maxH)
+	taView := p.textarea.View()
+	p.recalcHeight()
+	visLines := min(p.visualLineCount(), maxH)
+	lines := strings.Split(taView, "\n")
+	if visLines < len(lines) {
+		lines = lines[:visLines]
+	}
+	b.WriteString(lipgloss.NewStyle().PaddingLeft(2).Render(strings.Join(lines, "\n")))
+	b.WriteString("\n")
+
+	if p.validationError != "" {
+		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E88388"))
+		b.WriteString("  " + errStyle.Render(p.validationError) + "\n")
+	}
+
+	b.WriteString("\n" + dimStyle.Render("  enter: run | ctrl+j: new line | esc: cancel"))
+	return b.String()
 }

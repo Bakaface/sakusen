@@ -25,7 +25,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 | `wait_for_tasks.go` | `wait-for-tasks` — CLI/test-only surface for the `MsgWaitForTasks` RPC; agents use the MCP tools instead |
 | `depends_on.go` | `depends-on add/rm/list` |
 | `tracks.go` | `tracks create/list/show/set-context` |
-| `periodics.go` | `periodics list/show/pause/resume/runs/run` |
+| `routines.go` | `routines list/show/pause/resume/runs/run` — all by routine name |
 | `backfill_context.go` | `backfill-context` for older tasks |
 | `helpers.go` | Task table printing, truncation, shell completion for task IDs |
 | `version.go` | `version` |

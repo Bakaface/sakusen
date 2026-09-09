@@ -174,7 +174,7 @@ type CreateTaskRequest struct {
 	// "none" means explicitly trackless — meaningful for create_tasks_and_wait
 	// children, which otherwise inherit the parent task's track.
 	Track string `json:"track,omitempty"`
-	// PeriodicID is set by the scheduler when materializing a periodic fire.
+	// PeriodicID is set by the fire path when a routine materializes a task.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
 }
 
@@ -616,26 +616,32 @@ type TaskInfo struct {
 	// workflows with no group.
 	BranchStatus map[string]string `json:"branch_status,omitempty"`
 	LatestChat   *ChatInfo         `json:"latest_chat,omitempty"`
-	// PeriodicID is set when the task was materialized by a periodic definition.
+	// PeriodicID is set when the task was materialized by a routine fire.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
 }
 
-// PeriodicInfo is the client-facing projection of a periodic_definitions row.
+// PeriodicInfo is the client-facing projection of a routine: its
+// periodic_definitions row plus the config-only fields (description, input
+// requirement) resolved from .sakusen.yml at request time.
 type PeriodicInfo struct {
-	ID          int64      `json:"id"`
-	ProjectID   int64      `json:"project_id"`
-	ProjectName string     `json:"project_name,omitempty"`
-	ProjectPath string     `json:"project_path,omitempty"`
-	Name        string     `json:"name"`
-	Cadence     string     `json:"cadence"`
-	WorkflowRef string     `json:"workflow_ref,omitempty"` // empty ⇒ inline
-	Inline      bool       `json:"inline"`                 // true when steps are inline (no workflow_ref)
-	Input       string     `json:"input,omitempty"`
-	Priority    string     `json:"priority"` // empty ⇒ project default at fire time
-	Paused      bool       `json:"paused"`
-	NextFireAt  time.Time  `json:"next_fire_at"`
-	LastFiredAt *time.Time `json:"last_fired_at,omitempty"`
-	LastTaskID  *int64     `json:"last_task_id,omitempty"`
+	ID          int64  `json:"id"`
+	ProjectID   int64  `json:"project_id"`
+	ProjectName string `json:"project_name,omitempty"`
+	ProjectPath string `json:"project_path,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Cadence     string `json:"cadence"` // empty ⇒ on-demand only
+	WorkflowRef string `json:"workflow_ref"`
+	Input       string `json:"input,omitempty"`
+	// RequiresInput is true when a run must supply an input argument: the
+	// routine's effective input is empty and its workflow references
+	// {{task.input}}.
+	RequiresInput bool       `json:"requires_input"`
+	Priority      string     `json:"priority"` // empty ⇒ project default at fire time
+	Paused        bool       `json:"paused"`
+	NextFireAt    time.Time  `json:"next_fire_at"`
+	LastFiredAt   *time.Time `json:"last_fired_at,omitempty"`
+	LastTaskID    *int64     `json:"last_task_id,omitempty"`
 }
 
 type ListPeriodicsRequest struct {
@@ -647,8 +653,12 @@ type ListPeriodicsResponse struct {
 	Periodics []PeriodicInfo `json:"periodics"`
 }
 
+// Routines are addressed by (project_path, name) on every single-routine
+// request: the name is what the user writes in .sakusen.yml and types at every
+// surface, and the row id is an implementation detail of the DB.
 type GetPeriodicRequest struct {
-	ID int64 `json:"id"`
+	ProjectPath string `json:"project_path"`
+	Name        string `json:"name"`
 }
 
 type GetPeriodicResponse struct {
@@ -656,8 +666,9 @@ type GetPeriodicResponse struct {
 }
 
 type SetPeriodicPausedRequest struct {
-	ID     int64 `json:"id"`
-	Paused bool  `json:"paused"`
+	ProjectPath string `json:"project_path"`
+	Name        string `json:"name"`
+	Paused      bool   `json:"paused"`
 }
 
 type SetPeriodicPausedResponse struct {
@@ -665,7 +676,8 @@ type SetPeriodicPausedResponse struct {
 }
 
 type ListPeriodicRunsRequest struct {
-	PeriodicID int64 `json:"periodic_id"`
+	ProjectPath string `json:"project_path"`
+	Name        string `json:"name"`
 }
 
 type ListPeriodicRunsResponse struct {
@@ -673,7 +685,11 @@ type ListPeriodicRunsResponse struct {
 }
 
 type FirePeriodicNowRequest struct {
-	ID int64 `json:"id"`
+	ProjectPath string `json:"project_path"`
+	Name        string `json:"name"`
+	// Input overrides the routine's literal `input:` for this run. Required
+	// when the routine's RequiresInput is true.
+	Input string `json:"input,omitempty"`
 }
 
 type FirePeriodicNowResponse struct {

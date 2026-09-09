@@ -116,6 +116,42 @@ func (c *Config) GetTaskWorkflow(name string) *WorkflowConfig {
 	return nil
 }
 
+// GetRoutine returns the routine with the given name, or nil when absent.
+func (c *Config) GetRoutine(name string) *RoutineConfig {
+	for i := range c.Routines {
+		if c.Routines[i].Name == name {
+			return &c.Routines[i]
+		}
+	}
+	return nil
+}
+
+// ListRoutineNames returns every routine name in config order.
+func (c *Config) ListRoutineNames() []string {
+	names := make([]string, 0, len(c.Routines))
+	for i := range c.Routines {
+		names = append(names, c.Routines[i].Name)
+	}
+	return names
+}
+
+// RoutineRequiresInput reports whether firing the routine needs an input
+// argument: its effective input is empty and the workflow it binds references
+// {{task.input}} somewhere. Such a routine is on-demand only (a scheduled one
+// is a load error) and its run surfaces demand the argument. Returns false for
+// a routine whose workflow no longer resolves — the fire fails on that instead.
+func (c *Config) RoutineRequiresInput(r *RoutineConfig) bool {
+	wf := c.GetTaskWorkflow(r.Workflow)
+	if wf == nil {
+		return false
+	}
+	if r.EffectivePins(wf).Input != "" {
+		return false
+	}
+	_, ok := findTaskInputRef(wf)
+	return ok
+}
+
 // GetWorktreeSyncPaths returns the sync paths for a workflow, falling back to the global config.
 func (c *Config) GetWorktreeSyncPaths(wf *WorkflowConfig) WorktreeSyncPathsConfig {
 	var wfVal WorktreeSyncPathsConfig

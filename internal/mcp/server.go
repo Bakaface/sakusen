@@ -97,6 +97,12 @@ func Serve(cfg *config.Config) error {
 // at the next step or runs the same finalization the TUI's advance/finalize
 // keybind triggers. If it advanced too early, retry_task re-runs the step.
 //
+// list_routines is read-only, and run_routine is task creation the project
+// author pre-approved: a routine fixes the workflow, the pins and the priority
+// in .sakusen.yml, so the tool's whole surface is a name plus (sometimes) an
+// input. That is strictly narrower than create_task, which is already
+// admitted. A run never touches a scheduled routine's cadence.
+//
 // create_track is additive; list_tracks and get_track are read-only.
 // update_track (context and/or description) is admitted with the same
 // admission argument as update_step_context: the daemon enforces it can only
@@ -114,6 +120,8 @@ func registerTools(s *server.MCPServer, c *client.Client) {
 	registerCreateTasksAndWait(s, c)
 	registerWaitForTasks(s, c)
 	registerListWorkflows(s, c)
+	registerListRoutines(s, c)
+	registerRunRoutine(s, c)
 	registerGetTask(s, c)
 	registerListTasks(s, c)
 	registerRetryTask(s, c)

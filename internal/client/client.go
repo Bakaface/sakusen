@@ -941,8 +941,8 @@ func (c *Client) ListWorkflows(projectPath string) (*daemon.ListWorkflowsRespons
 	return &resp, nil
 }
 
-// ListPeriodics returns the periodic definitions registered for a project.
-func (c *Client) ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error) {
+// ListRoutines returns the routines registered for a project.
+func (c *Client) ListRoutines(projectPath string) ([]daemon.PeriodicInfo, error) {
 	msg, err := c.request(daemon.MsgListPeriodics, daemon.ListPeriodicsRequest{ProjectPath: projectPath})
 	if err != nil {
 		return nil, err
@@ -954,9 +954,9 @@ func (c *Client) ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error
 	return resp.Periodics, nil
 }
 
-// GetPeriodic returns a single periodic definition by id.
-func (c *Client) GetPeriodic(id int64) (*daemon.PeriodicInfo, error) {
-	msg, err := c.request(daemon.MsgGetPeriodic, daemon.GetPeriodicRequest{ID: id})
+// GetRoutine returns a single routine by name.
+func (c *Client) GetRoutine(projectPath, name string) (*daemon.PeriodicInfo, error) {
+	msg, err := c.request(daemon.MsgGetPeriodic, daemon.GetPeriodicRequest{ProjectPath: projectPath, Name: name})
 	if err != nil {
 		return nil, err
 	}
@@ -967,9 +967,9 @@ func (c *Client) GetPeriodic(id int64) (*daemon.PeriodicInfo, error) {
 	return &resp.Periodic, nil
 }
 
-// SetPeriodicPaused toggles the paused flag for a periodic definition.
-func (c *Client) SetPeriodicPaused(id int64, paused bool) (*daemon.PeriodicInfo, error) {
-	msg, err := c.request(daemon.MsgSetPeriodicPaused, daemon.SetPeriodicPausedRequest{ID: id, Paused: paused})
+// SetRoutinePaused toggles the paused flag for a scheduled routine.
+func (c *Client) SetRoutinePaused(projectPath, name string, paused bool) (*daemon.PeriodicInfo, error) {
+	msg, err := c.request(daemon.MsgSetPeriodicPaused, daemon.SetPeriodicPausedRequest{ProjectPath: projectPath, Name: name, Paused: paused})
 	if err != nil {
 		return nil, err
 	}
@@ -980,9 +980,9 @@ func (c *Client) SetPeriodicPaused(id int64, paused bool) (*daemon.PeriodicInfo,
 	return &resp.Periodic, nil
 }
 
-// ListPeriodicRuns returns the tasks materialized by a periodic definition.
-func (c *Client) ListPeriodicRuns(periodicID int64) ([]daemon.TaskInfo, error) {
-	msg, err := c.request(daemon.MsgListPeriodicRuns, daemon.ListPeriodicRunsRequest{PeriodicID: periodicID})
+// ListRoutineRuns returns the tasks a routine has materialized.
+func (c *Client) ListRoutineRuns(projectPath, name string) ([]daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgListPeriodicRuns, daemon.ListPeriodicRunsRequest{ProjectPath: projectPath, Name: name})
 	if err != nil {
 		return nil, err
 	}
@@ -993,10 +993,11 @@ func (c *Client) ListPeriodicRuns(periodicID int64) ([]daemon.TaskInfo, error) {
 	return resp.Tasks, nil
 }
 
-// FirePeriodicNow triggers an immediate one-shot fire of a periodic definition
-// without advancing its schedule.
-func (c *Client) FirePeriodicNow(id int64) (*daemon.TaskInfo, error) {
-	msg, err := c.request(daemon.MsgFirePeriodicNow, daemon.FirePeriodicNowRequest{ID: id})
+// RunRoutine fires a routine immediately without advancing its schedule. An
+// empty input falls back to the routine's own `input:`; routines that require
+// an input argument reject an empty one daemon-side.
+func (c *Client) RunRoutine(projectPath, name, input string) (*daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgFirePeriodicNow, daemon.FirePeriodicNowRequest{ProjectPath: projectPath, Name: name, Input: input})
 	if err != nil {
 		return nil, err
 	}

@@ -155,11 +155,11 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case key.Matches(msg, m.keys.Periodics):
+	case key.Matches(msg, m.keys.Routines):
 		if m.client != nil && m.projectPath != "" {
-			m.view = viewPeriodicList
-			m.periodic.loading = true
-			return m, m.loadPeriodics()
+			m.view = viewRoutineList
+			m.routines.loading = true
+			return m, m.loadRoutines()
 		}
 		return m, nil
 
@@ -383,6 +383,8 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		if completed, ok := completeRunTask(m, m.commandInput); ok {
 			m.commandInput = completed
+		} else if completed, ok := completeRunRoutine(m, m.commandInput); ok {
+			m.commandInput = completed
 		}
 		return m, nil
 
@@ -520,6 +522,9 @@ func (m Model) handleSelectorChoice() (tea.Model, tea.Cmd) {
 
 	case selectorWorkflow:
 		return m.launchWorkflow(item)
+
+	case selectorRoutine:
+		return m.launchRoutine(item)
 	}
 
 	return m, nil
@@ -555,6 +560,34 @@ func (m Model) launchWorkflow(wfName string) (tea.Model, tea.Cmd) {
 	m.prompt.SetSize(m.width, m.height)
 	m.prompt.Focus()
 	return m, nil
+}
+
+// launchRoutine runs the named routine. Routines that need an input argument
+// open the prompt in its input-only mode first — everything else about the
+// task (workflow, pins, priority) is already fixed by the binding, so there is
+// no New Task form to show.
+func (m Model) launchRoutine(name string) (tea.Model, tea.Cmd) {
+	if m.client == nil || m.projectPath == "" {
+		return m, nil
+	}
+	r := m.cfg.GetRoutine(name)
+	if r == nil {
+		m.err = fmt.Errorf("unknown routine: %s", name)
+		return m, nil
+	}
+
+	if m.cfg.RoutineRequiresInput(r) {
+		m.view = viewPrompt
+		m.prompt.defaultWorkflow = m.defaultWorkflow
+		m.prompt.Reset()
+		m.prompt.routineName = name
+		m.prompt.SetSize(m.width, m.height)
+		m.prompt.Focus()
+		return m, nil
+	}
+
+	m.statusMessage = fmt.Sprintf("ran routine %q", name)
+	return m, m.runRoutineCmd(name, "")
 }
 
 // handleSelectorCancel handles cleanup when a selection is cancelled.

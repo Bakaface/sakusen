@@ -38,6 +38,7 @@ type ProjectConfig struct {
     MergeConflicts           *MergeConflictsConfig   // Merge-conflict resolver role block
     OnComplete               string                  // Top-level finalization action (moved out of git:)
     Workflows                []WorkflowEntry         `yaml:"workflows"` // flat list (string ref or inline)
+    Routines                 []RoutineConfig         `yaml:"routines,omitempty"` // invocation bindings
     WorktreeSyncPaths        WorktreeSyncPathsConfig // Paths to copy/link into worktrees
     WorktreeSetupCommand     string                  // Single setup command (legacy)
     WorktreeSetupCommands    []string                // Ordered list of setup commands
@@ -49,7 +50,7 @@ type ProjectConfig struct {
 ```
 
 Removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`,
-`merge_conflict_agent:`) are hard
+`merge_conflict_agent:`, `periodic:`) are hard
 load-time migration errors surfaced by `checkRemovedProjectKeys` (agents.go) on the raw YAML.
 
 `WorkflowEntry` is a single item in the flat `workflows:` list — exactly one of `Ref` (string) or `Inline` (`*WorkflowConfig`) is set. String entries resolve to `.sakusen/workflows/<name>.yml` (local first, then global pool).
@@ -98,13 +99,14 @@ type WorkflowConfig struct {
     TmuxSetupCommand      string                  // Per-workflow tmux setup command (override project-level)
 
     // Populated by the loader, not from YAML:
-    Hidden                bool                    // file-based workflow not referenced from .sakusen.yml
+    Hidden                bool                    // not offered in the `n` picker and never the implicit default:
+                                                  //   a pool file not listed in workflows:, or a <slug>:<name> track workflow
     Source                string                  // "inline" or path under .sakusen/workflows/
     FromGlobal            bool                    // definition adopted from the global scope
 }
 ```
 
-Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped — note `description` is metadata and does NOT gate skip); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false).
+Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped — note `description` is metadata and does NOT gate skip); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false — the rules live in `validatePinFields`, shared with `RoutineConfig`).
 
 The removed `tmux:` and `print:` fields are rejected at parse time (workflow and step level) with migration errors — execution mode now comes from the resolved agent record's `mode` (see the Agents section below).
 
@@ -208,7 +210,44 @@ workflows:
     steps: [...]
 ```
 
-"Kind" is now an emergent property of how completely a workflow pins the New Task form — not a config category. The `n` key (and `:RunTask`) operates over the single flat list; fully-pinned workflows create a task immediately without showing the form.
+"Kind" is now an emergent property of how completely a workflow pins the New Task form and of whether a routine binds it — not a config category. The `n` key (and `:RunTask`) operates over the single flat list; fully-pinned workflows create a task immediately without showing the form.
+
+### Routines (invocation bindings)
+
+`routines:` is the orthogonal axis to `workflows:`: definitions live under `workflows:`, ways of invoking them live here. A routine names a workflow, supplies pins and an optional cadence, and NEVER defines steps.
+
+```go
+type RoutineConfig struct {
+    Name        string   // required, kebab-case, unique within routines:
+    Description string   // metadata for the palette and MCP; never a pin
+    Workflow    string   // required; resolved by exact name (hidden pool files and <slug>:<name> track workflows allowed)
+    Input       string   // pins
+    Worktree    *bool
+    Branch      string
+    Checkout    string
+    Target      string
+    Cadence     string   // cron / @every / descriptor; empty ⇒ on-demand only
+    Priority    string   // empty ⇒ project default at fire time
+    Paused      bool     // only meaningful with a cadence
+}
+```
+
+```yaml
+routines:
+  - name: compose-wiki           # on-demand: :RunRoutine, `sakusen routines run`, MCP run_routine
+    description: Rebuild the wiki
+    workflow: wiki-compose
+    branch: sakusen/wiki-{{task.id}}
+  - name: nightly-sweep          # + cadence ⇒ also scheduled
+    workflow: wiki-compose
+    cadence: "0 3 * * *"
+```
+
+- `steps`, `agent`, `summarizer_prompt`, `tmux`, `print` on a routine are load errors ("routines are bindings").
+- `EffectivePins(wf)` merges the routine over the workflow: `input`, `worktree` and `target` per field; `branch`/`checkout` as a PAIR (setting either on the routine ignores both of the workflow's). `ValidatePins(wf)` runs the shared pin rules against the merged result, naming the routine.
+- `IsScheduled()` is `Cadence != ""`. Both kinds get a `periodic_definitions` row; cadence-less rows are never due.
+- `Config.RoutineRequiresInput(r)` is true when the effective input is empty and the workflow references `{{task.input}}` in any step or parallel-branch prompt. That is a LOAD ERROR for a scheduled routine and legal for an on-demand one, whose run surfaces then demand the argument (the daemon re-checks it).
+- A workflow referenced only from `routines:` stays hidden — the routine is what makes it startable — and `Diagnose` suppresses the "is hidden" warning for it.
 
 ### Track Workflows
 
@@ -276,7 +315,7 @@ A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor s
 - A branch may not be a group (no nesting), may not have `loop` or `human`, and must be an inline mapping (a bare-scalar entry parses as a step *reference*, which only resolves against top-level steps).
 - Step names and branch names share ONE namespace and must be unique across the whole workflow — `{{steps.<name>.context}}` addresses both. Also enforced in `validateUniqueNames` and `resolveWorkflowSteps`.
 - `ValidateLoops`: a `goto` naming a branch is an error (target the group); exit conditions may name a branch or a group.
-- `validateAgentRefs` (production load only): every branch's EFFECTIVE agent must be headless — the join is synchronous, so a tmux branch could never complete. `collectAgentRefs`, `validatePromptIncludes` and `validatePeriodic` all walk branches too.
+- `validateAgentRefs` (production load only): every branch's EFFECTIVE agent must be headless — the join is synchronous, so a tmux branch could never complete. `collectAgentRefs`, `validatePromptIncludes` and the routine input guard all walk branches too.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 
@@ -331,6 +370,9 @@ GetTaskWorkflow(name string) *WorkflowConfig        // By name (includes hidden)
 DefaultWorkflow() WorkflowConfig                    // Built-in single-step default workflow
 ListWorkflowNames() []string                        // Active (non-hidden) workflow names; ["default"] if none configured
 ListAllWorkflowNames() []string                     // All workflow names including hidden (for pickers/tab-completion)
+GetRoutine(name string) *RoutineConfig              // By name; nil if absent
+ListRoutineNames() []string                         // All routine names, config order
+RoutineRequiresInput(r *RoutineConfig) bool         // Effective input empty AND the workflow references {{task.input}}
 GetStepTimeout(step StepConfig) time.Duration       // Parses Timeout string, falls back to 30m
 GetWorktreeSetupCommand(wf *WorkflowConfig) string  // Workflow-level override, then project-level
 GetTmuxSetupCommand(wf *WorkflowConfig) string      // Workflow-level override, then project-level
@@ -352,7 +394,8 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 | `types.go` | All struct/type definitions and their methods (`Config`, `ProjectConfig`, `WorkflowConfig`, `StepConfig`, etc.) |
 | `config.go` | Loading, parsing, merging, defaults (`Load()`, `LoadForProject()`, `defaultConfig()`, `resolveWorkflows()`) |
 | `agents.go` | `AgentConfig`/`SummarizerConfig`, the step→workflow→default_agent→"claude" cascade (`StepAgent` etc.), `validateAgents`, `mergeAgents`, `checkRemovedProjectKeys` (removed-key migration errors) |
-| `accessors.go` | Workflow accessors, branch templates, save (`GetWorkflow()`, `ListWorkflowNames()`, `ResolveBranchTemplate()`, `Save()`) |
+| `accessors.go` | Workflow and routine accessors, branch templates, save (`GetWorkflow()`, `ListWorkflowNames()`, `GetRoutine()`, `RoutineRequiresInput()`, `ResolveBranchTemplate()`, `Save()`) |
+| `cadence.go` | Routine cadence parsing (`ParseRoutineCadence()`, `NextRoutineFire()`) — 5-field cron + descriptors + `@every` |
 | `prompts.go` | `{{prompt.<name>}}` includes — `PromptDirs()`, `ExpandPromptIncludes()`, `validatePromptIncludes()` |
 | `detect.go` | Project type detection (`DetectProject()`) |
 | `validate.go` | Single-file validation for `sakusen validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |

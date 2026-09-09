@@ -27,7 +27,7 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 | `task_waits_on.go` | Parent → child suspension edges (`task_waits_on`) |
 | `track.go` | Tracks: create (slug/scope/depth validation), lookup by slug with project-shadows-global, chain, context/description updates |
 | `chat.go` | `chats` rows linking task steps to agent chat sessions (used for resume) |
-| `periodic.go` | Periodic definitions and their run history |
+| `periodic.go` | Routine rows (`periodic_definitions`) and their run history; an empty `cadence` marks an on-demand routine, excluded from the due-query and the claim |
 
 ## Conventions
 

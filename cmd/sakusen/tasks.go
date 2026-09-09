@@ -24,14 +24,14 @@ var tasksCmd = &cobra.Command{
 	ValidArgsFunction: completeTaskIDs(),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
-		periodicID, _ := cmd.Flags().GetInt64("periodic-id")
+		routineID, _ := cmd.Flags().GetInt64("routine-id")
 		if len(args) == 1 {
 			return showTaskDetail(args[0], jsonOut)
 		}
 
 		c := client.New(cfg)
 		if err := c.Connect(); err != nil {
-			return listTasksFromDB(jsonOut, periodicID)
+			return listTasksFromDB(jsonOut, routineID)
 		}
 		defer c.Close()
 
@@ -40,10 +40,10 @@ var tasksCmd = &cobra.Command{
 			return fmt.Errorf("failed to list tasks: %w", err)
 		}
 
-		if periodicID != 0 {
+		if routineID != 0 {
 			filtered := tasks[:0]
 			for _, t := range tasks {
-				if t.PeriodicID != nil && *t.PeriodicID == periodicID {
+				if t.PeriodicID != nil && *t.PeriodicID == routineID {
 					filtered = append(filtered, t)
 				}
 			}
@@ -83,7 +83,7 @@ func writeJSON(w *os.File, v any) error {
 	return enc.Encode(v)
 }
 
-func listTasksFromDB(jsonOut bool, periodicID int64) error {
+func listTasksFromDB(jsonOut bool, routineID int64) error {
 	dbPath := cfg.GetDatabasePath("")
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -96,10 +96,10 @@ func listTasksFromDB(jsonOut bool, periodicID int64) error {
 		return fmt.Errorf("failed to get tasks: %w", err)
 	}
 
-	if periodicID != 0 {
+	if routineID != 0 {
 		filtered := tasks[:0]
 		for _, t := range tasks {
-			if t.PeriodicID != nil && *t.PeriodicID == periodicID {
+			if t.PeriodicID != nil && *t.PeriodicID == routineID {
 				filtered = append(filtered, t)
 			}
 		}

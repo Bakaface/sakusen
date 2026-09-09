@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"database/sql"
 	"fmt"
 	"net"
 	"time"
@@ -8,8 +9,10 @@ import (
 	"github.com/Bakaface/sakusen/internal/db"
 )
 
-// periodicToInfo projects a DB periodic definition into the client-facing
-// PeriodicInfo, enriching it with the project name/path.
+// periodicToInfo projects a routine's DB row into the client-facing
+// PeriodicInfo, enriching it with the project name/path and the config-derived
+// fields (description, input requirement) that live in .sakusen.yml rather than
+// in the row.
 func (s *Server) periodicToInfo(d *db.PeriodicDef) PeriodicInfo {
 	info := PeriodicInfo{
 		ID:          d.ID,
@@ -17,7 +20,6 @@ func (s *Server) periodicToInfo(d *db.PeriodicDef) PeriodicInfo {
 		Name:        d.Name,
 		Cadence:     d.Cadence,
 		WorkflowRef: d.WorkflowRef,
-		Inline:      d.WorkflowRef == "",
 		Input:       d.Input,
 		Priority:    d.Priority,
 		Paused:      d.Paused,
@@ -29,7 +31,52 @@ func (s *Server) periodicToInfo(d *db.PeriodicDef) PeriodicInfo {
 		info.ProjectName = proj.Name
 		info.ProjectPath = proj.Path
 	}
+	if pc, err := s.getProjectContext(d.ProjectID); err == nil {
+		if r := pc.cfg.GetRoutine(d.Name); r != nil {
+			info.Description = r.Description
+			info.RequiresInput = pc.cfg.RoutineRequiresInput(r)
+		}
+	}
 	return info
+}
+
+// reconcileProjectRoutines brings the project's routine rows in line with its
+// current .sakusen.yml before a read, so a routine added to the yml is visible
+// (and runnable) immediately rather than after the next scheduler tick. The
+// mod-time is recorded on success so the loop doesn't redundantly redo it.
+func (s *Server) reconcileProjectRoutines(proj *db.Project) {
+	pc, err := s.getProjectContext(proj.ID)
+	if err != nil {
+		return
+	}
+	if err := s.reconcilePeriodicsForProject(proj, pc.cfg); err == nil {
+		s.markPeriodicReconciled(proj.ID, pc.configModTime)
+	}
+}
+
+// resolveRoutineRow resolves a routine by project path + name, reconciling the
+// project first. Every name-addressed handler goes through it.
+func (s *Server) resolveRoutineRow(projectPath, name string) (*db.PeriodicDef, error) {
+	if projectPath == "" {
+		return nil, fmt.Errorf("project_path is required")
+	}
+	if name == "" {
+		return nil, fmt.Errorf("routine name is required")
+	}
+	proj, err := s.database.GetOrCreateProject(projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve project: %w", err)
+	}
+	s.reconcileProjectRoutines(proj)
+
+	d, err := s.database.GetPeriodicByName(proj.ID, name)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no routine %q in %s (check the `routines:` list in .sakusen.yml)", name, proj.Path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get routine %q: %w", name, err)
+	}
+	return d, nil
 }
 
 func (s *Server) handleListPeriodics(conn net.Conn, req ListPeriodicsRequest) {
@@ -47,22 +94,12 @@ func (s *Server) handleListPeriodics(conn net.Conn, req ListPeriodicsRequest) {
 		s.sendError(conn, fmt.Sprintf("failed to resolve project: %v", err))
 		return
 	}
-	projectID := proj.ID
 
-	// Reconcile from the project's current .sakusen.yml before listing so the
-	// view reflects the on-disk config immediately, even for projects the
-	// scheduler hasn't ticked yet (e.g. a freshly-registered periodic-only
-	// project). Record the mod-time on success so the scheduler loop doesn't
-	// redundantly re-reconcile this project on its next tick.
-	if pc, err := s.getProjectContext(projectID); err == nil {
-		if err := s.reconcilePeriodicsForProject(proj, pc.cfg); err == nil {
-			s.markPeriodicReconciled(projectID, pc.configModTime)
-		}
-	}
+	s.reconcileProjectRoutines(proj)
 
-	defs, err := s.database.ListPeriodicsForProject(projectID)
+	defs, err := s.database.ListPeriodicsForProject(proj.ID)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to list periodics: %v", err))
+		s.sendError(conn, fmt.Sprintf("failed to list routines: %v", err))
 		return
 	}
 
@@ -74,31 +111,48 @@ func (s *Server) handleListPeriodics(conn net.Conn, req ListPeriodicsRequest) {
 }
 
 func (s *Server) handleGetPeriodic(conn net.Conn, req GetPeriodicRequest) {
-	d, err := s.database.GetPeriodicByID(req.ID)
+	d, err := s.resolveRoutineRow(req.ProjectPath, req.Name)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to get periodic #%d: %v", req.ID, err))
+		s.sendError(conn, err.Error())
 		return
 	}
 	s.sendMessage(conn, MsgGetPeriodic, GetPeriodicResponse{Periodic: s.periodicToInfo(d)})
 }
 
+// handleSetPeriodicPaused toggles a scheduled routine's pause flag. Pausing an
+// on-demand routine is rejected rather than silently accepted: there is no
+// clock to stop, and the flag would only make its run surfaces confusing.
 func (s *Server) handleSetPeriodicPaused(conn net.Conn, req SetPeriodicPausedRequest) {
-	if err := s.database.SetPeriodicPaused(req.ID, req.Paused); err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to update periodic #%d: %v", req.ID, err))
-		return
-	}
-	d, err := s.database.GetPeriodicByID(req.ID)
+	d, err := s.resolveRoutineRow(req.ProjectPath, req.Name)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to reload periodic #%d: %v", req.ID, err))
+		s.sendError(conn, err.Error())
 		return
 	}
-	s.sendMessage(conn, MsgSetPeriodicPaused, SetPeriodicPausedResponse{Periodic: s.periodicToInfo(d)})
+	if d.Cadence == "" {
+		s.sendError(conn, fmt.Sprintf("routine %q has no cadence; nothing to pause", d.Name))
+		return
+	}
+	if err := s.database.SetPeriodicPaused(d.ID, req.Paused); err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to update routine %q: %v", d.Name, err))
+		return
+	}
+	updated, err := s.database.GetPeriodicByID(d.ID)
+	if err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to reload routine %q: %v", d.Name, err))
+		return
+	}
+	s.sendMessage(conn, MsgSetPeriodicPaused, SetPeriodicPausedResponse{Periodic: s.periodicToInfo(updated)})
 }
 
 func (s *Server) handleListPeriodicRuns(conn net.Conn, req ListPeriodicRunsRequest) {
-	tasks, err := s.database.GetTasksForPeriodic(req.PeriodicID)
+	d, err := s.resolveRoutineRow(req.ProjectPath, req.Name)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to list periodic runs: %v", err))
+		s.sendError(conn, err.Error())
+		return
+	}
+	tasks, err := s.database.GetTasksForPeriodic(d.ID)
+	if err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to list runs for routine %q: %v", d.Name, err))
 		return
 	}
 	infos := make([]TaskInfo, len(tasks))
@@ -108,27 +162,32 @@ func (s *Server) handleListPeriodicRuns(conn net.Conn, req ListPeriodicRunsReque
 	s.sendMessage(conn, MsgListPeriodicRuns, ListPeriodicRunsResponse{Tasks: infos})
 }
 
-// handleFirePeriodicNow materializes a one-shot fire using the same create path
-// as the scheduler, WITHOUT advancing the cron schedule (next_fire_at is left
-// untouched) or applying skip-overlap to this fire. A soft-deleted definition
-// is rejected — its workflow may no longer exist and its schedule is dead. A
-// PAUSED definition may be fired manually on purpose (pause stops the clock,
-// not the operator). Note that materializePeriodicTask still records the new
-// task as last_task_id, so if this manual run is still active when the next
-// scheduled tick lands, that tick will skip-overlap on it.
+// handleFirePeriodicNow runs a routine on demand through the same create path
+// as the scheduler, WITHOUT advancing any cron schedule (next_fire_at is left
+// untouched) or applying skip-overlap to this fire. A soft-deleted routine is
+// rejected — its workflow may no longer exist and its schedule is dead. A
+// PAUSED routine may be run manually on purpose (pause stops the clock, not the
+// operator). Note that fireRoutine still records the new task as last_task_id,
+// so if this manual run is still active when the next scheduled tick lands,
+// that tick will skip-overlap on it.
 func (s *Server) handleFirePeriodicNow(conn net.Conn, req FirePeriodicNowRequest) {
-	d, err := s.database.GetPeriodicByID(req.ID)
+	d, err := s.resolveRoutineRow(req.ProjectPath, req.Name)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to get periodic #%d: %v", req.ID, err))
+		s.sendError(conn, err.Error())
 		return
 	}
 	if d.DeletedAt != nil {
-		s.sendError(conn, fmt.Sprintf("periodic #%d (%s) was removed from .sakusen.yml; re-add it before firing", req.ID, d.Name))
+		s.sendError(conn, fmt.Sprintf("routine %q was removed from .sakusen.yml; re-add it before running", d.Name))
 		return
 	}
-	t, err := s.materializePeriodicTask(d, time.Now())
+	b, err := s.resolveRoutine(d)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("failed to fire periodic #%d: %v", req.ID, err))
+		s.sendError(conn, fmt.Sprintf("routine %q: %v", d.Name, err))
+		return
+	}
+	t, err := s.fireRoutine(b, d, req.Input, time.Now())
+	if err != nil {
+		s.sendError(conn, err.Error())
 		return
 	}
 	s.sendMessage(conn, MsgFirePeriodicNow, FirePeriodicNowResponse{Task: s.taskToInfo(t)})
