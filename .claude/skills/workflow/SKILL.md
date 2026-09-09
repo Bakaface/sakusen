@@ -25,6 +25,7 @@ description: >
    - Store step context in `task_steps` DB table
    - Validate meaningful code changes (skip for human/tmux)
    - Evaluate loop conditions, check approval gates
+   - A step carrying `parallel:` short-circuits all of the above: `runStep` hands it to `runParallelGroup` right after the template context is built (a group has no prompt and no agent of its own)
 7. Execute `on_complete` (commit/merge/none), run summarizer, clean up worktree (if merge)
 
 ## File Map
@@ -32,7 +33,8 @@ description: >
 | File | Purpose |
 |------|---------|
 | `engine.go` | Core orchestrator: `Engine` struct, `NewEngine()`, `RunTask()`, `runStep()`, `ResumeAfterApproval()`, `summarizePreviousTmuxStep()` |
-| `step.go` | Agent step execution: the `agentRunner` test seam, `runHeadlessAgent()` (spawns `runner.Process`), `runStepTmux()`, `writeTmuxLogMessage()` |
+| `step.go` | Agent step execution: the `agentRunner` test seam, `headlessSpawn` (per-spawn log/output/tag overrides), `runHeadlessAgent()` (spawns `runner.Process`), `runStepTmux()`, `tagLines()`, `writeTmuxLogMessage()` |
+| `parallel.go` | Parallel groups (fan-out / fan-in): `runParallelGroup()`, `runBranch()`, `captureBranchContext()`, `summarizeParallelBranches()`, `loadBranchChatContent()`, `BranchLogPath()`, `branchOutputFile()` |
 | `sentinel.go` | Generic turn-end sentinel convention for tmux steps: `StepDoneDir()`, `SentinelPrefix()`, `StepSentinel` payload (`session_id`/`transcript_path`), `LatestStepSentinel(WithPath)()`, `ClearStepSentinels()` |
 | `stepcontext.go` | Step-context precedence (manual > last_message > summarize_chat): `captureHeadlessStepContext()`, `PublishManualStepContext()`, `RecordTmuxStepSentinelSession()` |
 | `merge.go` | Engine-side glue to `internal/merge`: `executeOnComplete()` (calls `e.coord.Finalize()`), `bindConflictResolver()` (wires the agent-driven resolver into the Coordinator), `resolveConflicts()` (the resolver itself), `cleanupMergedWorktree()`. **Per-repo locking, retry, and target-clean wait live in `internal/merge`, not here.** |
@@ -79,7 +81,12 @@ worktree/.sakusen/
 ```
 
 Project-level unified task log: `.sakusen/logs/{taskID}/task.log` — all steps and finalization
-append to this single file in chronological order.
+append to this single file in chronological order. Parallel BRANCHES are the one exception: each
+writes `.sakusen/logs/{taskID}/branch-<name>.log` (identical region layout) and its raw capture to
+`worktree/.sakusen/output-<name>.log`, while task.log gets only the two
+`=== parallel <group>: ... ===` marker lines. The live output stream still carries every branch
+line, tagged `[<branch>]` after the timestamp — so the live view and task.log deliberately differ
+for the group's duration.
 
 ## Directory Functions
 
@@ -88,6 +95,7 @@ LogsDir(worktreePath string) string
 EnsureWorkDirs(worktreePath string) error
 ProjectLogsDir(dataDir string, taskID int64) string
 ProjectLogPath(dataDir string, taskID int64) string   // unified per-task log (task.log)
+BranchLogPath(dataDir string, taskID int64, branch string) string // per-branch log (parallel.go)
 ImagesDir(worktreePath string) string
 CopyImagesToWorktree(worktreePath string, imagePaths []string) ([]string, error)
 StepDoneDir(worktreePath string) string               // sentinel dir (sentinel.go)
@@ -115,7 +123,8 @@ When `task.Worktree == false`:
 
 - **Conflict prompt**: `resolveConflicts` renders ONE template — `merge_conflicts.prompt` when set, else the built-in `defaultConflictPrompt` — through `ResolveTemplate` with task, git and `{{conflict.files}}` vars (step/loop/children/track vars resolve empty, since no step ran). The synthetic `resolve-conflicts` step takes its timeout from `merge_conflicts.timeout` (default 10m).
 - **Merge**: delegated to `internal/merge`. The Engine calls `e.coord.Finalize(ctx, t, baseBranch, onComplete, logFn)`; the Coordinator owns per-repo serialization (via `*merge.Lock` from the daemon's `*merge.Locks` registry), `--no-ff` merge into base (preserves task branch commit history), agent-driven conflict resolution (wired via `bindConflictResolver()`), up to 3 retries, target-clean wait, and cleanup-on-failure. The conflict resolver requires a HEADLESS agent, resolved by `config.Config.MergeConflictAgentFor` (`merge_conflicts.agent` → workflow agent → `default_agent` → `"claude"`): an explicit `merge_conflicts.agent` must itself be headless, while a tmux workflow agent falls back to the implicit `"claude"` record; it errors when only tmux agents exist.
-- **Loops**: evaluate at step end, check `MaxIterations` + `ExitCondition.StepContextEmpty`, persist iteration to DB
+- **Parallel groups**: `runParallelGroup` reads `GetTaskStepRows` (a branch whose row is already `completed` is NOT launched — it counts toward K and its stored context is reused), appends `=== parallel <group>: started N branches ===` to task.log, then runs one goroutine per launched branch under a `sync.WaitGroup` and a cancelable child context (no errgroup dependency). Each branch resolves its prompt from a COPY of the shared template context with `Branch` set (`{{branch.name}}`/`{{branch.agent}}`), exports `SAKUSEN_STEP=<branch>`, and spawns with a `headlessSpawn{LogPath: branch-<name>.log, OutputFile: .sakusen/output-<name>.log, Tag: <name>}`. A branch that fails gets `FailTaskStep` (status `failed`) and a short reason — `exit <code>`, `timed out after <timeout>`, `cancelled`, or the spawn error; under `require: all` the first failure cancels the siblings. After the join, `summarize_chat` branches are summarized SEQUENTIALLY (`summarizeParallelBranches`) from their own branch log. K = completed branches; below `RequiredCount()` the group fails the task and its row stays `running` (like any failed step). Otherwise the group returns `FormatParallelAggregate(...)` as its result text and `captureHeadlessStepContext` stores it verbatim.
+- **Loops**: evaluate at step end, check `MaxIterations` + `ExitCondition.StepContextEmpty`, persist iteration to DB. A loop whose range spans a parallel group deletes that group's branch rows before jumping back (`clearParallelBranchRows`), so the next iteration re-runs every branch rather than skipping the completed ones
 - **Approval gates**: human steps pause at `AwaitingApproval`, tmux steps at `Tmux`
 - **Summarization strategy**: per-step `summarization_strategy` controls how step context is captured. `summarize_chat` (default when unset, see `StepConfig.EffectiveSummarizationStrategy()`) stores last_message immediately, then synchronously runs `summarizeChatLog()` against the step's chat content and overwrites the context via `UpdateTaskStepContext()`. Chat content comes from `loadStepChatContent()`: headless steps slice the step's region out of the unified task log and then keep **only the agent's streamed output** via `stepAgentOutput()` — the step header, the echoed prompt block (bounded by the single literally-empty line `runHeadlessAgent` writes after it), and the footer are stripped, because summarizing sakusen's own prompt back into the step context overwrites the agent's real result text, and `smallChatBytes` is no protection since a long prompt clears it. An agent that redirects stdout into `$SAKUSEN_RESULT_FILE` (the documented env contract) streams nothing, so this correctly yields `""` and the summarize pass is skipped. Tmux steps run the step agent's `chat_log_command` (env: `SAKUSEN_SESSION_ID` from the chats table, `SAKUSEN_SENTINEL_FILE` + `SAKUSEN_TRANSCRIPT_PATH` from the latest sentinel) and use its stdout — an agent without `chat_log_command` degrades to no chat content (warn, or fail when `require_context: true`). `last_message` keeps only the headless result text — cheaper but loses decisions; for tmux steps it leaves context empty because there is no result text. Non-tmux + non-empty result text + chat < `smallChatBytes` (4 KB) short-circuits via `shouldSummarizeChat()` and keeps the result text. For tmux steps the summarization runs synchronously inside `ResumeAfterApproval` (the step itself returns immediately to pause at the tmux approval gate).
 - **Summarizer**: `runSummarizerSync(ctx, prompt, workDir, purpose)` resolves the configured runner (`config.SummarizerInvocation`) and hands it to the package-level `RunSummarizer`, shared with the daemon (titles/slugs) and `sakusen backfill-context`. An `agent:` runs through `runner.RunAgentSync` (prompt written to a scratch `$SAKUSEN_PROMPT_FILE`, answer read from `$SAKUSEN_RESULT_FILE` with a stdout-tail fallback, `SAKUSEN_PROJECT_PATH` + the agent's `env` exported); a bare `command:` runs through `runner.RunSync` (prompt on stdin — sidesteps ARG_MAX for huge chat logs — response on stdout). `SAKUSEN_PURPOSE=<purpose>` is set either way, and summarizer output is never streamed into the task log. Returns `ErrNoSummarizer` when no summarizer is configured — callers degrade (skip with a warning) or fail the task when the step sets `require_context: true`. Map-reduce chunking is gated on `Summarizer.MaxPromptBytes` (0 = no chunking): `splitOnLineBoundary` chunks at `maxBytes - chunkHeadroomBytes` (30 KiB headroom), each chunk gets a generic extraction pass (`SAKUSEN_PURPOSE=summarize_chat_chunk`), and the chunk summaries are fed back through the original (custom or default) prompt.

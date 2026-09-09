@@ -23,7 +23,7 @@ Sakusen is a daemon that orchestrates multiple user-configured coding agents wor
 
 | File | Load when |
 |---|---|
-| `references/workflow-building.md` | **Creating or editing any workflow, step, prompt, loop, or template variable.** Complete authoring reference: entry shapes, pins, file-based/hidden/global/track workflows, step references, every workflow and step field, summarization, loops, prompt wrapping, the full template-variable catalog, tracks in prompts, cross-task refs, and MCP orchestration patterns. |
+| `references/workflow-building.md` | **Creating or editing any workflow, step, prompt, loop, parallel group, or template variable.** Complete authoring reference: entry shapes, pins, file-based/hidden/global/track workflows, step references, every workflow and step field, summarization, loops, parallel groups, prompt wrapping, the full template-variable catalog, tracks in prompts, cross-task refs, and MCP orchestration patterns. |
 | `references/config-reference.md` | Working on non-workflow config: agents, summarizer, git, worktree sync/setup, tmux setup, notifications, options, task states/priorities, legacy formats, and a complete example config. |
 
 ## Config Loading Order (later overrides earlier)
@@ -347,7 +347,7 @@ workflows:
 
 "Kind" is an emergent property of pinning: a workflow that pins every New Task field (`input` + `worktree` + `branch`/`checkout` + `target`) creates its task immediately instead of showing the form.
 
-A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`), `agent`, `on_complete`, `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop`. **Execution mode comes from the resolved agent record, never from the step.**
+A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`), `agent`, `on_complete`, `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop` — or, instead of `prompt`, a `parallel:` block that fans out to concurrent headless branches on the same worktree (see the reference's Parallel Groups section). **Execution mode comes from the resolved agent record, never from the step.**
 
 Prompts interpolate `{{task.*}}`, `{{git.*}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`, `{{children.*}}`, and `{{prompt.<name>}}` (inlines `<project>/.sakusen/prompts/<name>.md`, falling back to `~/.sakusen/prompts/<name>.md`, for passages shared across workflows). **Every multi-line variable must be wrapped in a semantic XML-style tag** (`<task-input>`, `<step-context name="...">`, `<track-context>`, `<chat>`, …) so the receiving agent can tell fixed prompt text from interpolated content. Do not hard-wrap prompt prose — see the reference for the canonical tag table, the full variable catalog, and prompt-formatting rules.
 
@@ -371,7 +371,8 @@ When the user describes what they want, follow this:
 14. **"Talk to me first, then run unattended"** (interview / plan approval / human gate) → A tmux step that publishes a decision record via `update_step_context` and self-advances via `advance_task`, followed by headless steps templating that step's context — see `references/workflow-building.md` → The human-gated step
 15. **"Carry standing context across a stream of related tasks"** (sprint/epic/feature-area context) → Interpolate `{{track.context}}` in step prompts (explicit opt-in, empty for trackless tasks) and optionally write back with `update_track_context` — see `references/workflow-building.md` → Tracks in Workflows
 16. **"Several workflows repeat the same block of prompt text"** (craft guidance, review rules, commit hygiene) → Put the passage in `.sakusen/prompts/<name>.md` (or `~/.sakusen/prompts/` to share across projects) and reference it as `{{prompt.<name>}}`. Keep step-context wiring and scope-policy sentences inline — see `references/workflow-building.md` → Prompt Includes
-17. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
+17. **"Run the same review with two different models"** / "redundant checks in parallel" / "several agents look at the same diff at once" → A `parallel:` group step: branches run concurrently on the one worktree, `require:` sets the join policy, and the group publishes one aggregated `{{steps.<group>.context}}` for a following synthesis step. Branches must be read-only — for concurrent work that WRITES, use child tasks (`create_tasks_and_wait`) instead. See `references/workflow-building.md` → Parallel Groups
+18. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
 
 ## Discovering undocumented fields
 
@@ -391,6 +392,8 @@ This lists every YAML field name the binary will accept. Cross-reference unknown
 - Loop `goto` must reference an earlier step (no forward jumps, no self-reference)
 - Loop steps cannot have `human: true`, and cannot resolve to a tmux-mode agent — use a headless agent on the loop step (or its workflow)
 - Loop ranges cannot overlap
+- A `parallel:` group step sets no `prompt`/`loop`/`human`/`summarization_strategy`/`summarization_prompt`/`require_context`; its branches set no `parallel`/`loop`/`human` and must be inline mappings. `require:` is `all` (default), `any`, or an integer in `1..len(branches)`
+- Parallel branch names share the step namespace — unique across the whole workflow — and every branch must resolve to a headless agent. A loop `goto` may target a group but not a branch; retry-from-step takes the group name, not a branch name
 - `on_complete` (top-level, or per-workflow override) values: `"commit"`, `"merge"`, `"none"` — moved out of `git:`; `git.on_complete` is now an error
 - Never emit the removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`, `print:`, `tmux:`) — all are hard load errors. See [Removed keys](#removed-keys-hard-load-errors--never-emit-these).
 - `git.branch_template` supports: `{{task_id}}`, `{{task_slug}}`, `{{task.id}}`, `{{task.title}}`, `{{task.slug}}` — `{{prompt.<name>}}` does NOT work here (prompt fields only)

@@ -380,7 +380,9 @@ There is no top-level `prompts:` map and no agent-level prompt — files only. S
 Moved to [workflow-building.md](workflow-building.md) — the single workflow-authoring
 reference. It covers step fields (`description`, `timeout`, `human`, `require_context`,
 summarization strategies), step context flow, execution mode, loops and their validation
-rules, [cross-task references](workflow-building.md#cross-task-references)
+rules, [parallel groups](workflow-building.md#parallel-groups) (the `parallel:` step field —
+concurrent headless branches on one worktree, joined by a `require:` policy into one aggregated
+step context), [cross-task references](workflow-building.md#cross-task-references)
 (`{{tasks.<id>.<field>}}`), and
 [MCP orchestration patterns](workflow-building.md#mcp-orchestration-patterns) including child
 task orchestration (`{{children.*}}`).

@@ -28,6 +28,23 @@ func (db *DB) CompleteTaskStep(taskID int64, stepName string, context *string, e
 	return err
 }
 
+// FailTaskStep marks a step record 'failed' with its exit code and completion
+// time, leaving any context already written on the row intact.
+//
+// 'failed' is the third task_steps status, introduced for PARALLEL BRANCH rows:
+// a group needs to tell "this branch ran and lost" from "this branch never
+// started" so the aggregate can mark the gap and the join can count successes.
+// Ordinary steps deliberately do NOT use it — a failed step leaves its row at
+// 'running', which is what retry-from-step and the TUI already key off.
+func (db *DB) FailTaskStep(taskID int64, stepName string, exitCode int) error {
+	_, err := db.sqlDB.Exec(
+		`UPDATE task_steps SET status = 'failed', exit_code = ?, completed_at = ?
+		 WHERE task_id = ? AND step_name = ?`,
+		exitCode, time.Now(), taskID, stepName,
+	)
+	return err
+}
+
 // UpdateTaskStepContext overwrites the context for a completed step.
 // Used by background summarization to replace the initial last_message context.
 func (db *DB) UpdateTaskStepContext(taskID int64, stepName string, context string) error {

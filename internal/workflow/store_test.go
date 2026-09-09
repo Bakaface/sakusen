@@ -143,9 +143,16 @@ func (f *fakeTaskStore) SetChatSessionID(taskID int64, stepName, sessionID strin
 	existing.SessionID = sessionID
 	return nil
 }
-func (f *fakeTaskStore) HasAnyWaitsOn(taskID int64) (bool, error)              { return false, nil }
-func (f *fakeTaskStore) GetWaitsOnChildren(taskID int64) ([]*task.Task, error) { return nil, nil }
-func (f *fakeTaskStore) RemoveAllTaskWaitsOn(taskID int64) error               { return nil }
+func (f *fakeTaskStore) FailTaskStep(taskID int64, stepName string, exitCode int) error {
+	return nil
+}
+func (f *fakeTaskStore) GetTaskStepRows(taskID int64) (map[string]db.TaskStepRow, error) {
+	return map[string]db.TaskStepRow{}, nil
+}
+func (f *fakeTaskStore) DeleteTaskStepsFrom(taskID int64, stepNames []string) error { return nil }
+func (f *fakeTaskStore) HasAnyWaitsOn(taskID int64) (bool, error)                   { return false, nil }
+func (f *fakeTaskStore) GetWaitsOnChildren(taskID int64) ([]*task.Task, error)      { return nil, nil }
+func (f *fakeTaskStore) RemoveAllTaskWaitsOn(taskID int64) error                    { return nil }
 
 // TestPromoteSingleStepContextToTaskFakeStore demonstrates the taskStore fake
 // seam: promoteSingleStepContextToTask reads a step's captured context and

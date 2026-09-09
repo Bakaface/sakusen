@@ -15,6 +15,7 @@ template variables, loops, tracks, and MCP orchestration patterns.
 - [Execution Mode](#execution-mode)
 - [Step Summarization](#step-summarization)
 - [Loops](#loops)
+- [Parallel Groups](#parallel-groups)
 - [Prompt Formatting](#prompt-formatting)
 - [Wrapping Multi-Line Interpolations](#wrapping-multi-line-interpolations)
 - [Template Variables](#template-variables)
@@ -279,7 +280,11 @@ steps:
     summarization_prompt: "..."              # prompt fed to the summarizer for THIS step
     require_context: false # true = fail the task if summarize_chat context can't be captured
     loop: {...}            # jump back to an earlier step (see Loops)
+    parallel: {...}        # fan out to concurrent branches instead of running a prompt (see Parallel Groups)
 ```
+
+A step sets EITHER `prompt:` OR `parallel:`, never both — a `parallel:` step is a container, not
+a step that runs an agent. See [Parallel Groups](#parallel-groups).
 
 - **`description:`** is pure metadata. It is surfaced through the MCP `list_workflows` tool
   (each step entry carries its own `name` and `description`) so an orchestrating agent can
@@ -480,6 +485,122 @@ steps:
 
 `{{loop.iteration}}` and `{{loop.max_iterations}}` are available inside the loop range. Both
 reset once the loop exits, so they do not leak into post-loop steps.
+
+---
+
+## Parallel Groups
+
+A step carrying `parallel:` instead of `prompt:` is a **group**: it fans out to several branches
+that run **concurrently as headless agents on the same worktree**, joins them, and publishes one
+aggregated step context. Use it for redundant work whose value comes from disagreement —
+independent code reviews by different models is the canonical case.
+
+```yaml
+steps:
+  - name: implementing
+    prompt: "Implement: {{task.input}}"
+
+  - name: review
+    parallel:
+      require: any          # "" | all (default) | any | <positive int, 1..len(branches)>
+      branches:
+        - name: review-opus
+          agent: claude:opus
+          prompt: "{{prompt.review}}"
+        - name: review-codex
+          agent: codex
+          prompt: "{{prompt.review}}"
+          timeout: 20m
+
+  - name: synthesize
+    prompt: |
+      Two independent reviews of the same change follow. Dedupe overlapping findings, rank by
+      severity, and drop anything only one reviewer could verify.
+      <parallel-reviews>
+      {{steps.review.context}}
+      </parallel-reviews>
+```
+
+**Branches must be read-only.** They share the task's single worktree and run at the same time,
+so two branches writing the same files would race. Nothing enforces this — say so in the branch
+prompts. (Isolated per-branch worktrees are a separate, later feature.)
+
+### `require:` — the join policy
+
+| Value | Meaning |
+|---|---|
+| omitted / `all` | Every branch must succeed. The FIRST failure cancels its still-running siblings and fails the task. |
+| `any` | One success is enough. Losing branches are allowed to finish; the task advances. |
+| `<N>` | At least N branches must succeed (1..number of branches). No fail-fast. |
+
+When too few branches succeed, the task fails with an error naming each failed branch and its
+reason (`exit 3`, `timed out after 20m`, `cancelled`) plus a tail of the first failure's log.
+
+### Branch fields
+
+A branch takes `name`, `description`, `agent`, `prompt`, `timeout`, `summarization_strategy` and
+`summarization_prompt` — the ordinary step fields minus the ones that make no sense in a fan-out.
+
+- **Agent cascade:** branch `agent:` → group `agent:` → workflow `agent:` → `default_agent:` →
+  `"claude"`. Every branch must resolve to a **headless** agent; a tmux agent is a load error
+  (the join is synchronous, so a paused branch could never complete).
+- **`timeout:`** falls back to the group's `timeout:` when the branch omits it.
+- **`summarization_strategy:`** defaults to `last_message` for branches (NOT the global
+  `summarize_chat` default). A branch's result text IS the artifact the aggregate is built from;
+  running it through the summarizer would rewrite the review you asked for. Set
+  `summarization_strategy: summarize_chat` explicitly on a branch whose agent streams its
+  reasoning rather than writing a result file.
+- Branch prompts additionally see `{{branch.name}}` and `{{branch.agent}}` — useful for asking a
+  reviewer to sign its findings. Both resolve to `""` outside a branch.
+
+### The aggregate — `{{steps.<group>.context}}`
+
+The group name owns a step context assembling every branch, in config order:
+
+```
+## review-opus (claude:opus)
+
+<review-opus's findings>
+
+## review-codex (codex) (failed: timed out after 20m)
+
+## review-quiet (claude) (no context)
+```
+
+A failed branch is a header with `(failed: <reason>)` and no body; a branch that captured nothing
+is marked `(no context)`. Both are deliberately loud — a synthesis prompt must never mistake a
+missing review for agreement.
+
+**The format is fixed.** If you want a different layout, address the branches individually:
+each branch also publishes `{{steps.<branch>.context}}`, so a prompt can interleave them however
+it likes. Branch names live in the same namespace as step names and must be unique across the
+whole workflow.
+
+### Rules
+
+- A group sets none of `prompt`, `loop`, `human`, `summarization_strategy`, `summarization_prompt`,
+  `require_context` — those belong on a branch.
+- A branch may not contain a nested `parallel:`, a `loop:`, or `human: true`, and must be written
+  as an inline mapping (a bare string is a step *reference*, which only resolves against
+  top-level steps).
+- A loop's `goto:` may target a **group** but not a branch; an `exit_condition` may name either.
+  A loop back over a group re-runs all of its branches.
+- Retry-from-step takes the **group** name; a branch name is rejected. Retrying a group re-runs
+  only the branches that did not complete — completed branches keep their captured context.
+  Retrying from an earlier step re-runs the whole group.
+- Branch agent output goes to a per-branch log (`.sakusen/logs/<task>/branch-<name>.log`), not
+  the unified task log, which records only the `=== parallel <group>: ... ===` markers.
+
+### Parallel group vs. child tasks
+
+A parallel group is for **one task doing several things at once on one branch**: several readers
+of the same diff, whose outputs are combined into one prompt. It costs no extra worktrees,
+branches, or task rows, and the branches cannot write.
+
+Use `create_tasks_and_wait` (see [MCP Orchestration Patterns](#mcp-orchestration-patterns))
+instead when the concurrent work needs to **produce changes** — separate worktrees, separate
+branches, separate merges — or when each unit needs its own multi-step workflow. Their results
+come back as `{{children.summary}}`, the sibling shape of the group aggregate.
 
 ---
 

@@ -35,10 +35,19 @@ type taskStore interface {
 	// Per-step execution tracking (task_steps table).
 	CreateTaskStep(taskID int64, stepName string) error
 	CompleteTaskStep(taskID int64, stepName string, context *string, exitCode int) error
+	// FailTaskStep marks a PARALLEL BRANCH row 'failed' (see parallel.go).
+	// Ordinary steps never use it — they leave a failed row at 'running'.
+	FailTaskStep(taskID int64, stepName string, exitCode int) error
 	UpdateTaskStepContext(taskID int64, stepName string, context string) error
 	GetTaskStepContext(taskID int64, stepName string) (string, error)
 	GetTaskStepContexts(taskID int64, stepNames []string) (map[string]string, error)
 	GetRunningTaskStepContext(taskID int64, stepName string) (string, error)
+	// GetTaskStepRows is how runParallelGroup tells an already-completed branch
+	// (reuse its context, do not re-run) from one that must be launched.
+	GetTaskStepRows(taskID int64) (map[string]db.TaskStepRow, error)
+	// DeleteTaskStepsFrom drops a parallel group's branch rows when a loop
+	// jumps back over the group, so the next iteration re-runs every branch.
+	DeleteTaskStepsFrom(taskID int64, stepNames []string) error
 	// UpdateRunningTaskStepContext and UpdatePausedTmuxStepContext are the two
 	// row-status-specific writers behind PublishManualStepContext (see
 	// stepcontext.go) — the sole caller of both. Nothing outside this package

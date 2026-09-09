@@ -412,6 +412,12 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 		}
 	}
 	if stepIdx < 0 {
+		// A branch is not independently retryable: it is one arm of a group
+		// that owns the join policy and the aggregate context.
+		if group, _, ok := wf.BranchGroup(req.StepName); ok {
+			s.sendError(conn, fmt.Sprintf("step %q is a branch of parallel group %q; retry the group", req.StepName, group.Name))
+			return
+		}
 		s.sendError(conn, fmt.Sprintf("step %q not found in workflow %q", req.StepName, t.Workflow))
 		return
 	}
@@ -433,9 +439,33 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 		return
 	}
 
+	// Rows to drop: every step from stepIdx onward, plus their branch rows.
+	// The ONE exception is the retried step itself when it is a group: its
+	// already-completed branch rows survive. A completed branch row is never
+	// re-run (see internal/workflow/parallel.go), which is precisely what makes
+	// "retry the group" re-run only the branches that failed or were cut short.
+	// A group LATER than stepIdx loses all of its branch rows — its branches
+	// reviewed work that the retry is about to redo, so reusing them would
+	// feed stale reviews into the next pass.
+	rows, rowsErr := s.database.GetTaskStepRows(req.TaskID)
+	if rowsErr != nil {
+		log.Printf("%sWarning: failed to read step rows for retry of task #%d: %v", s.projectLogPrefix(t.ProjectID), req.TaskID, rowsErr)
+	}
 	stepsFromIdx := make([]string, 0, len(wf.Steps)-stepIdx)
-	for _, st := range wf.Steps[stepIdx:] {
+	for i := stepIdx; i < len(wf.Steps); i++ {
+		st := &wf.Steps[i]
 		stepsFromIdx = append(stepsFromIdx, st.Name)
+		if !st.IsParallel() {
+			continue
+		}
+		for _, b := range st.Parallel.Branches {
+			if i == stepIdx {
+				if row, ok := rows[b.Name]; ok && row.Status == "completed" {
+					continue
+				}
+			}
+			stepsFromIdx = append(stepsFromIdx, b.Name)
+		}
 	}
 	if err := s.database.ResetTaskForRetryAtStep(req.TaskID, stepIdx, stepsFromIdx); err != nil {
 		s.sendError(conn, fmt.Sprintf("failed to reset task: %v", err))
@@ -655,10 +685,11 @@ func (s *Server) handleGetTaskSteps(conn net.Conn, req GetTaskStepsRequest) {
 		return
 	}
 
-	details := make([]TaskStepDetail, 0, len(wf.Steps))
-	for _, step := range wf.Steps {
-		d := TaskStepDetail{Name: step.Name, Status: "pending"}
-		if row, ok := rows[step.Name]; ok {
+	// Workflow order, with each parallel group immediately followed by its
+	// branch rows (Parent = group name) so clients get the nesting explicitly.
+	detail := func(name, parent, agent string) TaskStepDetail {
+		d := TaskStepDetail{Name: name, Status: "pending", Parent: parent, Agent: agent}
+		if row, ok := rows[name]; ok {
 			d.Status = row.Status
 			d.Context = row.Context
 			if row.CompletedAt.Valid {
@@ -666,7 +697,22 @@ func (s *Server) handleGetTaskSteps(conn net.Conn, req GetTaskStepsRequest) {
 				d.CompletedAt = &ts
 			}
 		}
-		details = append(details, d)
+		return d
+	}
+
+	details := make([]TaskStepDetail, 0, len(wf.Steps))
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if step.IsParallel() {
+			// A group runs no agent of its own, so it reports none.
+			details = append(details, detail(step.Name, "", ""))
+			for j := range step.Parallel.Branches {
+				b := step.Parallel.EffectiveBranch(j, step)
+				details = append(details, detail(b.Name, step.Name, projCfg.StepAgentSlug(wf, &b)))
+			}
+			continue
+		}
+		details = append(details, detail(step.Name, "", projCfg.StepAgentSlug(wf, step)))
 	}
 
 	s.sendMessage(conn, MsgGetTaskSteps, GetTaskStepsResponse{Steps: details})
@@ -731,8 +777,25 @@ func (s *Server) handleUpdateActiveStepContext(conn net.Conn, req UpdateActiveSt
 		return
 	}
 	if activeStep != req.StepName {
-		s.sendError(conn, fmt.Sprintf("step %q is not the active step (current: %q)", req.StepName, activeStep))
-		return
+		// A branch of the currently-running parallel group writes to its OWN
+		// row: the group is the cursor slot, but each branch is a real step
+		// with a running row and its own {{steps.<branch>.context}}.
+		if !s.branchOfActiveGroup(t, pc, activeStep, req.StepName) {
+			s.sendError(conn, fmt.Sprintf("step %q is not the active step (current: %q)", req.StepName, activeStep))
+			return
+		}
+		// A branch is always mid-run when it writes: branches are headless and
+		// a group never pauses, so the target is its RUNNING row.
+		pausedTmux = false
+	} else if wf := pc.cfg.GetWorkflow(t.Workflow); wf != nil {
+		// The group row holds the engine-assembled aggregate; a manual write
+		// there would be silently overwritten at the join.
+		for i := range wf.Steps {
+			if wf.Steps[i].Name == req.StepName && wf.Steps[i].IsParallel() {
+				s.sendError(conn, fmt.Sprintf("%q is a parallel group; branches publish their own context", req.StepName))
+				return
+			}
+		}
 	}
 
 	rows, err := pc.engine.PublishManualStepContext(req.TaskID, req.StepName, req.Context, mode == "append", pausedTmux)
@@ -749,6 +812,21 @@ func (s *Server) handleUpdateActiveStepContext(conn net.Conn, req UpdateActiveSt
 
 	s.broadcastTaskUpdate(req.TaskID)
 	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated (%s)", req.StepName, mode)})
+}
+
+// branchOfActiveGroup reports whether stepName is a branch of the parallel
+// group the task is currently sitting on (activeStep). Branches of a group
+// that is not the active step are rejected like any other non-active step.
+func (s *Server) branchOfActiveGroup(t *task.Task, pc *projectContext, activeStep, stepName string) bool {
+	if t.Workflow == "" {
+		return false
+	}
+	wf := pc.cfg.GetWorkflow(t.Workflow)
+	if wf == nil {
+		return false
+	}
+	group, _, ok := wf.BranchGroup(stepName)
+	return ok && group.Name == activeStep
 }
 
 // refineTaskTitle resolves a freshly-created task's final title, slug, and

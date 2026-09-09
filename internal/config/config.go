@@ -779,6 +779,18 @@ func resolveWorkflowSteps(wf *WorkflowConfig, globalPool *globalWorkflowPool) er
 			}
 			seen[s.Name] = true
 		}
+		// Branch names share the step namespace (see WorkflowConfig.AllStepNames).
+		if s.IsParallel() {
+			for _, b := range s.Parallel.Branches {
+				if b.Name == "" {
+					continue
+				}
+				if seen[b.Name] {
+					return fmt.Errorf("workflows: workflow %q has a duplicate step %q", wf.Name, b.Name)
+				}
+				seen[b.Name] = true
+			}
+		}
 		out = append(out, s)
 	}
 	wf.Steps = out

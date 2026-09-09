@@ -389,6 +389,13 @@ func (c *Config) summarizerInvocation(agentSlug, command string) (SummarizerInvo
 // unresolvable slug reports false (the step will fail with a clear error at
 // run time anyway).
 func (c *Config) StepIsTmux(wf *WorkflowConfig, step *StepConfig) bool {
+	// A parallel group runs no agent of its own, and its branches are
+	// validated headless — so it is never a tmux step, even when the cascade
+	// the group itself would fall back to (workflow / default_agent) is
+	// tmux-mode.
+	if step.IsParallel() {
+		return false
+	}
 	_, agent, err := c.StepAgent(wf, step)
 	if err != nil {
 		return false
@@ -614,7 +621,16 @@ func collectAgentRefs(cfg *Config) []agentRef {
 		wf := &cfg.Workflows[i]
 		add(wf.Agent, fmt.Sprintf("workflow %q", wf.Name))
 		for j := range wf.Steps {
-			add(wf.Steps[j].Agent, fmt.Sprintf("workflow %q step %q", wf.Name, wf.Steps[j].Name))
+			step := &wf.Steps[j]
+			add(step.Agent, fmt.Sprintf("workflow %q step %q", wf.Name, step.Name))
+			if !step.IsParallel() {
+				continue
+			}
+			// Branch refs count too, so a composed ref used ONLY inside a
+			// branch still gets its registry entry materialized.
+			for _, b := range step.Parallel.Branches {
+				add(b.Agent, fmt.Sprintf("workflow %q step %q branch %q", wf.Name, step.Name, b.Name))
+			}
 		}
 	}
 	aliases := make([]string, 0, len(cfg.AgentAliases))
@@ -846,6 +862,22 @@ func validateAgentRefs(cfg *Config) error {
 			if step.Loop != nil {
 				if agent, ok := cfg.ResolveAgent(cfg.StepAgentSlug(wf, step)); ok && agent.IsTmux() {
 					return fmt.Errorf("workflow %q step %q: loop steps cannot use a tmux-mode agent", wf.Name, step.Name)
+				}
+			}
+			// Parallel branches run concurrently and are joined synchronously,
+			// so they must be headless for the same reason loop steps are.
+			if step.IsParallel() {
+				for k := range step.Parallel.Branches {
+					declared := step.Parallel.Branches[k].Agent
+					if err := checkRef(declared, fmt.Sprintf("workflow %q step %q branch %q", wf.Name, step.Name, step.Parallel.Branches[k].Name)); err != nil {
+						return err
+					}
+					eff := step.Parallel.EffectiveBranch(k, step)
+					slug := cfg.StepAgentSlug(wf, &eff)
+					if agent, ok := cfg.ResolveAgent(slug); ok && agent.IsTmux() {
+						return fmt.Errorf("workflow %q step %q branch %q: parallel branches cannot use a tmux-mode agent %q",
+							wf.Name, step.Name, eff.Name, slug)
+					}
 				}
 			}
 		}

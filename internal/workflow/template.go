@@ -58,6 +58,14 @@ type TrackVars struct {
 	OwnContext string // leaf track's own context only
 }
 
+// BranchVars identifies the parallel branch a prompt is being resolved for,
+// exposed as {{branch.name}} and {{branch.agent}}. The zero value (any
+// non-branch resolution) renders both as "".
+type BranchVars struct {
+	Name  string
+	Agent string // resolved agent slug, not the authored ref
+}
+
 // ConflictVars exposes the merge-conflict resolver's working set via
 // {{conflict.files}}. The zero value (any non-resolver context) renders "".
 type ConflictVars struct {
@@ -72,6 +80,8 @@ type TemplateContext struct {
 	Children ChildrenVars
 	Track    TrackVars
 	Conflict ConflictVars
+	// Branch is set only while resolving a parallel branch's prompt.
+	Branch BranchVars
 	// TaskLookup resolves a task by ID for {{tasks.<id>.<field>}} references.
 	// When nil, such references resolve to "".
 	TaskLookup func(int64) (*task.Task, error)
@@ -81,7 +91,10 @@ type TemplateContext struct {
 	PromptDirs []string
 }
 
-var templatePattern = regexp.MustCompile(`\{\{([a-zA-Z0-9_.]+)\}\}`)
+// templatePattern matches a {{dotted.path}} placeholder. The character class
+// includes "-" because step names are kebab-case by convention, so
+// {{steps.final-planning.context}} must resolve like its snake_case twin.
+var templatePattern = regexp.MustCompile(`\{\{([a-zA-Z0-9_.-]+)\}\}`)
 
 // supportedTaskRefFields lists the fields valid in {{tasks.<id>.<field>}} refs.
 var supportedTaskRefFields = []string{"title", "branch", "input", "context"}
@@ -141,6 +154,10 @@ func resolveVars(tmpl string, ctx *TemplateContext) string {
 			return ctx.Git.TargetBranch
 		case key == "git.repo_root":
 			return ctx.Git.RepoRoot
+		case key == "branch.name":
+			return ctx.Branch.Name
+		case key == "branch.agent":
+			return ctx.Branch.Agent
 		case key == "conflict.files":
 			return formatConflictFiles(ctx.Conflict.Files)
 		case key == "track.id":
@@ -299,6 +316,50 @@ func formatChildrenSummary(vars ChildrenVars) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// ParallelBranchResult is one branch's contribution to a group's aggregate
+// step context. Exactly one of Context / FailReason is meaningful: a branch
+// that failed has no body, only a reason.
+type ParallelBranchResult struct {
+	Name       string // branch name
+	Agent      string // resolved agent slug
+	Context    string // captured step context ("" when none was captured)
+	FailReason string // non-empty when the branch did not complete
+}
+
+// FormatParallelAggregate renders a parallel group's aggregate step context —
+// the value {{steps.<group>.context}} resolves to. The format is FIXED (there
+// is no template knob; per-branch {{steps.<branch>.context}} refs are the
+// escape hatch for custom layouts) and modeled on formatChildrenSummary:
+//
+//	## review-opus (claude:opus)
+//
+//	<branch context verbatim>
+//
+//	## review-codex (codex) (failed: timed out after 30m)
+//
+//	## review-none (claude) (no context)
+//
+// Branches appear in config order. A failed branch renders its header with the
+// reason and NO body, so a consumer prompt sees the gap loudly instead of
+// mistaking an absence for agreement. A branch that captured nothing (strategy
+// "none", or an empty result) is marked "(no context)" for the same reason.
+func FormatParallelAggregate(entries []ParallelBranchResult) string {
+	var sections []string
+	for _, e := range entries {
+		header := fmt.Sprintf("## %s (%s)", e.Name, e.Agent)
+		body := strings.TrimSpace(e.Context)
+		switch {
+		case e.FailReason != "":
+			sections = append(sections, header+" (failed: "+e.FailReason+")")
+		case body == "":
+			sections = append(sections, header+" (no context)")
+		default:
+			sections = append(sections, header+"\n\n"+body)
+		}
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 // resolveTaskRef handles the tasks.<id>.<field> placeholder form. Malformed

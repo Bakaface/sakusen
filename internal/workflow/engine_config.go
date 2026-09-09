@@ -95,6 +95,12 @@ func (e *engineConfig) StepAgent(wf *config.WorkflowConfig, step *config.StepCon
 	return e.full.StepAgent(wf, step)
 }
 
+// StepAgentSlug resolves only the agent SLUG for a step, without requiring the
+// record to exist. See config.Config.StepAgentSlug.
+func (e *engineConfig) StepAgentSlug(wf *config.WorkflowConfig, step *config.StepConfig) string {
+	return e.full.StepAgentSlug(wf, step)
+}
+
 // MergeConflictAgent resolves the headless agent that fixes merge conflicts
 // (merge_conflicts.agent → workflow.agent → default_agent → "claude").
 // See config.Config.MergeConflictAgentFor.

@@ -23,7 +23,7 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 | `schema.sql` | Canonical table definitions applied to fresh databases |
 | `project.go` | Project upsert/lookup by path, name, id; default worktree flag |
 | `task.go` | Task create/claim/query/update/reset/delete, commit tracking, dependency edges (`task_dependencies`, BFS cycle check) |
-| `task_steps.go` | Per-step results (`task_steps`): create/complete/context read+overwrite/delete |
+| `task_steps.go` | Per-step results (`task_steps`): create/complete/fail/context read+overwrite/delete |
 | `task_waits_on.go` | Parent → child suspension edges (`task_waits_on`) |
 | `track.go` | Tracks: create (slug/scope/depth validation), lookup by slug with project-shadows-global, chain, context/description updates |
 | `chat.go` | `chats` rows linking task steps to agent chat sessions (used for resume) |
@@ -31,6 +31,7 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 
 ## Conventions
 
+- `task_steps.status` has THREE values: `running`, `completed`, and `failed`. `failed` (`FailTaskStep`) is written only for PARALLEL BRANCH rows, where the join has to tell "ran and lost" from "never started". An ordinary step that fails still leaves its row at `running` — retry-from-step and the TUI key off that, and changing it would be a behavior change well beyond parallel groups.
 - Reset variants differ in what they keep: `ResetTaskForRetry` clears step index; `ResetTaskForRetryFromStep` keeps it; `ResetTaskForContinue` also swaps workflow and input. All delete `task_steps`.
 - Images and commit hashes are JSON arrays in TEXT columns; nullable fields scan through `sql.NullString` / `sql.NullInt64` / `sql.NullTime`.
 - `blocked_by` is computed from `task_dependencies`, never stored on the task row.

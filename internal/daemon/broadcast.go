@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/agent"
+	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
 	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/Bakaface/sakusen/internal/tmux"
 	"github.com/Bakaface/sakusen/internal/workflow"
@@ -369,6 +371,33 @@ func effectiveStatus(status task.Status, stepHuman bool) task.Status {
 	return task.StatusRunning
 }
 
+// branchStatuses maps every parallel-branch name in wf to its persisted status,
+// defaulting to "pending" for a branch with no row yet. Groups themselves are
+// not included — their status is the ordinary step row.
+func branchStatuses(wf *config.WorkflowConfig, rows map[string]db.TaskStepRow) map[string]string {
+	if wf == nil {
+		return nil
+	}
+	out := make(map[string]string)
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if !step.IsParallel() {
+			continue
+		}
+		for _, b := range step.Parallel.Branches {
+			status := "pending"
+			if row, ok := rows[b.Name]; ok {
+				status = row.Status
+			}
+			out[b.Name] = status
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 	info := TaskInfoFromTask(t)
 
@@ -398,9 +427,28 @@ func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 	// project config. We intentionally do not trigger a load here — the
 	// serializer must not issue DB queries; missing cache simply means these
 	// optional fields stay at their defaults.
-	if info.Worktree || t.Status == task.StatusTmux {
+	// Workflow shape peeked once under the projects lock; any DB work it
+	// implies happens after the lock is released. Holding the *WorkflowConfig
+	// past the unlock is safe: a config reload builds a whole new Config
+	// rather than mutating this one, so the worst case is a snapshot one
+	// reload old — the same staleness the fields below already accept.
+	var wfSnapshot *config.WorkflowConfig
+	hasParallel := false
+
+	if info.Worktree || t.Status == task.StatusTmux || t.Workflow != "" {
 		s.projectsMu.RLock()
 		if pc, ok := s.projects[t.ProjectID]; ok {
+			if t.Workflow != "" {
+				if wf := pc.cfg.GetWorkflow(t.Workflow); wf != nil {
+					wfSnapshot = wf
+					for i := range wf.Steps {
+						if wf.Steps[i].IsParallel() {
+							hasParallel = true
+							break
+						}
+					}
+				}
+			}
 			if info.TargetBranch == "" && info.Worktree && pc.cfg.Git.BaseBranch != "" {
 				info.TargetBranch = pc.cfg.Git.BaseBranch
 			}
@@ -419,6 +467,18 @@ func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 			}
 		}
 		s.projectsMu.RUnlock()
+	}
+
+	// Per-branch progress for workflows containing a parallel group. Read
+	// OUTSIDE the projectsMu lock above (the workflow shape is all that lock
+	// was needed for) because this issues a DB query, which must never happen
+	// while a shared lock is held. Gated on hasParallel so the common case —
+	// every workflow without a group — costs nothing: taskToInfo runs once per
+	// task on every list refresh.
+	if hasParallel {
+		if rows, err := s.database.GetTaskStepRows(t.ID); err == nil {
+			info.BranchStatus = branchStatuses(wfSnapshot, rows)
+		}
 	}
 
 	// tmux_direct tasks have no workflow step but are inherently interactive

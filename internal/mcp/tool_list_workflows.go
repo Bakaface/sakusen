@@ -16,7 +16,7 @@ type ListWorkflowsArgs struct {
 func registerListWorkflows(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"list_workflows",
-		mcp.WithDescription("List the workflows configured for a sakusen project. Returns a flat 'workflows' list; pass any name to create_task's workflow argument. Each entry includes name, description (human-readable metadata), any pinned New Task fields (input/worktree/branch/checkout/target — a non-empty 'input' means the workflow supplies the task input itself), fully_spec, first_step_is_tmux, and a per-step summary (each step carries its own name and description)."),
+		mcp.WithDescription("List the workflows configured for a sakusen project. Returns a flat 'workflows' list; pass any name to create_task's workflow argument. Each entry includes name, description (human-readable metadata), any pinned New Task fields (input/worktree/branch/checkout/target — a non-empty 'input' means the workflow supplies the task input itself), fully_spec, first_step_is_tmux, and a per-step summary (each step carries its own name and description). A step carrying a 'parallel' object is a parallel GROUP: it runs its 'parallel.branches' concurrently and succeeds per 'parallel.require' (\"all\" | \"any\" | \"<N>\"); each branch lists its own name and resolved agent."),
 		mcp.WithInputSchema[ListWorkflowsArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args ListWorkflowsArgs) (*mcp.CallToolResult, error) {

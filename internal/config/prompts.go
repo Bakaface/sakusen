@@ -142,6 +142,18 @@ func validatePromptIncludes(cfg *Config, dirs []string) error {
 			if err := check(s.SummarizationPrompt, fmt.Sprintf("workflow %q: step %q: summarization_prompt", wf.Name, s.Name)); err != nil {
 				return err
 			}
+			if !s.IsParallel() {
+				continue
+			}
+			for k := range s.Parallel.Branches {
+				b := &s.Parallel.Branches[k]
+				if err := check(b.Prompt, fmt.Sprintf("workflow %q: step %q: branch %q: prompt", wf.Name, s.Name, b.Name)); err != nil {
+					return err
+				}
+				if err := check(b.SummarizationPrompt, fmt.Sprintf("workflow %q: step %q: branch %q: summarization_prompt", wf.Name, s.Name, b.Name)); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
