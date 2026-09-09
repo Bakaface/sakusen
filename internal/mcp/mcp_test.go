@@ -600,8 +600,8 @@ func TestMCP_CreateTask_RejectsCwdOutsideRepo(t *testing.T) {
 	if !res.IsError {
 		t.Fatalf("expected tool error for non-git cwd, got success: %s", textOf(res))
 	}
-	if !strings.Contains(textOf(res), "not inside a git repository") {
-		t.Errorf("error should mention missing git repo; got %q", textOf(res))
+	if !strings.Contains(textOf(res), "neither inside a git repository nor a directory containing .sakusen.yml") {
+		t.Errorf("error should mention the missing repo and marker; got %q", textOf(res))
 	}
 
 	for _, msgType := range fake.requestTypes() {

@@ -18,7 +18,7 @@ type CreateTrackArgs struct {
 	Workflow    string `json:"workflow,omitempty" jsonschema:"Workflow to run for tasks attached to this track when they don't specify one explicitly. May reference a namespaced track workflow like '<slug>:<name>' from .sakusen/tracks/<slug>/workflows/."`
 	Description string `json:"description,omitempty" jsonschema:"A stable one-liner stating what this track is for. Routing agents read it from list_tracks to pick a track for a new task, so state the scope, not the current state of work. Distinct from context: it is never injected into agent prompts and does not accumulate."`
 	Context     string `json:"context,omitempty" jsonschema:"Initial context seed. WARNING: track context flows verbatim into the prompts of every future task attached to this track (or its children) — treat it as a persistent cross-task prompt surface."`
-	ProjectPath string `json:"project_path,omitempty" jsonschema:"Project repo root. Required for scope 'project'; defaults to the git toplevel of the MCP process's cwd."`
+	ProjectPath string `json:"project_path,omitempty" jsonschema:"Project repo root. Required for scope 'project'; defaults to the nearest ancestor of the MCP process's cwd containing .sakusen.yml (not crossing the git toplevel), else the git toplevel."`
 }
 
 func registerCreateTrack(s *server.MCPServer, c *client.Client) {

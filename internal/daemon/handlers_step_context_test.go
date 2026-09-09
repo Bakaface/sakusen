@@ -355,3 +355,49 @@ func TestHandleUpdateActiveStepContext_NoActiveStep(t *testing.T) {
 		t.Errorf("error message should mention no active step, got %q", resp.Message)
 	}
 }
+
+// TestHandleUpdateActiveStepContext_StaleWorkflowName is the regression test
+// for task #415: the project's `workflows:` list was edited while the task sat
+// at its tmux gate, so the task's stored workflow name stopped resolving.
+// GetWorkflow silently substituted the built-in single-step default, and the
+// paused-step arithmetic then resolved to that default's only step —
+// reporting the WRONG step as active ("implementing") instead of admitting it
+// could not resolve one. The strict lookup must yield "no active step".
+func TestHandleUpdateActiveStepContext_StaleWorkflowName(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	tk := createPausedTmuxStep(t, s, projID, "researching")
+
+	// Simulate the config edit: the cached project config no longer defines
+	// the workflow the task was created with.
+	s.projectsMu.Lock()
+	pc := s.projects[projID]
+	staleCfg := &config.Config{Workflows: []config.WorkflowConfig{{
+		Name:  "some-other-workflow",
+		Steps: []config.StepConfig{{Name: "implementing"}},
+	}}}
+	pc.cfg = staleCfg
+	pc.engine = workflow.NewEngine(staleCfg, s.database, s.notifier, pc.repoRoot)
+	s.projectsMu.Unlock()
+
+	clientConn, serverConn := pipeForHandler(t)
+	go s.handleUpdateActiveStepContext(serverConn, UpdateActiveStepContextRequest{
+		TaskID:   tk.ID,
+		StepName: "researching",
+		Context:  "the decision record",
+	})
+
+	msg := readOneMessage(t, clientConn)
+	if msg.Type != MsgError {
+		t.Fatalf("expected MsgError, got %s: %s", msg.Type, string(msg.Payload))
+	}
+	var resp ErrorResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if !strings.Contains(resp.Message, "has no active step") {
+		t.Errorf("expected a no-active-step error, got %q", resp.Message)
+	}
+	if strings.Contains(resp.Message, "implementing") {
+		t.Errorf("error must not name a step from the fallback default workflow, got %q", resp.Message)
+	}
+}

@@ -1555,3 +1555,31 @@ func TestLoopExitOnMarker(t *testing.T) {
 		}
 	})
 }
+
+// TestRunTask_UnresolvableWorkflowFails is the regression test for task #415:
+// a task whose stored workflow name no longer appears in the project config
+// (the `workflows:` list was edited mid-flight) used to silently fall back to
+// the built-in single-step default workflow. That re-shaped the running task —
+// wrong step names, a cursor pointing past the only step — and finished it on
+// the spot instead of running the pipeline the user asked for. RunTask must
+// refuse to run rather than substitute a different workflow.
+func TestRunTask_UnresolvableWorkflowFails(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Workflows: []config.WorkflowConfig{{
+			Name:  "sensible-auto",
+			Steps: []config.StepConfig{{Name: "researching"}},
+		}},
+	}
+	engine := NewEngine(cfg, (*db.DB)(nil), nil, dir)
+
+	taskObj := &task.Task{ID: 415, Workflow: "sensible", WorktreePath: dir}
+
+	err := engine.RunTask(context.Background(), taskObj, nil)
+	if err == nil {
+		t.Fatal("expected RunTask to fail on an unresolvable workflow name")
+	}
+	if !strings.Contains(err.Error(), `"sensible"`) {
+		t.Errorf("error should name the unresolvable workflow, got %q", err.Error())
+	}
+}

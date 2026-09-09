@@ -453,7 +453,7 @@ func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 				info.TargetBranch = pc.cfg.Git.BaseBranch
 			}
 			if t.Status == task.StatusTmux && t.Workflow != "" {
-				if wf := pc.cfg.GetWorkflow(t.Workflow); wf != nil {
+				if wf := pc.cfg.GetTaskWorkflow(t.Workflow); wf != nil {
 					// The engine clears CurrentStep before pausing, so the
 					// step that owns the tmux session is the paused step;
 					// see workflow.PausedStep for the cursor invariant.

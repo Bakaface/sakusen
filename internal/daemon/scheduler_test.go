@@ -11,8 +11,16 @@ import (
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
+// newSchedulerTestServer builds a server whose project carries a real
+// on-disk .sakusen.yml. That file — not the server's fallback cfg — is what
+// createTaskFromRequest validates a fire's workflow against, and it mirrors
+// production: a periodic definition in the DB always has a matching entry in
+// the project config (reconcile soft-deletes the ones that don't). HOME/XDG
+// are isolated so the user's real global config can't leak in.
 func newSchedulerTestServer(t *testing.T) (*Server, *db.DB, *db.Project) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -35,6 +43,19 @@ func newSchedulerTestServer(t *testing.T) (*Server, *db.DB, *db.Project) {
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	writeProjectConfig(t, proj.Path, `workflows:
+  - name: default
+    steps:
+      - name: impl
+        prompt: "do it"
+periodic:
+  - name: nightly
+    cadence: "@every 5m"
+    input: "the input"
+    steps:
+      - name: run
+        prompt: "{{task.input}}"
+`)
 	return s, database, proj
 }
 

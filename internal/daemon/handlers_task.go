@@ -137,15 +137,19 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	}
 
 	// Workflow precedence: explicit request > track's workflow field >
-	// project default. When the name came FROM the track, validate it resolves
-	// (GetWorkflow silently falls back to the default workflow, so it cannot
-	// validate); explicit req.Workflow keeps today's silent-fallback behavior.
+	// project default. Every named source is validated up front with the
+	// strict lookup — GetWorkflow silently falls back to the built-in
+	// single-step default, so a name that doesn't resolve would create a task
+	// whose stored workflow drives a pipeline nobody asked for. An empty name
+	// is the project default and needs no check.
 	workflowName := req.Workflow
 	if workflowName == "" && tr != nil && tr.Workflow != "" {
 		workflowName = tr.Workflow
 		if projCfg.GetTaskWorkflow(workflowName) == nil {
 			return nil, "", fmt.Errorf("track %q references unknown workflow %q", tr.Slug, workflowName)
 		}
+	} else if workflowName != "" && projCfg.GetTaskWorkflow(workflowName) == nil {
+		return nil, "", fmt.Errorf("unknown workflow %q for project %s (check the `workflows:` list in .sakusen.yml)", workflowName, proj.Path)
 	}
 
 	wf := projCfg.GetWorkflow(workflowName)
@@ -399,7 +403,7 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 		s.sendError(conn, fmt.Sprintf("failed to get project context: %v", err))
 		return
 	}
-	wf := pc.cfg.GetWorkflow(t.Workflow)
+	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
 	if wf == nil {
 		s.sendError(conn, fmt.Sprintf("workflow %q not found", t.Workflow))
 		return
@@ -673,7 +677,7 @@ func (s *Server) handleGetTaskSteps(conn net.Conn, req GetTaskStepsRequest) {
 		projCfg = pc.cfg
 	}
 
-	wf := projCfg.GetWorkflow(t.Workflow)
+	wf := projCfg.GetTaskWorkflow(t.Workflow)
 	if wf == nil {
 		s.sendMessage(conn, MsgGetTaskSteps, GetTaskStepsResponse{Steps: nil})
 		return

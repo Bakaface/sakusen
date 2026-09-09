@@ -25,7 +25,7 @@ func tmuxContinueAction(cfg *config.Config, task *daemon.TaskInfo) string {
 	if cfg == nil || task == nil {
 		return "finalize"
 	}
-	wf := cfg.GetWorkflow(task.Workflow)
+	wf := cfg.GetTaskWorkflow(task.Workflow)
 	// Delegate to workflow.HasMoreSteps — the sanctioned StepIndex
 	// arithmetic (see internal/workflow/cursor.go) — instead of re-deriving
 	// "does this task have steps left" here. daemon.TaskInfo only carries
@@ -127,7 +127,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if task := m.list.Selected(); task != nil {
 			m.view = viewTaskInfo
 			m.taskInfo.SetTask(task)
-			m.taskInfo.SetWorkflow(m.cfg.GetWorkflow(task.Workflow))
+			m.taskInfo.SetWorkflow(m.cfg.GetTaskWorkflow(task.Workflow))
 			return m, nil
 		}
 		return m, nil

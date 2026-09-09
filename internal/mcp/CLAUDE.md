@@ -36,9 +36,12 @@ irrecoverably destructive operations**.
   `update_step_context`'s `step_name` from `$SAKUSEN_STEP`) via `env.go`. Explicit
   arguments always win. This is a convenience only — the daemon's own-task/own-step/
   own-track checks are what make the tools safe, not the caller's honesty.
-- **Project resolution is per-call**: `resolveProjectPath()` in `project.go` falls back to
-  `git rev-parse --show-toplevel` against the caller's cwd when `project_path` is omitted,
-  matching how the TUI resolves projects so tasks land on the same project row.
+- **Project resolution is per-call**: when `project_path` is omitted, `resolveProjectPath()`
+  in `project.go` delegates to `config.FindProjectRoot()` — the nearest ancestor of the
+  caller's cwd holding a `.sakusen.yml`, bounded by the git toplevel (which is itself
+  checked, and is the fallback when no marker is found). The CLI (`config.Load`) and the TUI
+  go through the same helper, so tasks land on the same project row. A `.sakusen.yml` in a
+  subdirectory of a repo therefore owns its own project without an explicit `project_path`.
 - **Daemon connection held for the MCP process lifetime**: `Serve()` connects once at start
   (fails fast if the daemon isn't running) and reuses that `*client.Client`.
 
@@ -47,7 +50,7 @@ irrecoverably destructive operations**.
 | File | Purpose |
 |------|---------|
 | `server.go` | `Serve(cfg)` entry point, tool registration, MCP-result error helper |
-| `project.go` | `resolveProjectPath()` — explicit → cwd → git toplevel |
+| `project.go` | `resolveProjectPath()` — explicit → nearest ancestor `.sakusen.yml` → git toplevel (via `config.FindProjectRoot`) |
 | `env.go` | `resolveParentTaskID` / `resolveTaskID` / `resolveStepName` — explicit arg → engine env var |
 | `tool_create_task.go` | `create_task` tool definition + handler; `jsonResult` helper |
 | `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |

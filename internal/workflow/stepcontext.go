@@ -112,7 +112,7 @@ func (e *Engine) ResolveActiveStep(t *task.Task) (stepName string, pausedTmux bo
 	if t.Status != task.StatusTmux || t.Workflow == "" {
 		return "", false
 	}
-	wf := e.cfg.GetWorkflow(t.Workflow)
+	wf := e.cfg.GetTaskWorkflow(t.Workflow)
 	step, ok := PausedStep(t, wf)
 	if !ok {
 		return "", false

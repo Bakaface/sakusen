@@ -2,11 +2,9 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
-	gitpkg "github.com/Bakaface/sakusen/internal/git"
 	"github.com/Bakaface/sakusen/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -32,35 +30,31 @@ func resolveProjectMode(globalFlag bool) (projectID int64, projectPath string, p
 		return 0, "", "", true, true, 0, ""
 	}
 
-	if _, err := os.Stat(filepath.Join(cwd, ".sakusen.yml")); err != nil {
-		// No .sakusen.yml — check if we're in a git repo to filter by repo name
-		repoRoot, err := gitpkg.GetRepoRoot(cwd)
-		if err != nil {
-			return 0, "", "", true, true, 0, ""
-		}
-		// Must match config.ProjectNameFromPath used by GetOrCreateProject when
-		// the row was inserted; otherwise dot-prefixed dirs (e.g. ".pai") store
-		// as "_pai" but get queried as ".pai" → empty task list.
-		repoName := config.ProjectNameFromPath(repoRoot)
-		return 0, repoRoot, repoName, false, true, 0, ""
+	root, kind, err := config.FindProjectRoot(cwd)
+	if err != nil || kind == config.ProjectRootNone {
+		return 0, "", "", true, true, 0, ""
 	}
 
-	repoRoot, err := gitpkg.GetRepoRoot(cwd)
-	if err != nil {
-		return 0, cwd, "", false, true, 0, ""
+	if kind == config.ProjectRootGitToplevel {
+		// No .sakusen.yml anywhere up to the git toplevel — filter by repo name
+		// instead of registering a project row. The name must match
+		// config.ProjectNameFromPath used by GetOrCreateProject when the row was
+		// inserted; otherwise dot-prefixed dirs (e.g. ".pai") store as "_pai" but
+		// get queried as ".pai" → empty task list.
+		return 0, root, config.ProjectNameFromPath(root), false, true, 0, ""
 	}
 
 	dbPath := cfg.GetDatabasePath("")
 	database, err := db.Open(dbPath)
 	if err != nil {
-		return 0, repoRoot, "", false, true, 0, ""
+		return 0, root, "", false, true, 0, ""
 	}
 	defer database.Close()
 
-	proj, err := database.GetOrCreateProject(repoRoot)
+	proj, err := database.GetOrCreateProject(root)
 	if err != nil {
-		return 0, repoRoot, "", false, true, 0, ""
+		return 0, root, "", false, true, 0, ""
 	}
 
-	return proj.ID, repoRoot, config.ProjectNameFromPath(repoRoot), false, proj.DefaultWorktree, proj.DefaultBranchMode, proj.DefaultWorkflow
+	return proj.ID, root, config.ProjectNameFromPath(root), false, proj.DefaultWorktree, proj.DefaultBranchMode, proj.DefaultWorkflow
 }

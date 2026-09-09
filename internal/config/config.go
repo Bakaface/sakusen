@@ -96,21 +96,32 @@ func loadCommon(cfg *Config) error {
 //  1. Built-in defaults
 //  2. ~/.config/sakusen/config.yaml (global daemon config)
 //  3. ~/.sakusen.yml (global sakusen.yml defaults)
-//  4. ./.sakusen.yml (project config)
+//  4. <project root>/.sakusen.yml (project config, found via FindProjectRoot)
 func Load() (*Config, error) {
 	cfg := defaultConfig()
 	if err := loadCommon(cfg); err != nil {
 		return nil, err
 	}
 
-	// Load project config (.sakusen.yml at repo root)
-	projectPath := getProjectConfigPath()
-	if projectPath != "" {
-		if err := loadProjectConfig(projectPath, cfg); err != nil && !os.IsNotExist(err) {
+	// Load project config (.sakusen.yml at the nearest ancestor of cwd, bounded
+	// by the git toplevel) — the same resolution the TUI and the MCP tools use,
+	// so all three agree on which project row a command targets.
+	cwd, cwdErr := os.Getwd()
+	if cwdErr == nil {
+		root, kind, err := FindProjectRoot(cwd)
+		if err != nil {
 			return nil, err
 		}
-		cfg.ProjectDir = filepath.Dir(projectPath)
-		cfg.ProjectConfigFound = true
+		switch kind {
+		case ProjectRootMarker:
+			if err := loadProjectConfig(filepath.Join(root, ".sakusen.yml"), cfg); err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+			cfg.ProjectDir = root
+			cfg.ProjectConfigFound = true
+		case ProjectRootGitToplevel:
+			cfg.ProjectDir = root
+		}
 	}
 
 	cfg.computePaths()
@@ -988,21 +999,6 @@ func getGlobalSakusenYmlPath() string {
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
-	return ""
-}
-
-func getProjectConfigPath() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-
-	// Look for .sakusen.yml at repo root
-	path := filepath.Join(cwd, ".sakusen.yml")
-	if _, err := os.Stat(path); err == nil {
-		return path
-	}
-
 	return ""
 }
 

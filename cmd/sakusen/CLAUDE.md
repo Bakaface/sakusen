@@ -4,7 +4,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 
 ## Critical Invariants
 
-- **Config required for non-exempt commands** — `PersistentPreRunE` enforces `.sakusen.yml` exists; only daemon subcommands (`start`, `stop`, `status`), `tui`, and completion are exempt via `noProjectRequired` map
+- **Config required for non-exempt commands** — `PersistentPreRunE` enforces a `.sakusen.yml` exists in cwd or any ancestor up to the git toplevel (`config.FindProjectRoot`, shared with the TUI and the MCP server); only daemon subcommands (`start`, `stop`, `status`), `tui`, and completion are exempt via `noProjectRequired` map
 - **Task IDs are `int64`** — parsed from positional args, not strings
 - **`--no-worktree` defaults to false** — tasks get isolated worktrees by default
 
@@ -15,7 +15,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 | `main.go` | Root command, `PersistentPreRunE`, `noProjectRequired` map |
 | `action_runner.go` | `runAction`: opens a client, builds an `action.Ctx`, invokes the verb from `internal/action`, prints the result. Daemon-free verbs (e.g. `validate`) call `action.Run<Verb>` directly |
 | `daemon.go` | `daemon start/stop/status` |
-| `tui.go` | `tui`, `resolveProjectMode()` |
+| `tui.go` | `tui`, `resolveProjectMode()` — global / marker-owned project / git-toplevel name filter, via `config.FindProjectRoot` |
 | `init.go` | `init` — scaffolds `.sakusen.yml` and agent scripts under `.sakusen/agents/` from the embedded `scaffold/` FS; never overwrites |
 | `validate.go` | `validate [path]` — surfaces config errors itself (pre-run suppresses the generic load error for this command) |
 | `mcp.go` | `mcp` — MCP server over stdio (`internal/mcp`) |
@@ -32,6 +32,6 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 
 ## Conventions
 
-- `PersistentPreRunE` loads config into the package-level `cfg`, then requires `.sakusen.yml` unless the command is in `noProjectRequired`.
+- `PersistentPreRunE` loads config into the package-level `cfg`, then requires `.sakusen.yml` (in cwd or an ancestor below the git toplevel) unless the command is in `noProjectRequired`.
 - Most commands talk to the daemon through `client.Client`; `cleanup` and `tui` open the DB directly, and `tasks` falls back to the DB when the daemon is down.
 - `create`: `--target` overrides `git.base_branch`; `--checkout` reuses an existing branch and is mutually exclusive with `--branch`.
