@@ -239,9 +239,23 @@ type GetTaskStepsRequest struct {
 
 // TaskStepDetail is the per-step state returned to clients. Steps that exist
 // in the workflow but have no DB row yet are included with Status == "pending".
+//
+// Parallel groups flatten into this list: the group row is emitted first,
+// immediately followed by its branch rows, each carrying Parent = the group
+// name. Clients therefore get the nesting explicitly and never have to
+// re-derive it from the workflow config.
 type TaskStepDetail struct {
-	Name        string     `json:"name"`
-	Status      string     `json:"status"` // "pending" | "running" | "completed"
+	Name string `json:"name"`
+	// Status is "pending" | "running" | "completed" | "failed". "failed" is
+	// only ever set on a parallel BRANCH row — an ordinary step that fails
+	// leaves its row at "running" (see internal/db/CLAUDE.md).
+	Status string `json:"status"`
+	// Parent names the parallel group this row is a branch of. Empty for
+	// top-level steps (including the groups themselves).
+	Parent string `json:"parent,omitempty"`
+	// Agent is the resolved agent slug for this step or branch (the full
+	// step → workflow → default_agent cascade), filled for every row.
+	Agent       string     `json:"agent,omitempty"`
 	Context     string     `json:"context,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
@@ -286,6 +300,17 @@ type WorkflowStepSummary struct {
 	Tmux        bool   `json:"tmux,omitempty"`  // resolved agent runs in tmux mode
 	Human       bool   `json:"human,omitempty"`
 	Loop        bool   `json:"loop,omitempty"`
+	// Parallel is set when this step is a parallel group; its branches are
+	// nested here rather than flattened into the parent list, because a group
+	// occupies exactly one workflow step slot.
+	Parallel *ParallelStepSummary `json:"parallel,omitempty"`
+}
+
+// ParallelStepSummary projects a `parallel:` group for ListWorkflows: the join
+// policy and the branches that run under it, each with its resolved agent.
+type ParallelStepSummary struct {
+	Require  string                `json:"require"` // "all" | "any" | "<N>"
+	Branches []WorkflowStepSummary `json:"branches"`
 }
 
 // WorkflowSummary describes a single workflow available in a project. It
@@ -583,8 +608,14 @@ type TaskInfo struct {
 	// Used by the TUI to surface the "real" underlying state of a tmux task —
 	// human steps render as awaiting-approval with a [wip] postfix, non-human
 	// tmux steps render as running with a [T] postfix.
-	StepHuman  bool      `json:"step_human,omitempty"`
-	LatestChat *ChatInfo `json:"latest_chat,omitempty"`
+	StepHuman bool `json:"step_human,omitempty"`
+	// BranchStatus maps parallel-branch name → "pending"|"running"|"completed"|
+	// "failed" for tasks whose workflow contains at least one parallel group.
+	// Lets clients render per-branch progress (and the group's K/N badge)
+	// straight off a task refresh, with no extra round trip. Absent for
+	// workflows with no group.
+	BranchStatus map[string]string `json:"branch_status,omitempty"`
+	LatestChat   *ChatInfo         `json:"latest_chat,omitempty"`
 	// PeriodicID is set when the task was materialized by a periodic definition.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
 }

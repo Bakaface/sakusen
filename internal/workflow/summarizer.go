@@ -195,7 +195,9 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 			logFn(format, args...)
 		}
 	}
-	// Collect step names
+	// Collect step names. TOP-LEVEL ONLY, deliberately: a parallel group's row
+	// already holds every branch's context (the aggregate), so adding branch
+	// rows here would feed the summarizer each review twice.
 	var stepNames []string
 	for _, s := range wf.Steps {
 		stepNames = append(stepNames, s.Name)

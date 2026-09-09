@@ -305,3 +305,51 @@ func TestResolveTemplateConflictFiles(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveTemplateHyphenatedStepName is a regression test for the
+// placeholder character class: step names are kebab-case by convention, so a
+// {{steps.<name>.context}} ref with a hyphen must resolve like any other.
+// Before "-" was added to templatePattern these were left verbatim and shipped
+// to the agent as literal placeholder text.
+func TestResolveTemplateHyphenatedStepName(t *testing.T) {
+	ctx := &TemplateContext{Steps: map[string]string{"final-planning": "THE PLAN"}}
+
+	got, err := ResolveTemplate("plan: {{steps.final-planning.context}}", ctx)
+	if err != nil {
+		t.Fatalf("ResolveTemplate: %v", err)
+	}
+	if got != "plan: THE PLAN" {
+		t.Errorf("got %q, want the hyphenated step context resolved", got)
+	}
+
+	// An unknown hyphenated name still passes through verbatim, like any other
+	// unknown placeholder — only includes are hard errors.
+	got, err = ResolveTemplate("x {{some-unknown-key}} y", ctx)
+	if err != nil {
+		t.Fatalf("ResolveTemplate: %v", err)
+	}
+	if got != "x {{some-unknown-key}} y" {
+		t.Errorf("got %q, want the unknown placeholder left verbatim", got)
+	}
+}
+
+// TestResolveTemplateBranchVars covers {{branch.name}}/{{branch.agent}}: set
+// inside a parallel branch, empty everywhere else.
+func TestResolveTemplateBranchVars(t *testing.T) {
+	inBranch := &TemplateContext{Branch: BranchVars{Name: "review-opus", Agent: "claude:opus"}}
+	got, err := ResolveTemplate("{{branch.name}}/{{branch.agent}}", inBranch)
+	if err != nil {
+		t.Fatalf("ResolveTemplate: %v", err)
+	}
+	if got != "review-opus/claude:opus" {
+		t.Errorf("got %q, want the branch vars resolved", got)
+	}
+
+	got, err = ResolveTemplate("[{{branch.name}}][{{branch.agent}}]", &TemplateContext{})
+	if err != nil {
+		t.Fatalf("ResolveTemplate: %v", err)
+	}
+	if got != "[][]" {
+		t.Errorf("got %q, want empty branch vars outside a branch", got)
+	}
+}

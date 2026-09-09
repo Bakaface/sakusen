@@ -246,9 +246,38 @@ func (v *taskInfoView) renderMetadata() string {
 			if step.Loop != nil {
 				suffix += fmt.Sprintf(" [loop→%s ×%d]", step.Loop.Goto, step.Loop.MaxIterations)
 			}
+			if step.IsParallel() {
+				// K/N stays on the row after completion: how many branches
+				// actually produced a review is the interesting fact, and it
+				// is otherwise invisible once the group's icon turns ✓.
+				suffix += fmt.Sprintf(" [parallel %d/%d, require:%s]",
+					completedBranches(&step, t.BranchStatus), len(step.Parallel.Branches),
+					step.Parallel.EffectiveRequire())
+			}
 
 			b.WriteString(style.Render(fmt.Sprintf("  %s %d. %s%s", icon, i+1, step.Name, suffix)))
 			b.WriteString("\n")
+
+			// Branch sub-rows. The current-step marker above lands on the
+			// group row only; a branch's own state comes from BranchStatus,
+			// which the daemon refreshes on every task update.
+			if !step.IsParallel() {
+				continue
+			}
+			for j := range step.Parallel.Branches {
+				br := step.Parallel.EffectiveBranch(j, &step)
+				status := t.BranchStatus[br.Name]
+				// Explicit (branch or inherited-from-group) agents only, same
+				// rule as the step rows above: this panel has no agent
+				// registry, so it never re-resolves the default cascade.
+				agentSuffix := ""
+				if br.Agent != "" {
+					agentSuffix = fmt.Sprintf(" [agent:%s]", br.Agent)
+				}
+				b.WriteString(branchRowStyle(status).Render(
+					fmt.Sprintf("      %s %s%s", branchIcon(status), br.Name, agentSuffix)))
+				b.WriteString("\n")
+			}
 		}
 	}
 
@@ -271,6 +300,48 @@ func (v *taskInfoView) renderMetadata() string {
 	}
 
 	return b.String()
+}
+
+// completedBranches counts the group's branches whose BranchStatus is
+// "completed" — the K of the K/N badge. A missing entry means the branch has
+// no row yet (pending).
+func completedBranches(group *config.StepConfig, statuses map[string]string) int {
+	n := 0
+	for _, br := range group.Parallel.Branches {
+		if statuses[br.Name] == stepStatusCompleted {
+			n++
+		}
+	}
+	return n
+}
+
+// branchIcon maps a branch status to its sub-row glyph. An unknown/absent
+// status is pending.
+func branchIcon(status string) string {
+	switch status {
+	case stepStatusRunning:
+		return "●"
+	case stepStatusCompleted:
+		return "✓"
+	case stepStatusFailed:
+		return "✗"
+	default:
+		return "○"
+	}
+}
+
+// branchRowStyle colours a branch sub-row to match its glyph.
+func branchRowStyle(status string) lipgloss.Style {
+	switch status {
+	case stepStatusRunning:
+		return stateStyle(task.StatusRunning)
+	case stepStatusCompleted:
+		return stateStyle(task.StatusCompleted)
+	case stepStatusFailed:
+		return stateStyle(task.StatusFailed)
+	default:
+		return dimStyle
+	}
 }
 
 func (v *taskInfoView) ScrollUp() {

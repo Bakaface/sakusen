@@ -166,6 +166,18 @@ func decideSummarizeChat(hasManualContext bool, strategy string) bool {
 // summarizePreviousTmuxStep in summarizer.go is the real capture point for
 // tmux steps, see its doc comment).
 func (e *Engine) captureHeadlessStepContext(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, step config.StepConfig, resultText string, exitCode int, useTmux bool) {
+	// A parallel group's row is ENGINE-OWNED: runParallelGroup already applied
+	// the whole precedence chain per branch and assembled the aggregate, which
+	// arrives here as resultText. Running the chain again would let a manual
+	// write against the group row, or a summarize_chat pass over a log the
+	// group never wrote, replace the aggregate. Store it verbatim.
+	if step.IsParallel() {
+		if err := e.database.CompleteTaskStep(t.ID, step.Name, &resultText, exitCode); err != nil {
+			log.Printf("Warning: failed to complete parallel group step record: %v", err)
+		}
+		return
+	}
+
 	manualContext, hasManualContext, mErr := e.readManualOverride(t.ID, step.Name, false)
 	if mErr != nil {
 		log.Printf("Warning: failed to read running step context for step %q of task #%d: %v", step.Name, t.ID, mErr)

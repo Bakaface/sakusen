@@ -54,7 +54,30 @@ func stepResultFile(worktreePath, stepName string) string {
 // seaming it alone is enough to exercise that logic in-process without a
 // real agent binary.
 type agentRunner interface {
-	runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (exitCode int, resultText, outputTail string, err error)
+	runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string), spawn headlessSpawn) (exitCode int, resultText, outputTail string, err error)
+}
+
+// headlessSpawn overrides the two per-spawn file paths a headless step would
+// otherwise derive from the task alone. The ZERO VALUE means today's defaults
+// (the unified task log, and runner.Process's per-workdir raw capture), which
+// is what every ordinary step passes.
+//
+// Parallel branches must override both: several agents run concurrently in one
+// worktree, and each would otherwise append into the same task.log region (the
+// step markers stepAgentOutput slices on would interleave) and truncate the
+// same raw-capture file on start.
+type headlessSpawn struct {
+	// LogPath replaces the unified task log as the file the agent's header,
+	// echoed prompt, streamed stdout and footer are appended to. The layout is
+	// identical either way, so stepAgentOutput / extractLatestStepRegion work
+	// on it unchanged.
+	LogPath string
+	// OutputFile replaces runner.Process's raw stdout+stderr capture path.
+	OutputFile string
+	// Tag, when non-empty, is inserted after the timestamp of every line
+	// forwarded to outputFn (the live ring buffer the TUI reads), so
+	// concurrently-streaming branches stay attributable: "[14:02:11] [review-opus] ...".
+	Tag string
 }
 
 // realAgentRunner is the production agentRunner: it delegates to
@@ -62,8 +85,8 @@ type agentRunner interface {
 // default runner NewEngine wires up.
 type realAgentRunner struct{}
 
-func (realAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
-	return e.runHeadlessAgent(ctx, t, step, agent, prompt, envVars, outputFn)
+func (realAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string), spawn headlessSpawn) (int, string, string, error) {
+	return e.runHeadlessAgent(ctx, t, step, agent, prompt, envVars, outputFn, spawn)
 }
 
 // runHeadlessAgent executes a step's headless agent command synchronously:
@@ -72,7 +95,7 @@ func (realAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.T
 // streams its stdout into the unified task log, and returns the exit code,
 // result text (from SAKUSEN_RESULT_FILE, stdout-tail fallback), and — on
 // failure — a tail of the step log for diagnostics.
-func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
+func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string), spawn headlessSpawn) (int, string, string, error) {
 	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")
 	if err := os.MkdirAll(sakusenDir, 0755); err != nil {
 		return 1, "", "", fmt.Errorf("failed to create sakusen dir: %w", err)
@@ -91,6 +114,12 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	env["SAKUSEN_RESULT_FILE"] = resultFile
 
 	proc := runner.NewProcess(fmt.Sprintf("%d", t.ID), t.WorktreePath, agent.Command, resultFile)
+	if spawn.OutputFile != "" {
+		if err := os.MkdirAll(filepath.Dir(spawn.OutputFile), 0755); err != nil {
+			return 1, "", "", fmt.Errorf("failed to create output capture dir: %w", err)
+		}
+		proc.OutputFile = spawn.OutputFile
+	}
 
 	// Apply step timeout
 	timeout := e.cfg.GetStepTimeout(step)
@@ -101,7 +130,10 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	// into this single file so the on-disk order matches the chronological order
 	// of events.
 	logPath := ProjectLogPath(e.dataDir, t.ID)
-	if err := os.MkdirAll(ProjectLogsDir(e.dataDir, t.ID), 0755); err != nil {
+	if spawn.LogPath != "" {
+		logPath = spawn.LogPath
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
 		return 1, "", "", fmt.Errorf("failed to create log dir: %w", err)
 	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -129,9 +161,15 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	for _, line := range promptLines {
 		logFile.WriteString(line + "\n")
 	}
-	if outputFn != nil {
-		outputFn(promptLines)
+	// The log file gets untagged lines (its region layout is what
+	// stepAgentOutput parses); only the shared live stream carries the tag.
+	emit := func(lines []string) {
+		if outputFn == nil {
+			return
+		}
+		outputFn(tagLines(lines, spawn.Tag))
 	}
+	emit(promptLines)
 
 	// Compose OutputFunc: write to log file AND call the agent's outputFn
 	var logMu sync.Mutex
@@ -142,9 +180,7 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 		}
 		logMu.Unlock()
 
-		if outputFn != nil {
-			outputFn(lines)
-		}
+		emit(lines)
 	}
 
 	// Set environment on the child process (not the daemon's global env)
@@ -174,9 +210,7 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 				logMu.Lock()
 				logFile.WriteString(footer + "\n")
 				logMu.Unlock()
-				if outputFn != nil {
-					outputFn([]string{footer})
-				}
+				emit([]string{footer})
 
 				var outputTail string
 				if exitCode != 0 {
@@ -189,6 +223,28 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 			}
 		}
 	}
+}
+
+// tagLines inserts "[tag] " after the "[HH:MM:SS] " timestamp prefix of every
+// line, so lines from concurrently-running parallel branches stay attributable
+// in the shared live output stream. An empty tag returns lines unchanged (the
+// slice itself, since ordinary steps never need a copy). Lines that carry no
+// timestamp prefix get the tag prepended.
+func tagLines(lines []string, tag string) []string {
+	if tag == "" {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		if len(line) > 0 && line[0] == '[' {
+			if end := strings.Index(line, "] "); end > 0 {
+				out[i] = line[:end+2] + "[" + tag + "] " + line[end+2:]
+				continue
+			}
+		}
+		out[i] = "[" + tag + "] " + line
+	}
+	return out
 }
 
 // readLastLines reads the last n lines from a file.

@@ -38,7 +38,7 @@ Model (app.go)
 | `list.go` | Task table with custom row rendering, scroll offset, search matching |
 | `detail.go` | Viewport-based log viewer with follow mode, ANSI stripping |
 | `prompt.go` | Dual-field form (textarea + textinput), worktree toggle (`alt+W`), pane cycling (`CyclePane`), image detection |
-| `task_info.go` | Metadata display + workflow step progress (icons: `○`/`●`/`✓`/`✗`) |
+| `task_info.go` | Metadata display + workflow step progress (icons: `○`/`●`/`✓`/`✗`), including parallel-group rows (`[parallel K/N, require:<value>]` badge + indented branch sub-rows fed by `TaskInfo.BranchStatus`) |
 | `artifact_view.go` | Step context viewer (fetches from daemon RPC, not disk) |
 
 ### Update Handlers
@@ -143,6 +143,8 @@ See CLAUDE.md for the general principle. Below are lipgloss/BubbleTea-specific t
 - Detail view: check `contentDirty` before re-wrapping content (performance)
 - Handle `tea.WindowSizeMsg` in every view to recalculate dimensions
 - `promptView` auto-detects image paths from textarea — preserve this behavior
+- Step-list selectors index `m.taskSteps` by cursor position to recover the bare step name, so any filtering of selector items MUST filter `m.taskSteps` the same way. The retry picker does exactly that (`topLevelSteps` drops parallel-branch rows — the daemon rejects retrying a branch); the step-context selector keeps branch rows and only prefixes them with `  └ ` via `stepRowLabel`
+- A parallel group is ONE entry in `wf.Steps`, so `workflow.HasMoreSteps` and the task-list step badge need no group-awareness; the current-step marker belongs on the group row, never on a branch
 
 ## Adjacent Packages
 

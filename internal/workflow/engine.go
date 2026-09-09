@@ -132,6 +132,72 @@ func findStepIndex(steps []config.StepConfig, name string) int {
 	return -1
 }
 
+// appendImagesSection surfaces a task's attached images by appending a pointer
+// section to a resolved prompt — there is no agent-agnostic system-prompt
+// channel to inject them through. A task with no images returns prompt as-is.
+// Shared by ordinary steps and parallel branches so both see the same section.
+func appendImagesSection(prompt string, imageRelPaths []string) string {
+	if len(imageRelPaths) == 0 {
+		return prompt
+	}
+	var sb strings.Builder
+	sb.WriteString(prompt)
+	sb.WriteString("\n\n## Attached Images\n\n")
+	sb.WriteString("The following images were attached to this task. Use your file reading tool to view them:\n\n")
+	for _, imgPath := range imageRelPaths {
+		sb.WriteString("- `" + imgPath + "`\n")
+	}
+	return sb.String()
+}
+
+// stepEnv builds the sakusen env contract exported to a step's agent spawn.
+// stepName is the branch name for a parallel branch, so an agent inside a
+// branch sees SAKUSEN_STEP=<branch> and can address its own step context via
+// the update_step_context MCP tool.
+func (e *Engine) stepEnv(t *task.Task, stepName, agentSlug string) map[string]string {
+	env := map[string]string{
+		"SAKUSEN_TASK_ID":  fmt.Sprintf("%d", t.ID),
+		"SAKUSEN_STEP":     stepName,
+		"SAKUSEN_WORKTREE": t.WorktreePath,
+		"SAKUSEN_PURPOSE":  "step",
+		// SAKUSEN_PROJECT_PATH is the absolute path to the project repo
+		// root (NOT the worktree). MCP servers / scripts spawned inside
+		// the step that need to create child tasks under the same
+		// project use this so they don't accidentally register their
+		// `git rev-parse --show-toplevel` (which in a worktree returns
+		// the worktree path) as a new project row.
+		"SAKUSEN_PROJECT_PATH": e.repoRoot,
+	}
+	if t.TrackID != nil {
+		// Lets agents target "their" track via the update_track MCP tool.
+		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
+	}
+	// The resolved agent slug, so stubs/scripts can tell which agent record a
+	// spawn came from without re-deriving the cascade.
+	env["SAKUSEN_AGENT"] = agentSlug
+	return env
+}
+
+// clearParallelBranchRows deletes the branch rows of every parallel group in
+// the step range [from, to], so a loop-back re-runs those groups in full.
+func (e *Engine) clearParallelBranchRows(t *task.Task, steps []config.StepConfig, from, to int) {
+	var names []string
+	for i := from; i >= 0 && i <= to && i < len(steps); i++ {
+		if !steps[i].IsParallel() {
+			continue
+		}
+		for _, b := range steps[i].Parallel.Branches {
+			names = append(names, b.Name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	if err := e.database.DeleteTaskStepsFrom(t.ID, names); err != nil {
+		log.Printf("Warning: failed to clear parallel branch rows for task #%d before loop-back: %v", t.ID, err)
+	}
+}
+
 // effectiveBaseBranch returns the base branch for a task, checking the task's
 // per-task TargetBranch override first, then falling back to the config's Git.BaseBranch,
 // and finally to "main".
@@ -411,11 +477,11 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	// in earlier iterations (e.g. reviewing's issues feeding back to
 	// implementing on the next pass). Steps that haven't run yet simply
 	// have no DB row and resolve to "".
-	var allStepNames []string
-	for _, s := range steps {
-		allStepNames = append(allStepNames, s.Name)
-	}
-	stepContexts, err := e.database.GetTaskStepContexts(t.ID, allStepNames)
+	//
+	// AllStepNames (not a walk over `steps`) so parallel BRANCH names are in
+	// the snapshot too: they share the step namespace and are addressable as
+	// {{steps.<branch>.context}}.
+	stepContexts, err := e.database.GetTaskStepContexts(t.ID, wf.AllStepNames())
 	if err != nil {
 		log.Printf("Warning: failed to get step contexts: %v", err)
 		stepContexts = make(map[string]string)
@@ -476,6 +542,13 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		}
 	}
 
+	// A parallel group has no prompt and no agent of its own: it fans out to
+	// its branches, each of which resolves its own prompt from a copy of the
+	// context assembled above. See parallel.go.
+	if step.IsParallel() {
+		return e.runParallelGroup(ctx, t, wf, step, tmplCtx, ws, outputFn)
+	}
+
 	// A {{prompt.<name>}} include that can't be read (file deleted since the
 	// config was loaded, bad name) fails the step — shipping a prompt with a
 	// literal placeholder in it would be worse than not running.
@@ -486,18 +559,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		return stepResult{}, promptErr
 	}
 
-	// Surface attached images by appending a pointer section to the prompt —
-	// there is no agent-agnostic system-prompt channel to inject them through.
-	if len(ws.imageRelPaths) > 0 {
-		var sb strings.Builder
-		sb.WriteString(resolvedPrompt)
-		sb.WriteString("\n\n## Attached Images\n\n")
-		sb.WriteString("The following images were attached to this task. Use your file reading tool to view them:\n\n")
-		for _, imgPath := range ws.imageRelPaths {
-			sb.WriteString("- `" + imgPath + "`\n")
-		}
-		resolvedPrompt = sb.String()
-	}
+	resolvedPrompt = appendImagesSection(resolvedPrompt, ws.imageRelPaths)
 
 	// Resolve the agent that runs this step (step.agent → workflow.agent →
 	// default_agent → "claude"). An unresolvable slug fails the step with an
@@ -508,27 +570,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		return stepResult{}, fmt.Errorf("step %q failed: %w", step.Name, agentErr)
 	}
 
-	// Set environment variables
-	env := map[string]string{
-		"SAKUSEN_TASK_ID":  fmt.Sprintf("%d", t.ID),
-		"SAKUSEN_STEP":     step.Name,
-		"SAKUSEN_WORKTREE": t.WorktreePath,
-		"SAKUSEN_PURPOSE":  "step",
-		// SAKUSEN_PROJECT_PATH is the absolute path to the project repo
-		// root (NOT the worktree). MCP servers / scripts spawned inside
-		// the step that need to create child tasks under the same
-		// project use this so they don't accidentally register their
-		// `git rev-parse --show-toplevel` (which in a worktree returns
-		// the worktree path) as a new project row.
-		"SAKUSEN_PROJECT_PATH": e.repoRoot,
-	}
-	if t.TrackID != nil {
-		// Lets agents target "their" track via the update_track MCP tool.
-		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
-	}
-	// The resolved agent slug, so stubs/scripts can tell which agent record a
-	// spawn came from without re-deriving the cascade.
-	env["SAKUSEN_AGENT"] = agentSlug
+	env := e.stepEnv(t, step.Name, agentSlug)
 
 	// Spawn the step's agent (tmux or headless, per the agent record's mode)
 	useTmux := agentCfg.IsTmux()
@@ -539,7 +581,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	if useTmux {
 		exitCode, outputTail, spawnErr = e.runStepTmux(ctx, t, step, agentCfg, resolvedPrompt, env, outputFn)
 	} else {
-		exitCode, resultText, outputTail, spawnErr = e.runner.runHeadlessStep(ctx, e, t, step, agentCfg, resolvedPrompt, env, outputFn)
+		exitCode, resultText, outputTail, spawnErr = e.runner.runHeadlessStep(ctx, e, t, step, agentCfg, resolvedPrompt, env, outputFn, headlessSpawn{})
 	}
 	if spawnErr != nil {
 		e.database.UpdateTaskExitCode(t.ID, 1, spawnErr.Error())
@@ -677,6 +719,12 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 
 		if shouldLoop {
 			targetIdx := findStepIndex(steps, step.Loop.Goto)
+			// A completed branch row is never re-run (see parallel.go), so a
+			// loop back over a parallel group must delete that group's branch
+			// rows or the next iteration would skip every branch and re-emit
+			// the previous pass's aggregate. This is the one place inside
+			// applyStepResult that knows about groups.
+			e.clearParallelBranchRows(t, steps, targetIdx, i)
 			t.LoopIteration++
 			if err := e.database.UpdateTaskLoopIteration(t.ID, t.LoopIteration); err != nil {
 				log.Printf("Warning: failed to update loop iteration: %v", err)

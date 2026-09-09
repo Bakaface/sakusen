@@ -12,7 +12,7 @@ import (
 // RetryTaskArgs is the typed input schema for retry_task.
 type RetryTaskArgs struct {
 	TaskID   int64  `json:"task_id" jsonschema:"Task ID to retry. Required."`
-	StepName string `json:"step_name,omitempty" jsonschema:"Workflow step to restart from. Earlier completed steps (and their captured contexts) are preserved. Empty restarts the task from the beginning."`
+	StepName string `json:"step_name,omitempty" jsonschema:"Workflow step to restart from. Earlier completed steps (and their captured contexts) are preserved. Empty restarts the task from the beginning. To re-run a parallel group, name the GROUP: branch names are rejected, and retrying the group re-runs only the branches that did not complete."`
 }
 
 func registerRetryTask(s *server.MCPServer, c *client.Client) {

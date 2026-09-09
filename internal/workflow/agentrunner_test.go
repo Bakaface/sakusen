@@ -2,11 +2,13 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
@@ -19,6 +21,17 @@ type fakeAgentResult struct {
 	resultText string
 	outputTail string
 	err        error
+
+	// delay holds the call open for this long before returning, so parallel
+	// tests can force branches to overlap.
+	delay time.Duration
+	// block holds the call open until the context is cancelled, then returns
+	// ctx.Err(). Used to prove `require: all` cancels the surviving siblings.
+	block bool
+	// chatOutput, when non-empty, is written to the spawn's log path in the
+	// exact region layout runHeadlessAgent produces, so summarize_chat tests
+	// have something for stepAgentOutput to slice.
+	chatOutput string
 }
 
 // fakeAgentCall records the inputs a single runHeadlessStep invocation was
@@ -30,6 +43,11 @@ type fakeAgentCall struct {
 	prompt   string
 	agent    config.AgentConfig
 	env      map[string]string
+	spawn    headlessSpawn
+	// startedAt/finishedAt bracket the call so concurrency tests can assert
+	// that two branches actually overlapped rather than ran back to back.
+	startedAt  time.Time
+	finishedAt time.Time
 }
 
 // fakeAgentRunner is the AGENT-RUNNER seam's test double (see agentRunner in
@@ -57,23 +75,82 @@ func (f *fakeAgentRunner) script(stepName string, r fakeAgentResult) {
 	f.results[stepName] = append(f.results[stepName], r)
 }
 
-func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string)) (int, string, string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
+// runHeadlessStep records the call, then honours the scripted delay/blocking
+// OUTSIDE the mutex — parallel branches must be able to run concurrently, so
+// the lock only ever covers bookkeeping.
+func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *task.Task, step config.StepConfig, agent config.AgentConfig, prompt string, envVars map[string]string, outputFn func([]string), spawn headlessSpawn) (int, string, string, error) {
 	envCopy := make(map[string]string, len(envVars))
 	for k, v := range envVars {
 		envCopy[k] = v
 	}
-	f.calls = append(f.calls, fakeAgentCall{stepName: step.Name, prompt: prompt, agent: agent, env: envCopy})
 
-	queue := f.results[step.Name]
-	if len(queue) == 0 {
-		return 0, "ok", "", nil
+	f.mu.Lock()
+	idx := len(f.calls)
+	f.calls = append(f.calls, fakeAgentCall{
+		stepName: step.Name, prompt: prompt, agent: agent, env: envCopy,
+		spawn: spawn, startedAt: time.Now(),
+	})
+	var res fakeAgentResult
+	if queue := f.results[step.Name]; len(queue) > 0 {
+		res = queue[0]
+		f.results[step.Name] = queue[1:]
+	} else {
+		res = fakeAgentResult{resultText: "ok"}
 	}
-	res := queue[0]
-	f.results[step.Name] = queue[1:]
+	f.mu.Unlock()
+
+	finish := func() {
+		f.mu.Lock()
+		f.calls[idx].finishedAt = time.Now()
+		f.mu.Unlock()
+	}
+
+	if res.chatOutput != "" && spawn.LogPath != "" {
+		f.writeFakeRegion(spawn.LogPath, step.Name, t.ID, prompt, res.chatOutput, res.exitCode)
+	}
+
+	switch {
+	case res.block:
+		<-ctx.Done()
+		finish()
+		return 1, "", "", ctx.Err()
+	case res.delay > 0:
+		select {
+		case <-ctx.Done():
+			finish()
+			return 1, "", "", ctx.Err()
+		case <-time.After(res.delay):
+		}
+	}
+
+	finish()
 	return res.exitCode, res.resultText, res.outputTail, res.err
+}
+
+// writeFakeRegion reproduces runHeadlessAgent's on-disk region layout (header,
+// "Prompt:" block, the single empty terminator line, streamed output, footer)
+// so stepAgentOutput parses the fake's log exactly as it parses a real one.
+func (f *fakeAgentRunner) writeFakeRegion(path, stepName string, taskID int64, prompt, output string, exitCode int) {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[00:00:00] === Step: %s (task #%d) ===\n", stepName, taskID)
+	b.WriteString("[00:00:00] Prompt:\n")
+	for _, line := range strings.Split(prompt, "\n") {
+		fmt.Fprintf(&b, "[00:00:00]   %s\n", line)
+	}
+	b.WriteString("\n")
+	for _, line := range strings.Split(output, "\n") {
+		fmt.Fprintf(&b, "[00:00:00] %s\n", line)
+	}
+	fmt.Fprintf(&b, "[00:00:00] === Step %s finished (exit=%d) ===\n", stepName, exitCode)
+	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer fh.Close()
+	fh.WriteString(b.String())
 }
 
 // callsFor returns the recorded calls for stepName, in invocation order.

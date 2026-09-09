@@ -146,6 +146,11 @@ type taskStore interface {
 	UpdateRunningTaskStepContext(taskID int64, stepName, value string, appendMode bool) (int64, error)
 	UpdatePausedTmuxStepContext(taskID int64, stepName, value string, appendMode bool) (int64, error)
 	SetChatSessionID(taskID int64, stepName, sessionID string) error
+	// FailTaskStep / DeleteTaskStepsFrom back parallel groups: the engine marks
+	// losing branch rows 'failed' and clears branch rows when a loop jumps back
+	// over a group (see internal/workflow/parallel.go).
+	FailTaskStep(taskID int64, stepName string, exitCode int) error
+	DeleteTaskStepsFrom(taskID int64, stepNames []string) error
 	HasAnyWaitsOn(taskID int64) (bool, error)
 	GetWaitsOnChildren(taskID int64) ([]*task.Task, error)
 	RemoveAllTaskWaitsOn(taskID int64) error

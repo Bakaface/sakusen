@@ -228,6 +228,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tasksLoadedMsg:
 		m.list.refreshing = false
 		m.list.SetTasks(msg)
+		// Re-seed an open task info panel from the refreshed list. Branch rows
+		// of a running parallel group change status through plain engine-side
+		// DB writes, which emit no broadcast — without this the K/N badge and
+		// the sub-row icons would sit stale until some unrelated task update
+		// happened to fire.
+		if m.view == viewTaskInfo && m.taskInfo.task != nil {
+			for i := range msg {
+				if msg[i].ID == m.taskInfo.task.ID {
+					task := msg[i]
+					m.taskInfo.SetTask(&task)
+					break
+				}
+			}
+		}
 		return m, nil
 
 	case periodicsLoadedMsg:
@@ -320,13 +334,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// not just non-pending ones. Single-step workflows skip the picker
 		// (and the now-removed confirmation) entirely.
 		if msg.action == "retry" {
-			if len(msg.steps) == 1 {
-				return m, m.retryTask(msg.taskID, msg.steps[0].Name)
+			// Branch rows are not retry targets. Narrowing m.taskSteps to the
+			// top-level rows keeps it index-parallel with the selector items,
+			// which is how handleSelectorChoice recovers the bare step name.
+			steps := topLevelSteps(msg.steps)
+			m.taskSteps = steps
+			if len(steps) == 1 {
+				return m, m.retryTask(msg.taskID, steps[0].Name)
 			}
 
-			names := make([]string, len(msg.steps))
-			descriptions := make([]string, len(msg.steps))
-			for i, s := range msg.steps {
+			names := make([]string, len(steps))
+			descriptions := make([]string, len(steps))
+			for i, s := range steps {
 				names[i] = retryStepSelectorLabel(s)
 				descriptions[i] = retryStepSelectorDescription(s)
 			}
@@ -345,7 +364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				kind:         selectorRetryStep,
 				title:        "Retry From Step",
 				items:        names,
-				cursor:       retryStepCursor(taskRef, msg.steps),
+				cursor:       retryStepCursor(taskRef, steps),
 				descriptions: descriptions,
 				itemStyle:    stepSelectorItemStyle,
 				hint:         "j/k: navigate  enter: retry from step  esc: cancel",

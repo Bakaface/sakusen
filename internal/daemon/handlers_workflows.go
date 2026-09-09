@@ -68,7 +68,7 @@ func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) [
 		}
 		for j := range wf.Steps {
 			step := &wf.Steps[j]
-			summary.Steps = append(summary.Steps, WorkflowStepSummary{
+			entry := WorkflowStepSummary{
 				Name:        step.Name,
 				Description: step.Description,
 				Mode:        step.Mode,
@@ -76,7 +76,25 @@ func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) [
 				Tmux:        cfg.StepIsTmux(wf, step),
 				Human:       step.Human,
 				Loop:        step.Loop != nil,
-			})
+			}
+			if step.IsParallel() {
+				// A group runs no agent itself; its branches carry the agents.
+				entry.Agent = ""
+				entry.Tmux = false
+				entry.Parallel = &ParallelStepSummary{
+					Require:  step.Parallel.EffectiveRequire(),
+					Branches: make([]WorkflowStepSummary, 0, len(step.Parallel.Branches)),
+				}
+				for k := range step.Parallel.Branches {
+					b := step.Parallel.EffectiveBranch(k, step)
+					entry.Parallel.Branches = append(entry.Parallel.Branches, WorkflowStepSummary{
+						Name:        b.Name,
+						Description: b.Description,
+						Agent:       cfg.StepAgentSlug(wf, &b),
+					})
+				}
+			}
+			summary.Steps = append(summary.Steps, entry)
 		}
 		out = append(out, summary)
 	}

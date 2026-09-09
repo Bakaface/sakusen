@@ -22,6 +22,9 @@ const (
 	stepStatusPending   = "pending"
 	stepStatusRunning   = "running"
 	stepStatusCompleted = "completed"
+	// stepStatusFailed is only ever reported for a PARALLEL BRANCH row: an
+	// ordinary step that fails leaves its row at "running".
+	stepStatusFailed = "failed"
 )
 
 func (m Model) openArtifactSelection(task *daemon.TaskInfo, action string) (tea.Model, tea.Cmd) {
@@ -111,24 +114,39 @@ func renderStepBody(step daemon.TaskStepDetail) string {
 		return step.Context
 	case stepStatusRunning:
 		return "⟳ Step in progress — context will be captured when it completes."
+	case stepStatusFailed:
+		return "✗ Branch failed — no context was captured. See the task log for the reason."
 	default:
 		return "· Step has not started yet."
 	}
 }
 
+// stepRowLabel prefixes a parallel branch's name with a nesting glyph so the
+// selector shows branches under their group. The selector's items stay
+// index-parallel with m.taskSteps, so the decoration is display-only.
+func stepRowLabel(step daemon.TaskStepDetail) string {
+	if step.Parent == "" {
+		return step.Name
+	}
+	return "  └ " + step.Name
+}
+
 // stepSelectorLabel returns the displayed item text for a step row in the
 // generic selector. Format: "<glyph> <name>[ (state)]".
 func stepSelectorLabel(step daemon.TaskStepDetail) string {
+	name := stepRowLabel(step)
 	switch step.Status {
 	case stepStatusCompleted:
 		if step.Context == "" {
-			return "✗ " + step.Name + " (empty)"
+			return "✗ " + name + " (empty)"
 		}
-		return "✓ " + step.Name
+		return "✓ " + name
 	case stepStatusRunning:
-		return "⟳ " + step.Name + " (running)"
+		return "⟳ " + name + " (running)"
+	case stepStatusFailed:
+		return "✗ " + name + " (failed)"
 	default:
-		return "· " + step.Name + " (pending)"
+		return "· " + name + " (pending)"
 	}
 }
 
@@ -147,6 +165,8 @@ func stepSelectorDescription(step daemon.TaskStepDetail) string {
 		return size
 	case stepStatusRunning:
 		return "in progress"
+	case stepStatusFailed:
+		return "branch failed · no context"
 	default:
 		return ""
 	}
@@ -175,6 +195,19 @@ func actionableSteps(steps []daemon.TaskStepDetail) []daemon.TaskStepDetail {
 	out := make([]daemon.TaskStepDetail, 0, len(steps))
 	for _, s := range steps {
 		if stepIsActionable(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// topLevelSteps drops parallel-branch rows. Used for the retry picker: a
+// branch is not a retry target (the daemon rejects it) — retrying the GROUP
+// re-runs exactly the branches that did not complete.
+func topLevelSteps(steps []daemon.TaskStepDetail) []daemon.TaskStepDetail {
+	out := make([]daemon.TaskStepDetail, 0, len(steps))
+	for _, s := range steps {
+		if s.Parent == "" {
 			out = append(out, s)
 		}
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -475,6 +476,16 @@ type StepConfig struct {
 	// otherwise. Defaults to false (best-effort: warn and proceed).
 	RequireContext bool `yaml:"require_context,omitempty"`
 
+	// Parallel, when non-nil, makes this entry a PARALLEL GROUP rather than an
+	// ordinary step: it carries no prompt of its own and instead fans out to
+	// the branches under `parallel.branches`, which run concurrently as
+	// headless agents on the same worktree. The group still occupies exactly
+	// one cursor slot (t.StepIndex) and publishes one aggregate step context
+	// (see workflow.FormatParallelAggregate) under its own name. Branch names
+	// share the workflow's step namespace, so `{{steps.<branch>.context}}`
+	// works too. See ValidateSteps for the mutually-exclusive field rules.
+	Parallel *ParallelConfig `yaml:"parallel,omitempty"`
+
 	// ref marks a step parsed from a bare-string list entry (e.g. `- planning`).
 	// A reference step carries only its Name; resolveWorkflowSteps replaces it
 	// with the same-named step from the base (global) workflow during config
@@ -567,11 +578,167 @@ type LoopExitCondition struct {
 	Marker string `yaml:"marker"`
 }
 
+// ParallelConfig is the body of a `parallel:` group step: a join policy plus
+// the branches that run concurrently under it. Branches reuse StepConfig so a
+// branch supports the same subset of step fields an ordinary headless step
+// does (name, description, agent, prompt, timeout, summarization_*); the rest
+// are rejected by ValidateSteps.
+//
+// Branches share the task's single worktree and run at the same time, so they
+// are required (by documentation, not enforcement) to be read-only: two
+// branches writing the same files would race.
+type ParallelConfig struct {
+	// Require is the join policy: "" / "all" (every branch must succeed;
+	// the first failure cancels its siblings), "any" (one is enough), or a
+	// positive integer in 1..len(branches).
+	Require  string       `yaml:"require,omitempty"`
+	Branches []StepConfig `yaml:"branches"`
+}
+
+// RequireAll / RequireAny are the two symbolic `require:` values.
+const (
+	RequireAll = "all"
+	RequireAny = "any"
+)
+
+// EffectiveRequire returns the configured join policy with the empty value
+// resolved to its default ("all"). Use it for display; use RequiredCount for
+// the actual arithmetic.
+func (p *ParallelConfig) EffectiveRequire() string {
+	if p == nil || p.Require == "" {
+		return RequireAll
+	}
+	return p.Require
+}
+
+// RequiredCount returns how many branches must complete for the group to
+// succeed. Validation guarantees Require is one of "", "all", "any", or an
+// integer in range, so an unparseable value here can only mean the config
+// bypassed validation — it degrades to "all".
+func (p *ParallelConfig) RequiredCount() int {
+	if p == nil {
+		return 0
+	}
+	switch p.Require {
+	case "", RequireAll:
+		return len(p.Branches)
+	case RequireAny:
+		return 1
+	}
+	if n, err := strconv.Atoi(p.Require); err == nil {
+		return n
+	}
+	return len(p.Branches)
+}
+
+// EffectiveBranch returns branch i with the group-level fallbacks applied: the
+// agent and timeout fall back to the group's, and an unset summarization
+// strategy resolves to last_message (NOT the global step default — a branch's
+// result text is the artifact the aggregate is built from, and running every
+// branch chat through the summarizer would rewrite it).
+//
+// This is the SINGLE normalization point for branch defaults: the engine, the
+// validators, the daemon summaries and the TUI all go through it, and the
+// parsed config is never rewritten in place.
+func (p *ParallelConfig) EffectiveBranch(i int, group *StepConfig) StepConfig {
+	if p == nil || i < 0 || i >= len(p.Branches) {
+		return StepConfig{}
+	}
+	b := p.Branches[i]
+	if group != nil {
+		if b.Agent == "" {
+			b.Agent = group.Agent
+		}
+		if b.Timeout == "" {
+			b.Timeout = group.Timeout
+		}
+	}
+	if b.SummarizationStrategy == "" {
+		b.SummarizationStrategy = SummarizationStrategyLastMessage
+	}
+	return b
+}
+
+// EffectiveBranches returns every branch of the group with EffectiveBranch
+// applied, in config order.
+func (s *StepConfig) EffectiveBranches() []StepConfig {
+	if !s.IsParallel() {
+		return nil
+	}
+	out := make([]StepConfig, 0, len(s.Parallel.Branches))
+	for i := range s.Parallel.Branches {
+		out = append(out, s.Parallel.EffectiveBranch(i, s))
+	}
+	return out
+}
+
+// IsParallel reports whether this step entry is a parallel group.
+func (s *StepConfig) IsParallel() bool {
+	return s != nil && s.Parallel != nil
+}
+
+// AllStepNames returns every name in the workflow's step namespace: each
+// top-level step in order, with a group immediately followed by its branch
+// names. Used wherever "all names a {{steps.<name>.context}} ref could
+// address" is needed (the engine's step-context snapshot, validation).
+func (wf *WorkflowConfig) AllStepNames() []string {
+	var out []string
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		out = append(out, step.Name)
+		if !step.IsParallel() {
+			continue
+		}
+		for _, b := range step.Parallel.Branches {
+			out = append(out, b.Name)
+		}
+	}
+	return out
+}
+
+// BranchGroup locates the parallel group that owns the named branch. ok is
+// false when name is not a branch of any group in this workflow (it may still
+// be an ordinary step or a group name).
+func (wf *WorkflowConfig) BranchGroup(name string) (group *StepConfig, groupIdx int, ok bool) {
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if !step.IsParallel() {
+			continue
+		}
+		for _, b := range step.Parallel.Branches {
+			if b.Name == name {
+				return step, i, true
+			}
+		}
+	}
+	return nil, -1, false
+}
+
 // ValidateLoops checks all loop configurations in a workflow for correctness.
 func (wf *WorkflowConfig) ValidateLoops() error {
 	stepIndex := make(map[string]int)
 	for i, s := range wf.Steps {
 		stepIndex[s.Name] = i
+	}
+	// Branches are addressable by exit conditions (they publish their own step
+	// context) but not by goto: a group is one cursor slot, so a loop can only
+	// jump to the group itself.
+	branchOwner := make(map[string]string)
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if !step.IsParallel() {
+			continue
+		}
+		for _, b := range step.Parallel.Branches {
+			branchOwner[b.Name] = step.Name
+		}
+	}
+	knownContextStep := func(name string) bool {
+		if _, ok := stepIndex[name]; ok {
+			return true
+		}
+		_, ok := branchOwner[name]
+		return ok
 	}
 
 	// Track loop ranges [goto_target, loop_step] to detect overlaps
@@ -589,6 +756,9 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 		// goto must reference an existing step
 		targetIdx, ok := stepIndex[step.Loop.Goto]
 		if !ok {
+			if group, isBranch := branchOwner[step.Loop.Goto]; isBranch {
+				return fmt.Errorf("step %q: loop goto %q targets a branch of parallel group %q; target the group", step.Name, step.Loop.Goto, group)
+			}
 			return fmt.Errorf("step %q: loop goto references unknown step %q", step.Name, step.Loop.Goto)
 		}
 
@@ -612,12 +782,12 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 		// Validate exit condition
 		if ec := step.Loop.ExitCondition; ec != nil {
 			if ec.StepContextEmpty != "" {
-				if _, ok := stepIndex[ec.StepContextEmpty]; !ok {
+				if !knownContextStep(ec.StepContextEmpty) {
 					return fmt.Errorf("step %q: exit_condition step_context_empty references unknown step %q", step.Name, ec.StepContextEmpty)
 				}
 			}
 			if ec.StepContextContains != "" {
-				if _, ok := stepIndex[ec.StepContextContains]; !ok {
+				if !knownContextStep(ec.StepContextContains) {
 					return fmt.Errorf("step %q: exit_condition step_context_contains references unknown step %q", step.Name, ec.StepContextContains)
 				}
 				if strings.TrimSpace(ec.Marker) == "" {
@@ -661,10 +831,107 @@ func (wf *WorkflowConfig) ValidateOnComplete() error {
 
 // ValidateSteps checks step-level configurations for correctness.
 func (wf *WorkflowConfig) ValidateSteps() error {
-	for _, step := range wf.Steps {
+	// Names live in ONE namespace shared by top-level steps and parallel
+	// branches, because {{steps.<name>.context}} addresses both.
+	seen := make(map[string]bool, len(wf.Steps))
+	claim := func(name, what string) error {
+		if name == "" {
+			return fmt.Errorf("%s is missing a name", what)
+		}
+		if seen[name] {
+			return fmt.Errorf("duplicate step name %q (steps and parallel branches share one namespace)", name)
+		}
+		seen[name] = true
+		return nil
+	}
+
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if err := claim(step.Name, fmt.Sprintf("step %d", i)); err != nil {
+			return err
+		}
+		if step.IsParallel() {
+			if err := validateParallelGroup(step); err != nil {
+				return err
+			}
+			for j := range step.Parallel.Branches {
+				b := &step.Parallel.Branches[j]
+				if err := claim(b.Name, fmt.Sprintf("step %q: branch %d", step.Name, j)); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if !ValidSummarizationStrategies[step.SummarizationStrategy] {
 			return fmt.Errorf("step %q: invalid summarization_strategy %q (must be %q, %q, or %q)",
 				step.Name, step.SummarizationStrategy,
+				SummarizationStrategyLastMessage, SummarizationStrategySummarizeChat, SummarizationStrategyNone)
+		}
+	}
+	return nil
+}
+
+// validateParallelGroup checks a `parallel:` group entry and each of its
+// branches. A group is a container, not a step: it carries no prompt and none
+// of the per-step execution knobs (those belong on the branches). A branch is
+// an ordinary headless step, so it may not itself be a group, loop, or gate.
+func validateParallelGroup(step *StepConfig) error {
+	p := step.Parallel
+	// Group-level exclusions. Every field here is either meaningless on a
+	// container (prompt, require_context) or would need semantics the group
+	// deliberately doesn't have (loop/human on a fan-out, a summarization
+	// pass over an aggregate that is already assembled from branch contexts).
+	for _, banned := range []struct {
+		set   bool
+		field string
+	}{
+		{step.Prompt != "", "prompt"},
+		{step.Loop != nil, "loop"},
+		{step.Human, "human"},
+		{step.SummarizationStrategy != "", "summarization_strategy"},
+		{step.SummarizationPrompt != "", "summarization_prompt"},
+		{step.RequireContext, "require_context"},
+	} {
+		if banned.set {
+			return fmt.Errorf("step %q: a parallel group cannot set %s (it belongs on a branch)", step.Name, banned.field)
+		}
+	}
+	if len(p.Branches) == 0 {
+		return fmt.Errorf("step %q: parallel.branches must have at least one branch", step.Name)
+	}
+	switch p.Require {
+	case "", RequireAll, RequireAny:
+	default:
+		n, err := strconv.Atoi(p.Require)
+		if err != nil {
+			return fmt.Errorf("step %q: invalid parallel.require %q (must be %q, %q, or an integer 1..%d)",
+				step.Name, p.Require, RequireAll, RequireAny, len(p.Branches))
+		}
+		if n < 1 || n > len(p.Branches) {
+			return fmt.Errorf("step %q: parallel.require %d is out of range (must be 1..%d, the branch count)",
+				step.Name, n, len(p.Branches))
+		}
+	}
+	for j := range p.Branches {
+		b := &p.Branches[j]
+		// A bare-scalar list entry parses as a step *reference*, which only
+		// resolveWorkflowSteps can expand — and it resolves against top-level
+		// steps, not branches. Require an inline mapping.
+		if b.ref {
+			return fmt.Errorf("step %q: branch %q must be an inline mapping, not a step reference", step.Name, b.Name)
+		}
+		if b.IsParallel() {
+			return fmt.Errorf("step %q: branch %q cannot itself be a parallel group (no nesting)", step.Name, b.Name)
+		}
+		if b.Loop != nil {
+			return fmt.Errorf("step %q: branch %q cannot have a loop", step.Name, b.Name)
+		}
+		if b.Human {
+			return fmt.Errorf("step %q: branch %q cannot have human: true", step.Name, b.Name)
+		}
+		if !ValidSummarizationStrategies[b.SummarizationStrategy] {
+			return fmt.Errorf("step %q: branch %q: invalid summarization_strategy %q (must be %q, %q, or %q)",
+				step.Name, b.Name, b.SummarizationStrategy,
 				SummarizationStrategyLastMessage, SummarizationStrategySummarizeChat, SummarizationStrategyNone)
 		}
 	}

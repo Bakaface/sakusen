@@ -27,7 +27,7 @@ import (
 // by trusting the caller.
 type UpdateStepContextArgs struct {
 	TaskID   int64  `json:"task_id,omitempty" jsonschema:"Task ID whose active step should receive the context. Defaults to $SAKUSEN_TASK_ID (set by the workflow engine for the active step). Must be a task that's currently in a running step."`
-	StepName string `json:"step_name,omitempty" jsonschema:"Name of the workflow step receiving the context. Defaults to $SAKUSEN_STEP (the running step's name). Must match the task's currently-active step — updates to non-active steps are rejected."`
+	StepName string `json:"step_name,omitempty" jsonschema:"Name of the workflow step receiving the context. Defaults to $SAKUSEN_STEP (the running step's name). Must match the task's currently-active step — updates to non-active steps are rejected. Inside a parallel branch, $SAKUSEN_STEP is the BRANCH name and the write targets that branch's own context; the group name itself is rejected."`
 	Context  string `json:"context" jsonschema:"The canonical context value to publish for the step. Required (may be empty when mode is 'replace' to clear an existing value)."`
 	Mode     string `json:"mode,omitempty" jsonschema:"'replace' (default) overwrites the existing context. 'append' concatenates the new value to the existing one with a newline separator."`
 }

@@ -104,7 +104,7 @@ func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFil
 		env["SAKUSEN_TRACK_ID"] = fmt.Sprintf("%d", *t.TrackID)
 	}
 
-	exitCode, _, outputTail, err := e.runHeadlessAgent(ctx, t, step, agent, prompt, env, outputFn)
+	exitCode, _, outputTail, err := e.runHeadlessAgent(ctx, t, step, agent, prompt, env, outputFn, headlessSpawn{})
 	if err != nil {
 		return fmt.Errorf("conflict resolution agent failed: %w", err)
 	}

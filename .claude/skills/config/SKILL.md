@@ -238,6 +238,7 @@ type StepConfig struct {
     SummarizationStrategy string         // Strategy for summarizing step output
     SummarizationPrompt   string         // Custom summarize_chat prompt ({{chat}} placeholder)
     RequireContext        bool           // Fail the task when summarize_chat context capture fails
+    Parallel              *ParallelConfig // Fan-out group; mutually exclusive with Prompt/Loop/Human (see below)
 }
 ```
 
@@ -248,6 +249,34 @@ type StepConfig struct {
 **Summarizer**: all summarization (step `summarize_chat` passes, the final task summarizer, AI titles and slugs, backfill-context) runs the single top-level `summarizer:` block, resolved by `Config.SummarizerInvocation()` / `SummarizerSlugInvocation()` into a `SummarizerInvocation` and executed by `workflow.RunSummarizer` — `agent:` goes through `runner.RunAgentSync` (prompt in `$SAKUSEN_PROMPT_FILE` in a scratch dir, answer from `$SAKUSEN_RESULT_FILE` with a stdout-tail fallback, `SAKUSEN_PROJECT_PATH` + the agent's `env` exported), `command:` through `runner.RunSync` (prompt on stdin, response on stdout); `SAKUSEN_PURPOSE` tags the call site either way. `MaxPromptBytes` (when > 0) gates map-reduce chunking of oversized chat logs; `TitlePrompt`/`SlugPrompt` override the built-in title/slug prompts (`{{input}}` = task input); the slug side resolves via `EffectiveSlugAgent()`/`EffectiveSlugCommand()` and is gated by `SlugConfigured()` (so a slug-only setting enables AI slugs without AI titles); there is no model selection in sakusen — pick the model inside the agent or command. `allowed_summarization_models` (top-level and step-level) is a removed key with a hard migration error.
 
 **Merge conflicts**: `merge_conflicts:` configures the resolver — `agent:` (cascade `merge_conflicts.agent` → workflow `agent:` → `default_agent:` → `"claude"`, resolved by `Config.MergeConflictAgentFor`; only the lower tiers fall back from a tmux agent to a headless `"claude"`), `timeout:` (default `10m`), and `prompt:` (replaces the built-in body; `{{conflict.files}}` plus task/git vars). The old top-level `merge_conflict_agent:` is a removed key with a migration error.
+
+### ParallelConfig (fan-out / fan-in groups)
+
+```go
+type ParallelConfig struct {
+    Require  string        // "" | "all" (default) | "any" | "<N>" (1..len(Branches))
+    Branches []StepConfig  // Branches reuse StepConfig; each is an ordinary headless step
+}
+
+func (p *ParallelConfig) EffectiveRequire() string                            // "" → "all"
+func (p *ParallelConfig) RequiredCount() int                                  // how many must complete
+func (p *ParallelConfig) EffectiveBranch(i int, group *StepConfig) StepConfig // THE normalization point
+func (s *StepConfig) IsParallel() bool
+func (s *StepConfig) EffectiveBranches() []StepConfig
+func (wf *WorkflowConfig) AllStepNames() []string                             // steps + branches, in order
+func (wf *WorkflowConfig) BranchGroup(name string) (*StepConfig, int, bool)
+```
+
+A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor slot, N branches that run concurrently on the same worktree. `EffectiveBranch` is the ONLY place branch defaults are applied — `agent` and `timeout` fall back to the group's, and an unset `summarization_strategy` becomes `last_message` (deliberately NOT `DefaultSummarizationStrategy`: a branch's result text is the artifact the group's aggregate is built from, and a summarizer pass would rewrite it). It returns a copy; the parsed config is never rewritten, so every consumer must call it rather than reading `Branches[i]` directly.
+
+**Group/branch validation** (`ValidateSteps` → `validateParallelGroup`, reached by every load path and `sakusen validate`):
+
+- A group may not set `prompt`, `loop`, `human`, `summarization_strategy`, `summarization_prompt`, or `require_context` — all belong on a branch.
+- `branches` needs ≥ 1 entry; `require` must be `""`, `all`, `any`, or an integer in `1..len(branches)`.
+- A branch may not be a group (no nesting), may not have `loop` or `human`, and must be an inline mapping (a bare-scalar entry parses as a step *reference*, which only resolves against top-level steps).
+- Step names and branch names share ONE namespace and must be unique across the whole workflow — `{{steps.<name>.context}}` addresses both. Also enforced in `validateUniqueNames` and `resolveWorkflowSteps`.
+- `ValidateLoops`: a `goto` naming a branch is an error (target the group); exit conditions may name a branch or a group.
+- `validateAgentRefs` (production load only): every branch's EFFECTIVE agent must be headless — the join is synchronous, so a tmux branch could never complete. `collectAgentRefs`, `validatePromptIncludes` and `validatePeriodic` all walk branches too.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 

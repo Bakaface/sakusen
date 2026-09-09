@@ -314,9 +314,18 @@ func validatePeriodic(cfg *Config) error {
 		}
 
 		if p.Input == "" && !inputPinned {
-			for _, step := range steps {
+			for i := range steps {
+				step := &steps[i]
 				if strings.Contains(step.Prompt, "{{task.input}}") {
 					return fmt.Errorf("periodic %q: step %q references {{task.input}} but no `input` is set", p.Name, step.Name)
+				}
+				if !step.IsParallel() {
+					continue
+				}
+				for _, b := range step.Parallel.Branches {
+					if strings.Contains(b.Prompt, "{{task.input}}") {
+						return fmt.Errorf("periodic %q: step %q branch %q references {{task.input}} but no `input` is set", p.Name, step.Name, b.Name)
+					}
 				}
 			}
 		}
@@ -348,16 +357,33 @@ func validateUniqueNames(cfg *Config) error {
 		seenWf[wf.Name] = true
 	}
 
+	// Step names and parallel-branch names share one namespace (both are
+	// addressable as {{steps.<name>.context}}), so uniqueness spans both.
 	for _, wf := range cfg.Workflows {
 		seen := make(map[string]bool, len(wf.Steps))
-		for _, step := range wf.Steps {
-			if step.Name == "" {
-				return fmt.Errorf("workflow %q: step is missing a name", wf.Name)
+		claim := func(name, kind string) error {
+			if name == "" {
+				return fmt.Errorf("workflow %q: %s is missing a name", wf.Name, kind)
 			}
-			if seen[step.Name] {
-				return fmt.Errorf("workflow %q: duplicate step name %q", wf.Name, step.Name)
+			if seen[name] {
+				return fmt.Errorf("workflow %q: duplicate step name %q", wf.Name, name)
 			}
-			seen[step.Name] = true
+			seen[name] = true
+			return nil
+		}
+		for i := range wf.Steps {
+			step := &wf.Steps[i]
+			if err := claim(step.Name, "step"); err != nil {
+				return err
+			}
+			if !step.IsParallel() {
+				continue
+			}
+			for _, b := range step.Parallel.Branches {
+				if err := claim(b.Name, fmt.Sprintf("step %q: branch", step.Name)); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
