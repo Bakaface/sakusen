@@ -96,8 +96,9 @@ type taskStore interface {
 	UpdateProjectDefaultWorktree(id int64, worktree bool) error
 	UpdateProjectDefaults(id int64, worktree bool, branchMode int, workflow string) error
 
-	// Periodic definitions (periodic_definitions table) — reconciled from the
-	// periodic: section of .sakusen.yml and fired by the scheduler loop.
+	// Routines (periodic_definitions table) — reconciled from the routines:
+	// section of .sakusen.yml; the scheduled ones are fired by the scheduler
+	// loop, all of them by the run-now handler.
 	GetPeriodicByID(id int64) (*db.PeriodicDef, error)
 	GetPeriodicByName(projectID int64, name string) (*db.PeriodicDef, error)
 	ListPeriodicsForProject(projectID int64) ([]*db.PeriodicDef, error)

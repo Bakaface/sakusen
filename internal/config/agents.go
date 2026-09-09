@@ -953,6 +953,7 @@ var removedProjectKeys = map[string]string{
 	"yolo":                         "`yolo:` was removed with the `claude:` block: put permission flags (e.g. --dangerously-skip-permissions) directly in your agent's `command`",
 	"system_prompt":                "`system_prompt:` was removed: bake system-prompt flags into your agent's `command` (e.g. claude --append-system-prompt \"...\") or fold the text into step prompts",
 	"allowed_summarization_models": "`allowed_summarization_models` was removed: summarization now runs the top-level `summarizer:` command; pick the model inside that command",
+	"periodic":                     "`periodic:` was removed: declare the steps under `workflows:` and bind them with a `routines:` entry (`- name: <name>` + `workflow: <workflow>`), which also carries the cadence, pins and priority",
 	"merge_conflict_agent":         "`merge_conflict_agent:` was removed: set `agent:` inside the top-level `merge_conflicts:` block instead (it also holds the resolver's `timeout:` and `prompt:`)",
 }
 

@@ -23,8 +23,8 @@ const (
 	viewPrompt
 	viewArtifact
 	viewSakusen
-	viewPeriodicList
-	viewPeriodicRuns
+	viewRoutineList
+	viewRoutineRuns
 )
 
 type Model struct {
@@ -103,8 +103,8 @@ type Model struct {
 	searchDirection int // 1 for forward (/), -1 for backward (?)
 	searchHistory   inputHistory
 
-	// Periodic views state (read + pause/run-now surface)
-	periodic periodicViewState
+	// Routine views state (read + pause/run-now surface)
+	routines routineViewState
 }
 
 type clientConnectedMsg struct {
@@ -244,25 +244,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case periodicsLoadedMsg:
-		m.periodic.loading = false
-		m.periodic.defs = []daemon.PeriodicInfo(msg)
-		if m.periodic.cursor >= len(m.periodic.defs) {
-			m.periodic.cursor = len(m.periodic.defs) - 1
+	case routinesLoadedMsg:
+		m.routines.loading = false
+		m.routines.defs = []daemon.PeriodicInfo(msg)
+		if m.routines.cursor >= len(m.routines.defs) {
+			m.routines.cursor = len(m.routines.defs) - 1
 		}
-		if m.periodic.cursor < 0 {
-			m.periodic.cursor = 0
+		if m.routines.cursor < 0 {
+			m.routines.cursor = 0
 		}
 		return m, nil
 
-	case periodicRunsLoadedMsg:
-		m.periodic.runsLoading = false
-		m.periodic.runs = []daemon.TaskInfo(msg)
-		if m.periodic.runsCursor >= len(m.periodic.runs) {
-			m.periodic.runsCursor = len(m.periodic.runs) - 1
+	case routineRunsLoadedMsg:
+		m.routines.runsLoading = false
+		m.routines.runs = []daemon.TaskInfo(msg)
+		if m.routines.runsCursor >= len(m.routines.runs) {
+			m.routines.runsCursor = len(m.routines.runs) - 1
 		}
-		if m.periodic.runsCursor < 0 {
-			m.periodic.runsCursor = 0
+		if m.routines.runsCursor < 0 {
+			m.routines.runsCursor = 0
 		}
 		return m, nil
 
@@ -540,10 +540,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePromptKey(msg)
 	case viewArtifact:
 		return m.handleArtifactViewKey(msg)
-	case viewPeriodicList:
-		return m.handlePeriodicListKey(msg)
-	case viewPeriodicRuns:
-		return m.handlePeriodicRunsKey(msg)
+	case viewRoutineList:
+		return m.handleRoutineListKey(msg)
+	case viewRoutineRuns:
+		return m.handleRoutineRunsKey(msg)
 	case viewSakusen:
 		// Any keypress skips the animation
 		m.view = viewList
@@ -588,13 +588,13 @@ func (m Model) View() string {
 		return m.renderArtifactHelpOverlay()
 	}
 
-	// Periodic views are full-screen and render independently of the list/
+	// Routine views are full-screen and render independently of the list/
 	// selector machinery below.
-	if m.view == viewPeriodicList {
-		return m.renderPeriodicList()
+	if m.view == viewRoutineList {
+		return m.renderRoutineList()
 	}
-	if m.view == viewPeriodicRuns {
-		return m.renderPeriodicRuns()
+	if m.view == viewRoutineRuns {
+		return m.renderRoutineRuns()
 	}
 
 	// Show selection dialog

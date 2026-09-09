@@ -241,6 +241,11 @@ var commands = []command{
 		help:  "pick a workflow to start a new task (alias for :create --workflow=<name>)",
 	},
 	{
+		match: matchRunRoutine,
+		exec:  execRunRoutine,
+		help:  "pick a routine to run now (routines: bindings in .sakusen.yml)",
+	},
+	{
 		match: matchActionVerb,
 		exec:  execActionVerb,
 		help:  "run an action verb (see internal/action — :stop, :retry, :revert, ...)",
@@ -478,6 +483,54 @@ func execRunTask(m Model, args string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func matchRunRoutine(input string) (string, bool) {
+	return matchRunCommand("RunRoutine", input)
+}
+
+// execRunRoutine runs a routine by name, or opens a fuzzy picker over the
+// project's routines when none is given. A routine that needs an input
+// argument opens the input prompt instead of firing straight away.
+func execRunRoutine(m Model, args string) (tea.Model, tea.Cmd) {
+	if m.client == nil || m.projectPath == "" {
+		m.err = fmt.Errorf("not connected to daemon")
+		return m, nil
+	}
+	if m.cfg == nil {
+		m.err = fmt.Errorf("no config loaded")
+		return m, nil
+	}
+
+	names := m.cfg.ListRoutineNames()
+	if args != "" {
+		if !contains(names, args) {
+			m.err = fmt.Errorf("unknown routine: %s", args)
+			return m, nil
+		}
+		return m.launchRoutine(args)
+	}
+
+	if len(names) == 0 {
+		m.err = fmt.Errorf("no routines configured")
+		return m, nil
+	}
+	descs := make([]string, len(names))
+	for i, name := range names {
+		if r := m.cfg.GetRoutine(name); r != nil {
+			descs[i] = r.Description
+		}
+	}
+	m.selector = selector{
+		kind:            selectorRoutine,
+		title:           "Run Routine",
+		items:           append([]string(nil), names...),
+		descriptions:    append([]string(nil), descs...),
+		filterable:      true,
+		allItems:        names,
+		allDescriptions: descs,
+	}
+	return m, nil
+}
+
 // contains reports whether names contains s.
 func contains(names []string, s string) bool {
 	for _, n := range names {
@@ -495,6 +548,15 @@ func completeRunTask(m Model, input string) (string, bool) {
 		return "", false
 	}
 	return completeRunCommand(input, "RunTask", m.cfg.ListAllWorkflowNames())
+}
+
+// completeRunRoutine returns tab-completed command input for RunRoutine,
+// matching routine names against the partial input after the command.
+func completeRunRoutine(m Model, input string) (string, bool) {
+	if m.cfg == nil {
+		return "", false
+	}
+	return completeRunCommand(input, "RunRoutine", m.cfg.ListRoutineNames())
 }
 
 // completeRunCommand handles tab-completion for a single "RunFoo [name]" command.

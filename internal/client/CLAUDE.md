@@ -14,5 +14,5 @@ Unix socket IPC client with RPC and event streaming. Single file, `client.go`; t
 
 - Lifecycle: `New(cfg)` (socket path from `cfg.Daemon.SocketPath`) → `Connect()` starts the reader goroutine → RPC calls → `Subscribe()` and read `Messages()` / `Errors()` → `Close()`.
 - Internal helpers, lowest to highest: `send()` is fire-and-forget (rarely correct, see invariants); `sendAndWait()` / `sendAndWaitWithHook()` do one request-response with the bounded reconnect; `request()` additionally unwraps an error reply; `requestOK()` wraps `request()` for void RPCs.
-- RPC methods are grouped by domain and mirror the daemon's `protocol.go`: agents, tasks, steps, tracks, workflows, dependencies/branches, periodics, waits-on, and `Ping`. Add a method next to its group when adding a message type.
+- RPC methods are grouped by domain and mirror the daemon's `protocol.go`: agents, tasks, steps, tracks, workflows, dependencies/branches, routines, waits-on, and `Ping`. Add a method next to its group when adding a message type.
 - The reader goroutine routes with `daemon.IsBroadcast(msg.Type)` (broadcasts → `subChan`, everything else → `respChan`). A new broadcast type must be added to `IsBroadcast` in `protocol.go` or it will land in `respChan` and corrupt the next RPC. `ParseAgentUpdate(msg)` decodes `agent_update`.

@@ -135,6 +135,57 @@ workflows:
 
 File pool is flat: `.sakusen/workflows/<name>.yml` (no `tasks/`, `one-off/`, or `init/` subdirectories). Global pool: `~/.sakusen/workflows/<name>.yml`.
 
+### Routines
+
+`workflows:` defines what to run. `routines:` — its sibling top-level key — defines *ways of running it*. A routine names a workflow, supplies pins, and optionally a cadence. It never defines steps.
+
+```yaml
+routines:
+  - name: compose-wiki               # on-demand: run it by name, whenever
+    description: Rebuild the wiki    # metadata (palette, MCP)
+    workflow: wiki-compose           # the workflow it binds — required
+    branch: sakusen/wiki-{{task.id}} # pins, overriding the workflow's own
+    target: main
+
+  - name: nightly-sweep              # same workflow, different binding + a schedule
+    workflow: wiki-compose
+    cadence: "0 3 * * *"             # 5-field cron, @daily/@hourly/..., or @every 90m
+    priority: low
+```
+
+"Kind" is emergent rather than declared:
+
+| Shape | How it starts |
+|---|---|
+| Workflow, no routine | New Task screen (`n`), or immediately if fully pinned |
+| Workflow + routine | On demand: `:RunRoutine` in the TUI, `sakusen routines run <name>`, MCP `run_routine` |
+| Workflow + routine + cadence | All of the above, plus the daemon fires it on schedule |
+
+One workflow can back any number of routines — which is the point: the pins live on the binding, not the definition.
+
+**Pin override.** A pin set on the routine wins over the workflow's, field by field (`input`, `worktree`, `target`). `branch` and `checkout` override as a *pair*: setting either on the routine ignores both of the workflow's, since they are two ways to answer the same question.
+
+**Arguments.** A routine takes one optional free-text argument that becomes `{{task.input}}`:
+
+```bash
+sakusen routines run compose-wiki                 # uses the routine's own input:, if any
+sakusen routines run digest "the security section"  # overrides it
+```
+
+If the bound workflow references `{{task.input}}` and neither the routine nor the workflow pins an input, the routine *requires* that argument — the TUI asks for it, the CLI and MCP reject an empty one. A **scheduled** routine in that state is a config error: a cron job has nobody to ask.
+
+**Reachability.** A workflow listed in `workflows:` shows up in the `n` picker. A workflow file under `.sakusen/workflows/` that is *not* listed stays hidden — reachable by exact name only. Binding it from `routines:` is what makes it startable, so `sakusen validate` won't nag about it being hidden.
+
+Routines are read-only at runtime: edit `.sakusen.yml` to add or change them. `sakusen routines` surfaces their schedule, pause state and run history:
+
+```bash
+sakusen routines list                 # NAME / CADENCE / WORKFLOW / NEXT FIRE / LAST FIRE / STATUS
+sakusen routines show <name>
+sakusen routines run <name> [input]   # run now; does not advance a schedule
+sakusen routines runs <name>          # tasks this routine has created
+sakusen routines pause|resume <name>  # scheduled routines only
+```
+
 ### Step options
 
 | Key | Type | Notes |
@@ -379,6 +430,18 @@ sakusen agents [--json]        # list running agents
 sakusen depends-on add <id> <blocked-by-id>     # mark <id> as blocked by another task
 sakusen depends-on rm  <id> <blocked-by-id>     # remove a dependency
 sakusen depends-on list <id>                    # list tasks blocking <id>
+```
+
+**Routines**
+
+```bash
+sakusen routines list                 # routines declared under routines: in .sakusen.yml
+sakusen routines show <name>
+sakusen routines run <name> [input]   # run now (does not advance a schedule)
+sakusen routines runs <name>          # tasks this routine has created
+sakusen routines pause <name>         # scheduled routines only
+sakusen routines resume <name>
+sakusen tasks --routine-id N          # tasks created by a routine, by its DB id
 ```
 
 **Worktree branch management**

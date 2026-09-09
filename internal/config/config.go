@@ -134,6 +134,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	// Routines may bind a "<slug>:<name>" track workflow, so their refs, pins
+	// and input guard are checked once every workflow tier is in place.
+	if err := validateRoutines(cfg); err != nil {
+		return nil, err
+	}
+
 	// The agent registry is finalized (variants expanded, aliases resolved)
 	// and refs validated once every tier (global + project + tracks) has
 	// merged, since a workflow may reference an agent defined in another tier.
@@ -178,6 +184,11 @@ func LoadForProject(projectDir string) (*Config, error) {
 	// See the matching call in Load() for why this lives here and not inside
 	// loadProjectConfig.
 	if err := appendTrackWorkflows(cfg, cfg.ProjectDir); err != nil {
+		return nil, err
+	}
+
+	// See the matching call in Load().
+	if err := validateRoutines(cfg); err != nil {
 		return nil, err
 	}
 
@@ -683,30 +694,8 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 		}
 	}
 
-	// Resolve periodic definitions. Inline-step entries are registered with the
-	// engine as hidden workflows named "periodic:<name>" so the existing engine
-	// resolution path (GetWorkflow) reaches them unchanged. Ref-mode entries
-	// contribute nothing to cfg.Workflows.
-	cfg.Periodic = append([]PeriodicEntry(nil), proj.Periodic...)
-	for i := range cfg.Periodic {
-		p := &cfg.Periodic[i]
-		if len(p.Steps) > 0 && p.Workflow == "" {
-			wf := WorkflowConfig{
-				Name:             p.InlineWorkflowName(),
-				Description:      p.Description,
-				Agent:            p.Agent,
-				Steps:            p.Steps,
-				SummarizerPrompt: p.SummarizerPrompt,
-				Worktree:         p.Worktree,
-				Branch:           p.Branch,
-				Checkout:         p.Checkout,
-				Target:           p.Target,
-				Hidden:           true,
-				Source:           "periodic",
-			}
-			cfg.Workflows = append(cfg.Workflows, wf)
-		}
-	}
+	// Routines are bindings only — they never contribute workflows.
+	cfg.Routines = append([]RoutineConfig(nil), proj.Routines...)
 
 	// Validate workflow configurations (after all workflows are assembled)
 	for i := range cfg.Workflows {
@@ -722,13 +711,6 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 		if err := cfg.Workflows[i].ValidateOnComplete(); err != nil {
 			return fmt.Errorf("workflow %q: %w", cfg.Workflows[i].Name, err)
 		}
-	}
-
-	// Validate periodic definitions on the production load path too — this
-	// rejects "both workflow and steps set" and the missing-input
-	// {{task.input}} guard at config-load time, not just in ValidateFile.
-	if err := validatePeriodic(cfg); err != nil {
-		return err
 	}
 
 	return nil

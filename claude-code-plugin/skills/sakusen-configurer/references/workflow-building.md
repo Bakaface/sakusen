@@ -1,12 +1,13 @@
 # Sakusen Workflow Building Reference
 
-Everything needed to author the `workflows:` list: entry shapes, pins, step fields, prompts,
-template variables, loops, tracks, and MCP orchestration patterns.
+Everything needed to author the `workflows:` list and its `routines:` bindings: entry shapes,
+pins, step fields, prompts, template variables, loops, tracks, and MCP orchestration patterns.
 
 ## Contents
 
 - [Workflow Entry Shapes](#workflow-entry-shapes)
 - [Pinnable Fields](#pinnable-fields)
+- [Routines — Invocation Bindings](#routines--invocation-bindings)
 - [File-Based and Hidden Workflows](#file-based-and-hidden-workflows)
 - [Global Workflows, Overrides, and Step References](#global-workflows-overrides-and-step-references)
 - [Track Workflows](#track-workflows)
@@ -104,6 +105,74 @@ is **never** a pin.
 
 ---
 
+## Routines — Invocation Bindings
+
+`workflows:` defines what runs. The sibling top-level `routines:` key defines *ways of running
+it*. A routine names a workflow, supplies pins, and optionally a cadence — it never defines
+steps, so one workflow can back any number of differently pinned routines.
+
+```yaml
+routines:
+  - name: compose-wiki                 # required, kebab-case, unique
+    description: Rebuild the wiki      # metadata (routine palette, MCP); NOT a pin
+    workflow: wiki-compose             # required — the workflow this binds
+    input: "Recompose every wiki page" # pins, overriding the workflow's own
+    worktree: true
+    branch: sakusen/wiki-{{task.id}}
+    target: main
+    cadence: "0 3 * * *"               # optional — omit for on-demand only
+    priority: low                      # optional — else the project default at fire time
+    paused: false                      # optional — only meaningful with a cadence
+```
+
+"Kind" is emergent, never declared:
+
+| Shape | How it starts |
+|---|---|
+| Workflow, no routine | New Task screen (`n` / `:RunTask`), or immediately if fully pinned |
+| Workflow + routine | On demand: `:RunRoutine`, `sakusen routines run <name>`, MCP `run_routine` |
+| Workflow + routine + `cadence` | The above, plus the daemon fires it on schedule |
+
+**Cadence.** Standard 5-field cron (`0 3 * * *`), a descriptor (`@daily`, `@hourly`, ...) or
+`@every <duration>`. The scheduler ticks every 30s, so sub-minute `@every` values are observed
+at tick resolution (a validate warning says so). No cadence = on-demand only; the routine
+still gets run history and a last-task link, it simply never becomes due.
+
+**Pin override.** A pin on the routine beats the workflow's, field by field for `input`,
+`worktree` and `target`. `branch` and `checkout` override as a **pair**: setting either on the
+routine ignores both of the workflow's, because they are two answers to one question. The
+merged result goes through the same pin validation as a workflow, reported against the
+routine's name.
+
+**Arguments.** A run takes one optional free-text argument that becomes `{{task.input}}` and
+overrides the routine's own `input:`. If the bound workflow references `{{task.input}}` in any
+step or parallel-branch prompt and neither the routine nor the workflow pins an input, the
+routine **requires** that argument: the TUI opens an input-only prompt, and the CLI and MCP
+reject an empty one. A **scheduled** routine in that state is a load error — a cron job has
+nobody to ask. Fix it by pinning `input:` on the routine or dropping the cadence.
+
+```yaml
+workflows:
+  - name: digest
+    steps:
+      - name: writing
+        prompt: "Write a digest of {{task.input}}"
+
+routines:
+  - name: digest-now      # legal: on-demand, asks for its argument
+    workflow: digest
+  - name: digest-nightly  # legal: the pin answers {{task.input}}
+    workflow: digest
+    cadence: "@daily"
+    input: "yesterday's merged PRs"
+```
+
+Routines are read-only at runtime — `.sakusen.yml` is the source of truth. `sakusen routines
+list/show/run/runs/pause/resume <name>` surfaces and drives them; pausing an on-demand routine
+is rejected (there is no clock to stop).
+
+---
+
 ## File-Based and Hidden Workflows
 
 A workflow file at `.sakusen/workflows/<name>.yml` contains the same fields as an inline
@@ -117,6 +186,9 @@ filenames starting with a letter or digit (`[a-z0-9][a-z0-9-]*`, extension `.yml
 - **Reachable** via `:RunTask <name>` (and tab completion)
 - **Reachable** via CLI: `sakusen create -w <name>` accepts hidden workflows
 - **Returned** by the MCP `list_workflows` tool with `"hidden": true`
+- **Startable by name** when bound from `routines:` — which is the idiomatic pairing: a pool
+  file referenced only from `routines:` stays hidden AND produces no validate warning, because
+  the routine is what makes it reachable
 
 ### When to split a workflow into a file
 
@@ -1054,7 +1126,15 @@ Hard errors at config load:
 - The removed `print:` / `tmux:` fields on a workflow or step; step-level
   `allowed_summarization_models:`
 - An explicit `agent:` / `default_agent:` naming a slug that does not exist
+- A routine missing `workflow:`, or naming one that does not exist
+- A routine setting `steps:` / `agent:` / `summarizer_prompt:` (routines are bindings)
+- A routine with a duplicate or non-kebab-case name, an unparseable `cadence`, an invalid
+  `priority`, or effective pins that fail pin validation
+- A **scheduled** routine whose workflow references `{{task.input}}` with no effective input
+- The removed top-level `periodic:` key
 
 Warnings (non-fatal, surfaced by `sakusen validate`):
 
-- A file under `.sakusen/workflows/` that is not referenced in `.sakusen.yml` (it is hidden)
+- A file under `.sakusen/workflows/` that is neither referenced in `.sakusen.yml` nor bound by
+  a routine (it is hidden and unreachable by any menu)
+- A routine `cadence:` of `@every <under a minute>` (observed at the scheduler's ~30s tick)

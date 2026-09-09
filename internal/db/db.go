@@ -420,9 +420,9 @@ func migrateV22(db *DB) error {
 }
 
 // migrateV23 adds the periodic_definitions table and tasks.periodic_id — the
-// scheduled-task (periodic:) feature. priority is stored raw (” = fall back
-// to the project default at fire time). The partial idx_periodic_due index
-// covers the scheduler's due-scan predicate.
+// storage behind routines:. priority is stored raw (” = fall back to the
+// project default at fire time). The partial idx_periodic_due index covers the
+// scheduler's due-scan predicate.
 func migrateV23(db *DB) error {
 	if _, err := db.sqlDB.Exec(`CREATE TABLE IF NOT EXISTS periodic_definitions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
