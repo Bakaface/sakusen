@@ -141,7 +141,7 @@ func (s *Server) maybeAutoAdvance(t *task.Task) {
 
 	// Figure out which step just finished: the one the task is paused on.
 	// See workflow.PausedStep for the cursor invariant.
-	wf := pc.cfg.GetWorkflow(t.Workflow)
+	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
 	justFinished, ok := workflow.PausedStep(t, wf)
 	if !ok {
 		return

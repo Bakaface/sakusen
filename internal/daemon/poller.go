@@ -311,7 +311,7 @@ func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
 	label := "continue"
 	var slug string
 	var agentCfg config.AgentConfig
-	wf := pc.cfg.GetWorkflow(t.Workflow)
+	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
 	if step, ok := workflow.PausedStep(t, wf); ok && pc.cfg.StepIsTmux(wf, &step) {
 		var agentErr error
 		slug, agentCfg, agentErr = pc.cfg.StepAgent(wf, &step)

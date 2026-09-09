@@ -124,7 +124,7 @@ func (e *Engine) FinalizeTask(ctx context.Context, t *task.Task) error {
 	// Run summarizer after merge. For single-step workflows the per-step
 	// summary already IS the task summary — promote it directly into
 	// task.context and skip the redundant cross-step Claude invocation.
-	wf := e.cfg.GetWorkflow(t.Workflow)
+	wf := e.cfg.GetTaskWorkflow(t.Workflow)
 	if wf != nil {
 		if !e.promoteSingleStepContextToTask(t, wf, logFn) {
 			if err := e.database.UpdateTaskStatus(t.ID, task.StatusSummarizing); err != nil {

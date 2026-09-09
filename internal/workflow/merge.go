@@ -53,7 +53,7 @@ const defaultConflictPrompt = "You are resolving merge conflicts in an automated
 // default_agent → "claude" and must be headless-mode: an interactive tmux
 // agent cannot run a synchronous conflict-resolution pass.
 func (e *Engine) resolveConflicts(ctx context.Context, t *task.Task, conflictFiles []string, outputFn func([]string)) error {
-	wf := e.cfg.GetWorkflow(t.Workflow)
+	wf := e.cfg.GetTaskWorkflow(t.Workflow)
 	slug, agent, err := e.cfg.MergeConflictAgent(wf)
 	if err != nil {
 		return fmt.Errorf("failed to resolve merge conflicts: %w", err)

@@ -272,7 +272,14 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 
 	// Determine whether the workflow has more steps to run after the one the
 	// task is paused on. See workflow.HasMoreSteps for the cursor invariant.
-	wf := pc.cfg.GetWorkflow(t.Workflow)
+	// Strict lookup: a nil workflow here would read as "no steps left" and
+	// finalize the task on the spot, so an unresolvable name must stop the
+	// advance instead (the usual cause is the project's `workflows:` list
+	// being edited while the task sat at its gate).
+	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
+	if wf == nil {
+		return tmuxAdvanceOutcome{}, fmt.Errorf("workflow %q is not available for this project (check the `workflows:` list in .sakusen.yml)", t.Workflow)
+	}
 	hasMoreSteps := workflow.HasMoreSteps(t, wf)
 
 	if hasMoreSteps {

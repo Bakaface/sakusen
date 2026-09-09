@@ -735,3 +735,39 @@ func TestNoiseFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateTask_RejectsUnknownWorkflow pins the create-time half of the
+// task #415 fix. An explicit workflow name that the project config does not
+// define used to be accepted verbatim — GetWorkflow quietly substituted the
+// built-in single-step default, so the task was created against a pipeline
+// nobody asked for and only misbehaved much later. The create must fail up
+// front, naming the workflow.
+func TestCreateTask_RejectsUnknownWorkflow(t *testing.T) {
+	isolateGlobalConfig(t)
+	projectPath := t.TempDir()
+	s, _ := setupServerWithPinnedWorkflow(t, projectPath, config.WorkflowConfig{
+		Name:  "sensible-auto",
+		Steps: []config.StepConfig{{Name: "researching", Prompt: "p"}},
+	})
+
+	_, _, err := s.createTaskFromRequest(CreateTaskRequest{
+		Input:       "do the thing",
+		Workflow:    "sensible",
+		ProjectPath: projectPath,
+	})
+	if err == nil {
+		t.Fatal("expected create to fail on an unknown workflow name")
+	}
+	if !strings.Contains(err.Error(), `unknown workflow "sensible"`) {
+		t.Errorf("error should name the unknown workflow, got %q", err.Error())
+	}
+
+	// A workflow the project does define still creates fine.
+	if _, _, err := s.createTaskFromRequest(CreateTaskRequest{
+		Input:       "do the thing",
+		Workflow:    "sensible-auto",
+		ProjectPath: projectPath,
+	}); err != nil {
+		t.Fatalf("known workflow should create: %v", err)
+	}
+}

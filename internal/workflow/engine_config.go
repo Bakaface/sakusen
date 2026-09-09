@@ -65,6 +65,16 @@ func (e *engineConfig) GetWorkflow(name string) *config.WorkflowConfig {
 	return e.full.GetWorkflow(name)
 }
 
+// GetTaskWorkflow is the strict lookup: nil when name does not resolve,
+// where GetWorkflow silently substitutes the built-in single-step default.
+// Anything driving a task whose workflow name comes from the DB must use
+// this — a name that stops resolving (the project's `workflows:` list was
+// edited mid-flight) would otherwise silently re-shape a running task into
+// the default workflow.
+func (e *engineConfig) GetTaskWorkflow(name string) *config.WorkflowConfig {
+	return e.full.GetTaskWorkflow(name)
+}
+
 func (e *engineConfig) EffectiveOnComplete(workflowName string) string {
 	return e.full.EffectiveOnComplete(workflowName)
 }

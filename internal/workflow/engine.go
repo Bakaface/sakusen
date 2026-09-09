@@ -314,7 +314,15 @@ func (e *Engine) EnsureWorktree(t *task.Task, checkDisk bool) (path string, prov
 //     evaluation, approval/tmux pausing) — returns a stepOutcome the driver
 //     switches on.
 func (e *Engine) RunTask(ctx context.Context, t *task.Task, outputFn func([]string)) error {
-	wf := e.cfg.GetWorkflow(t.Workflow)
+	wf := e.cfg.GetTaskWorkflow(t.Workflow)
+	if wf == nil {
+		// Strict lookup: GetWorkflow would substitute the built-in single-step
+		// default here, silently re-shaping the task's pipeline (wrong step
+		// names, a truncated cursor, an instant "completed"). Fail loudly
+		// instead — the usual cause is the project's `workflows:` list no
+		// longer listing this name.
+		return fmt.Errorf("workflow %q is not available for this project (check the `workflows:` list in .sakusen.yml)", t.Workflow)
+	}
 	steps := wf.Steps
 
 	ws, err := e.prepareWorkspace(ctx, t, wf)
@@ -824,7 +832,7 @@ func (e *Engine) summarizePreviousTmuxStep(ctx context.Context, t *task.Task, lo
 		}
 	}
 
-	wf := e.cfg.GetWorkflow(t.Workflow)
+	wf := e.cfg.GetTaskWorkflow(t.Workflow)
 	prevStep, ok := PausedStep(t, wf)
 	if !ok {
 		return nil
