@@ -80,39 +80,3 @@ workflows:
 		})
 	}
 }
-
-func TestPeriodicInlineWorkdirCopied(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	path := writeTempConfig(t, periodicBaseWorkflows+`
-periodic:
-  - name: sweep
-    cadence: "@every 5m"
-    workdir: personal/georgia-residency
-    steps:
-      - name: ping
-        prompt: "say hi"
-`)
-	cfg, err := LoadForProject(filepath.Dir(path))
-	if err != nil {
-		t.Fatalf("LoadForProject: %v", err)
-	}
-	if wf := cfg.GetTaskWorkflow("periodic:sweep"); wf == nil || wf.Workdir != "personal/georgia-residency" {
-		t.Fatalf("periodic workdir pin not copied: %+v", wf)
-	}
-}
-
-func TestPeriodicInlineWorkdirRejected(t *testing.T) {
-	path := writeTempConfig(t, periodicBaseWorkflows+`
-periodic:
-  - name: bad
-    cadence: "@every 5m"
-    workdir: ../escape
-    steps:
-      - name: ping
-        prompt: "say hi"
-`)
-	if err := ValidateFile(path); err == nil || !strings.Contains(err.Error(), "workdir") {
-		t.Fatalf("expected workdir error, got: %v", err)
-	}
-}

@@ -27,7 +27,7 @@ func TestHandleListPeriodics_ListsReconciledConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(resp.Periodics) != 1 || resp.Periodics[0].Name != "nightly" {
-		t.Fatalf("expected the 'nightly' periodic, got %+v", resp.Periodics)
+		t.Fatalf("expected the 'nightly' routine, got %+v", resp.Periodics)
 	}
 }
 
@@ -38,13 +38,16 @@ func TestHandleListPeriodics_SurfacesConfigLoadError(t *testing.T) {
 		t.Fatalf("initial list: got %s: %s", msg.Type, string(msg.Payload))
 	}
 
-	writeProjectConfig(t, proj.Path, `periodic:
+	writeProjectConfig(t, proj.Path, `workflows:
   - name: radar
-    cadence: "@every 5m"
     steps:
       - name: refreshing
         prompt: "x"
         agent: claude:fable
+routines:
+  - name: radar-sweep
+    cadence: "@every 5m"
+    workflow: radar
 `)
 	msg := listPeriodics(t, s, proj.Path)
 	if msg.Type != MsgError {

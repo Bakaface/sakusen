@@ -23,8 +23,8 @@ Unix socket server, request handlers, task polling, agent lifecycle. Protocol is
 | `store.go` | `taskStore` interface — the slice of `*db.DB` the server depends on; the fake-point for tests |
 | `protocol.go` | Message types, request/response structs |
 | `poller.go` | `taskPollerLoop` → `checkPendingTasks` → `startTaskAgent` (claim in DB, project context, work dir, runner wrapping `engine.RunTask`, spawn via manager) |
-| `scheduler.go` | Periodic definitions: reconcile from each project's `.sakusen.yml`, fire due ones as ordinary tasks; startup catch-up runs separately |
-| `broadcast.go` | `onAgentStateChange` → `MsgAgentUpdate` to subscribers; terminal states update the task, fire notifications (per-task switches via `taskNotifications`: periodic → workflow → global; `notify_if` evaluated in `notifyCompleted` from `task_steps`), `checkProjectTasksDone` (skipped when the trigger's own notification was silenced by an override) |
+| `scheduler.go` | Routines: reconcile each project's `routines:` into `periodic_definitions`, fire due (`cadence:`) and triggered (`after:`) ones as ordinary tasks (`fireRoutine` is the single fire path, shared with run-now); startup catch-up runs separately |
+| `broadcast.go` | `onAgentStateChange` → `MsgAgentUpdate` to subscribers; terminal states update the task, fire notifications (per-task switches via `taskNotifications`: routine → workflow → global; `notify_if` evaluated in `notifyCompleted` from `task_steps`), `checkProjectTasksDone` (skipped when the trigger's own notification was silenced by an override) |
 | `tmux_monitor.go` | Background tmux activity loop, broadcasts activity changes |
 | `agent_spawn.go` | `spawnInteractiveSession` / `interactiveAgent` (see invariants) |
 | `handlers_task.go` | Task CRUD & metadata: create (async title/slug via `summarizer:`), get, list, delete, retry, priority/field/dependency updates, revert, step contexts |
@@ -32,7 +32,7 @@ Unix socket server, request handlers, task polling, agent lifecycle. Protocol is
 | `handlers_continue.go` | Continue/advance/finalize, worktree/branch management, tmux setup, detach/attach branch |
 | `handlers_waits_on.go` | `create_tasks_and_wait` / `wait_for_tasks`: child creation + `task_waits_on` edges; parent suspends to `StatusAwaitingChildren` |
 | `handlers_cleanup.go` | Worktree/branch/log cleanup for completed/failed tasks (task ID 0 = all eligible) |
-| `handlers_periodic.go` | List/get/pause/runs/fire-now for periodic definitions |
+| `handlers_periodic.go` | List/get/pause/runs/run-now for routines, all addressed by (project path, name) |
 | `handlers_tracks.go` | Track create/get/list/set-context, `resolveTrackRef`, `trackToInfo` |
 | `handlers_workflows.go` | `list_workflows` — flat listing across projects |
 

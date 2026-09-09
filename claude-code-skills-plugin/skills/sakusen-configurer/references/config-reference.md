@@ -17,7 +17,6 @@
 - [Tmux Setup Command](#tmux-setup-command)
 - [Tmux Session Hibernation](#tmux-session-hibernation)
 - [Prompt Includes (`.sakusen/prompts/`)](#prompt-includes-sakusenprompts)
-- [Periodic Triggers (`cadence` / `after`)](#periodic-triggers-cadence--after)
 - [Step Configuration, Loops, Cross-Task and Child References](#step-configuration-loops-cross-task-and-child-references) — moved to [workflow-building.md](workflow-building.md)
 - [Task States](#task-states)
 - [Task Priorities](#task-priorities)
@@ -277,9 +276,9 @@ notifications:
 The daemon reads this block from the global config. `enabled` is the master switch: when it is
 `false`, nothing is sent, whatever any override says.
 
-### Per-workflow and per-periodic overrides
+### Per-workflow and per-routine overrides
 
-A workflow or a `periodic:` entry may carry its own `notifications:` block to override the
+A workflow or a `routines:` entry may carry its own `notifications:` block to override the
 per-event switches for the tasks it runs. Every key is optional:
 
 ```yaml
@@ -290,8 +289,8 @@ workflows:
       on_failed: true          # but always report failures
     steps: [...]
 
-periodic:
-  - name: anki-enrich
+routines:
+  - name: anki-enrich-nightly
     cadence: "0 3 * * *"
     workflow: anki-enrich
     notifications:
@@ -300,8 +299,8 @@ periodic:
         marker: NEW_CARDS      # ...step `report`'s context contains this literal
 ```
 
-- **Cascade, per field:** periodic entry → the task's workflow → global `notifications:`.
-  The first tier that sets a field wins, so a periodic that sets only `on_complete` still
+- **Cascade, per field:** routine → the task's workflow → global `notifications:`.
+  The first tier that sets a field wins, so a routine that sets only `on_complete` still
   inherits `on_failed` from its workflow or from the global config.
 - **No `enabled` key:** an override can silence events but cannot turn notifications on while
   the global `enabled` is `false`.
@@ -310,8 +309,8 @@ periodic:
   - `step_context_contains: <step>` plus `marker: <literal>`: notify if that step's context
     contains the marker (case-sensitive substring, as in loop `exit_condition`).
 
-  `<step>` must be a step or parallel branch of the effective workflow (the periodic's inline
-  `steps:`, or the workflow it references). It reads the step's own context, so it behaves the
+  `<step>` must be a step or parallel branch of the workflow (for a routine, the workflow it
+  binds). It reads the step's own context, so it behaves the
   same whether or not finalization ran the summarizer.
 - **"All Tasks Completed"** is skipped when the task that would trigger it had its own
   notification silenced by an override or by `notify_if`.
@@ -496,27 +495,6 @@ workflows:
 
 There is no top-level `prompts:` map and no agent-level prompt — files only. See
 [workflow-building.md → Prompt Includes](workflow-building.md#prompt-includes).
-
----
-
-## Periodic Triggers (`cadence` / `after`)
-
-Each entry under the top-level `periodic:` list declares exactly one trigger:
-
-```yaml
-periodic:
-  - name: intrum-sync
-    cadence: "0 0 * * *"        # cron schedule (or "@every 1h")
-    workflow: default
-  - name: intrum-log-backfill
-    after: intrum-sync          # fire each time an intrum-sync run completes
-    workflow: default
-```
-
-- `after:` names another periodic in the **same** `.sakusen.yml`. The entry fires when that periodic's latest run reaches `completed`; a run that ends `failed`/`merge-failed` is skipped (the next completed run fires). A manual run-now of the upstream counts as a run.
-- Setting both `cadence:` and `after:`, or neither, is a load error, as are unknown names, self-references and cycles.
-- Detection happens on the daemon's 30s scheduler tick. A new `after:` entry does not fire for an upstream run that finished before it existed, and completions that happen while it is paused are not replayed on resume.
-- Skip-overlap still applies: if the entry's own previous run is still active, that trigger is skipped.
 
 ---
 

@@ -523,10 +523,10 @@ func TestDiagnose_MergedAgentRefs(t *testing.T) {
 			wantErr: `unknown agent "claude:fable"`,
 		},
 		{
-			name:    "periodic step ref to removed global variant",
+			name:    "routine-bound workflow step ref to removed global variant",
 			global:  globalClaudeNoFable,
-			project: "periodic:\n  - name: radar\n    cadence: \"0 3 * * *\"\n    steps:\n      - name: refreshing\n        prompt: x\n        agent: claude:fable\n",
-			wantErr: `workflow "periodic:radar" step "refreshing": unknown agent "claude:fable"`,
+			project: "workflows:\n  - name: radar\n    steps:\n      - name: refreshing\n        prompt: x\n        agent: claude:fable\nroutines:\n  - name: radar-nightly\n    cadence: \"0 3 * * *\"\n    workflow: radar\n",
+			wantErr: `workflow "radar" step "refreshing": unknown agent "claude:fable"`,
 		},
 		{
 			name:    "step ref to global variant resolves",

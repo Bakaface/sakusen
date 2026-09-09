@@ -182,6 +182,7 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 		"continue_task", "update_task", "update_step_context",
 		"create_track", "get_track", "update_track", "list_tracks",
 		"wait_for_task_status",
+		"list_routines", "run_routine",
 	} {
 		if !got[want] {
 			t.Errorf("tool %q not advertised; got %v", want, got)
@@ -196,8 +197,8 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 			t.Errorf("removed tool %q is still advertised", gone)
 		}
 	}
-	if len(resp.Tools) != 17 {
-		t.Errorf("tool count: got %d, want 17 — %v", len(resp.Tools), got)
+	if len(resp.Tools) != 19 {
+		t.Errorf("tool count: got %d, want 19 — %v", len(resp.Tools), got)
 	}
 }
 

@@ -15,6 +15,7 @@ const (
 	selectorPriority
 	selectorArtifact
 	selectorWorkflow  // workflow picker: opens new-task prompt with workflow preselected (or skips if fully-pinned)
+	selectorRoutine   // routine picker: runs the chosen routine (or asks for its input first)
 	selectorRetryStep // retry: pick which workflow step to restart from
 )
 

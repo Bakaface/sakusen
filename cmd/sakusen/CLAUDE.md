@@ -26,7 +26,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 | `wait.go` | `wait <task_id>...` — blocks until any task reaches a target status (`--status`, `--timeout`), prints `client.WaitResult` JSON; exit 0 matched / 2 timed out / 1 error; project-independent |
 | `depends_on.go` | `depends-on add/rm/list` |
 | `tracks.go` | `tracks create/list/show/set-context` |
-| `periodics.go` | `periodics list/show/pause/resume/runs/run` |
+| `routines.go` | `routines list/show/pause/resume/runs/run` — all by routine name |
 | `backfill_context.go` | `backfill-context` for older tasks |
 | `helpers.go` | Task table printing, truncation, shell completion for task IDs |
 | `version.go` | `version` |

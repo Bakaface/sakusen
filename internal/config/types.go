@@ -107,10 +107,10 @@ type ProjectConfig struct {
 	WorktreeSetupCommands    []string                `yaml:"worktree-setup-commands"`
 	TmuxSetupCommand         string                  `yaml:"tmux-setup-command"`
 	Options                  *OptionsConfig          `yaml:"options,omitempty"`
-	// Periodic defines scheduled tasks that the daemon materializes as ordinary
-	// tasks rows on a cron/@every cadence. Top-level (sibling to workflows:).
-	// See PeriodicEntry.
-	Periodic []PeriodicEntry `yaml:"periodic,omitempty"`
+	// Routines are invocation bindings: each names a workflow defined under
+	// workflows: and supplies pins plus an optional trigger (cadence or
+	// after). Top-level (sibling to workflows:). See RoutineConfig.
+	Routines []RoutineConfig `yaml:"routines,omitempty"`
 	// Tmux configures tmux session hibernation. See TmuxConfig.
 	Tmux *TmuxConfig `yaml:"tmux,omitempty"`
 	// Merge configures the clean-target wait of the merge pipeline. See
@@ -151,102 +151,144 @@ type TmuxConfig struct {
 	MaxLiveSessions *int `yaml:"max_live_sessions,omitempty"`
 }
 
-// PeriodicEntry is a single scheduled-task definition under the top-level
-// periodic: key in .sakusen.yml. Each entry pairs a cadence (standard 5-field
-// cron or @every/descriptor) with EITHER a workflow reference (Workflow) OR
-// inline steps (Steps) — exactly one must be set (enforced in validation).
-//
-// Inline-step entries are registered with the engine as a hidden workflow named
-// "periodic:<name>" (same "<prefix>:<name>" shape as track workflows; a track
-// slugged "periodic" whose workflow name collides with a periodic entry name is
-// rejected as a workflow-name collision at load time). Ref-mode entries reuse
-// an existing workflow by name.
-//
-// An entry declares exactly one trigger: Cadence (cron schedule) or After (the
-// name of another periodic in the same project; this entry fires each time a
-// run of that periodic reaches completed).
-type PeriodicEntry struct {
-	Name        string `yaml:"name"`
-	Cadence     string `yaml:"cadence,omitempty"`
-	After       string `yaml:"after,omitempty"`
+// RoutineConfig is a single entry under the top-level routines: key in
+// .sakusen.yml. A routine BINDS an existing workflow to a way of invoking it:
+// it never defines steps. A routine declares at most one trigger: Cadence (a
+// cron schedule) or After (the name of another routine in the same project;
+// this routine fires each time a run of that routine reaches completed).
+// Without either it is on-demand only (TUI :RunRoutine, `sakusen routines
+// run`, MCP run_routine). Every routine can also be run on demand. One
+// workflow may back any number of routines with different pins.
+type RoutineConfig struct {
+	Name string `yaml:"name"`
+	// Description is human-readable metadata surfaced in the routine palette
+	// and over MCP. Never a pin, never interpolated into prompts.
 	Description string `yaml:"description,omitempty"`
 
-	// Workflow references an existing workflow by name (ref mode). Mutually
-	// exclusive with Steps.
-	Workflow string `yaml:"workflow,omitempty"`
+	// Workflow names the workflow this routine runs. Required; resolved by the
+	// same exact-name lookup task creation uses, so hidden pool files and
+	// "<slug>:<name>" track workflows are reachable.
+	Workflow string `yaml:"workflow"`
 
-	// Steps defines an inline workflow (inline mode). Mutually exclusive with
-	// Workflow. Registered as the hidden workflow "periodic:<name>".
-	Steps []StepConfig `yaml:"steps,omitempty"`
-
-	// Agent is the inline-workflow agent slug default (see WorkflowConfig.Agent).
-	// Ignored in ref mode.
-	Agent string `yaml:"agent,omitempty"`
-
-	// SummarizerPrompt is the inline-workflow summarizer prompt. Ignored in ref mode.
-	SummarizerPrompt string `yaml:"summarizer_prompt,omitempty"`
-
-	// Worktree, Branch, Checkout, Target and Workdir are the inline-workflow New Task
-	// pins (see the same-named WorkflowConfig fields). They are copied verbatim
-	// onto the hidden "periodic:<name>" workflow, so materialized fires pick
-	// them up through the ordinary workflow-pin path in createTaskFromRequest.
-	// Without them an inline entry could only inherit the project default,
-	// which the user's last interactive task creation mutates.
-	//
-	// Ignored in ref mode — the referenced workflow's own pins apply, the same
-	// way Agent and SummarizerPrompt are ignored there.
-	//
-	// The Input pin is deliberately absent: PeriodicEntry.Input already sets
-	// the materialized task's input directly.
+	// Input, Worktree, Branch, Checkout, Target and Workdir are the New Task
+	// pins (see the same-named WorkflowConfig fields). A pin set here
+	// overrides the referenced workflow's own; branch and checkout override as
+	// a PAIR, so setting either one ignores both of the workflow's. See
+	// EffectivePins.
+	Input    string `yaml:"input,omitempty"`
 	Worktree *bool  `yaml:"worktree,omitempty"`
 	Branch   string `yaml:"branch,omitempty"`
 	Checkout string `yaml:"checkout,omitempty"`
 	Target   string `yaml:"target,omitempty"`
 	Workdir  string `yaml:"workdir,omitempty"`
 
-	// ExclusiveWorkdir is the inline-workflow working-tree lock (see
-	// WorkflowConfig.ExclusiveWorkdir). Ignored in ref mode.
-	ExclusiveWorkdir bool `yaml:"exclusive_workdir,omitempty"`
+	// Cadence is a standard 5-field cron expression, a descriptor (@daily,
+	// @hourly, ...) or the @every shorthand. Mutually exclusive with After.
+	// With neither set the routine is on-demand only: it is still registered
+	// (and keeps its run history) but never fires by itself.
+	Cadence string `yaml:"cadence,omitempty"`
 
-	// Input becomes the task input ({{task.input}}) for each fire. Optional —
-	// when empty, no step prompt of the effective workflow may reference
-	// {{task.input}} (enforced in validation).
-	Input string `yaml:"input,omitempty"`
+	// After names another routine in the same project: this routine fires
+	// each time a run of that routine (scheduled, triggered or on-demand)
+	// reaches completed. Mutually exclusive with Cadence.
+	After string `yaml:"after,omitempty"`
 
-	// Priority for materialized tasks. Empty falls back to the project default
-	// at fire time (resolved in createTaskFromRequest, not at reconcile, so a
-	// changed project default takes effect without touching .sakusen.yml).
+	// Priority for tasks this routine fires. Empty falls back to the project
+	// default at fire time (resolved in createTaskFromRequest, not at
+	// reconcile, so a changed default takes effect without a config touch).
 	Priority string `yaml:"priority,omitempty"`
 
-	// Paused, when true, keeps the definition registered but prevents fires.
+	// Paused, when true, keeps the routine registered but prevents automatic
+	// (cadence or after) fires. Only meaningful with a trigger.
 	Paused bool `yaml:"paused,omitempty"`
 
 	// Notifications overrides the per-event notification switches for tasks
-	// fired by this entry, in both ref and inline mode. It is the most
-	// specific tier (see Config.EffectiveNotifications) and is never copied
-	// onto the hidden "periodic:<name>" workflow.
+	// fired by this routine. It is the most specific tier (see
+	// Config.EffectiveNotifications), above the bound workflow's own.
 	Notifications *NotificationOverrides `yaml:"notifications,omitempty"`
 }
 
-// UnmarshalYAML decodes a PeriodicEntry and rejects the removed `tmux:` and
-// `print:` fields with the same migration errors as workflows.
-func (p *PeriodicEntry) UnmarshalYAML(value *yaml.Node) error {
-	if err := checkRemovedModeFields(value, "periodic"); err != nil {
+// UnmarshalYAML decodes a RoutineConfig and rejects workflow-DEFINITION fields:
+// a routine is a binding, so steps (and their agent / summarizer_prompt
+// settings, and its exclusive_workdir lock) belong on the workflow it
+// references. The removed `tmux:`/`print:`
+// fields get the same migration errors as workflows.
+func (r *RoutineConfig) UnmarshalYAML(value *yaml.Node) error {
+	for _, key := range []string{"steps", "agent", "summarizer_prompt", "exclusive_workdir"} {
+		if err := checkRemovedMappingKey(value, key, fmt.Sprintf(
+			"routine field `%s` is not allowed: routines are bindings — define steps under `workflows:` and reference them with `workflow:`", key)); err != nil {
+			return err
+		}
+	}
+	if err := checkRemovedModeFields(value, "routine"); err != nil {
 		return err
 	}
-	type raw PeriodicEntry
-	var r raw
-	if err := value.Decode(&r); err != nil {
+	type raw RoutineConfig
+	var rr raw
+	if err := value.Decode(&rr); err != nil {
 		return err
 	}
-	*p = PeriodicEntry(r)
+	*r = RoutineConfig(rr)
 	return nil
 }
 
-// InlineWorkflowName returns the engine-registered hidden workflow name for an
-// inline-mode periodic entry.
-func (p *PeriodicEntry) InlineWorkflowName() string {
-	return "periodic:" + p.Name
+// IsScheduled reports whether the routine carries a cadence (and so fires on a
+// schedule).
+func (r *RoutineConfig) IsScheduled() bool { return r.Cadence != "" }
+
+// IsTriggered reports whether the routine fires by itself — on a cadence or
+// after another routine completes. Untriggered routines are on-demand only.
+func (r *RoutineConfig) IsTriggered() bool { return r.Cadence != "" || r.After != "" }
+
+// EffectivePins merges the routine's pins over the referenced workflow's,
+// returning a WorkflowConfig-shaped value (named after the routine) that the
+// fire path and the pin validators can consume directly.
+//
+// Input, Worktree, Target and Workdir merge per field. Branch and Checkout merge as a
+// PAIR — setting either on the routine ignores both of the workflow's — which
+// mirrors how an explicit request value displaces a workflow pin in
+// createTaskFromRequest.
+func (r *RoutineConfig) EffectivePins(wf *WorkflowConfig) WorkflowConfig {
+	pins := WorkflowConfig{
+		Name:     r.Name,
+		Input:    r.Input,
+		Worktree: r.Worktree,
+		Branch:   r.Branch,
+		Checkout: r.Checkout,
+		Target:   r.Target,
+		Workdir:  r.Workdir,
+	}
+	if wf == nil {
+		return pins
+	}
+	if pins.Input == "" {
+		pins.Input = wf.Input
+	}
+	if pins.Worktree == nil {
+		pins.Worktree = wf.Worktree
+	}
+	if pins.Branch == "" && pins.Checkout == "" {
+		pins.Branch = wf.Branch
+		pins.Checkout = wf.Checkout
+	}
+	if pins.Target == "" {
+		pins.Target = wf.Target
+	}
+	if pins.Workdir == "" {
+		pins.Workdir = wf.Workdir
+	}
+	return pins
+}
+
+// ValidatePins checks the routine's effective pins for the same internal
+// consistency WorkflowConfig.ValidatePins enforces, reporting against the
+// routine's name.
+func (r *RoutineConfig) ValidatePins(wf *WorkflowConfig) error {
+	pins := r.EffectivePins(wf)
+	if err := ValidateWorkdir(pins.Workdir); err != nil {
+		return fmt.Errorf("routine %q: %w", r.Name, err)
+	}
+	return validatePinFields("routine", r.Name, pins.Worktree, pins.Branch, pins.Checkout, pins.Target)
 }
 
 // WorkflowEntry is a single item in the flat workflows: list. It is either
@@ -469,7 +511,6 @@ type WorkflowConfig struct {
 	// Source records where this workflow definition originated:
 	//   "inline"           — defined inline in .sakusen.yml
 	//   "<path>"           — file path under .sakusen/workflows/
-	//   "periodic"         — synthesized from an inline-mode periodic entry
 	// Not serialized to YAML — populated by the loader.
 	Source string `yaml:"-"`
 
@@ -505,12 +546,18 @@ func (wf *WorkflowConfig) ValidatePins() error {
 	if err := ValidateWorkdir(wf.Workdir); err != nil {
 		return fmt.Errorf("workflow %q: %w", wf.Name, err)
 	}
-	if wf.Branch != "" && wf.Checkout != "" {
-		return fmt.Errorf("workflow %q: cannot set both branch and checkout", wf.Name)
+	return validatePinFields("workflow", wf.Name, wf.Worktree, wf.Branch, wf.Checkout, wf.Target)
+}
+
+// validatePinFields holds the pin consistency rules shared by workflows and
+// routines; kind/name only shape the error message.
+func validatePinFields(kind, name string, worktree *bool, branch, checkout, target string) error {
+	if branch != "" && checkout != "" {
+		return fmt.Errorf("%s %q: cannot set both branch and checkout", kind, name)
 	}
-	if wf.Worktree != nil && !*wf.Worktree {
-		if wf.Branch != "" || wf.Checkout != "" || wf.Target != "" {
-			return fmt.Errorf("workflow %q: branch/checkout/target cannot be set when worktree: false", wf.Name)
+	if worktree != nil && !*worktree {
+		if branch != "" || checkout != "" || target != "" {
+			return fmt.Errorf("%s %q: branch/checkout/target cannot be set when worktree: false", kind, name)
 		}
 	}
 	return nil
@@ -1164,7 +1211,7 @@ type NotificationsConfig struct {
 }
 
 // NotificationOverrides is the `notifications:` block on a workflow or a
-// periodic entry. Each field overrides the global per-event switch only when
+// routine. Each field overrides the global per-event switch only when
 // set. There is deliberately no `enabled`: the global switch stays the master
 // gate, so an override can silence events but never turn notifications on.
 type NotificationOverrides struct {
@@ -1175,7 +1222,7 @@ type NotificationOverrides struct {
 	NotifyIf *NotifyCondition `yaml:"notify_if,omitempty"`
 }
 
-// UnmarshalYAML decodes strictly: the enclosing workflow and periodic entries
+// UnmarshalYAML decodes strictly: the enclosing workflow and routine entries
 // tolerate unknown keys, but a typo here would silently re-enable noise.
 func (n *NotificationOverrides) UnmarshalYAML(value *yaml.Node) error {
 	if err := checkKnownMappingKeys(value, "notifications", "on_complete", "on_failed", "on_waiting_input", "notify_if"); err != nil {
@@ -1288,7 +1335,7 @@ type Config struct {
 	OnComplete string
 
 	Workflows []WorkflowConfig // flat resolved workflow list
-	Periodic  []PeriodicEntry  // scheduled-task definitions (top-level periodic: section)
+	Routines  []RoutineConfig  // invocation bindings (top-level routines: section)
 
 	// Agents is the merged agent registry (global tier overlaid by the
 	// project tier, per slug). See AgentConfig and Config.StepAgent. After

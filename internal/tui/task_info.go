@@ -191,7 +191,7 @@ func (v *taskInfoView) renderMetadata() string {
 
 	if t.NotBefore != nil {
 		b.WriteString(labelStyle.Render("Not before: "))
-		b.WriteString(valueStyle.Render(fmtPeriodicTime(t.NotBefore)))
+		b.WriteString(valueStyle.Render(fmtRoutineTime(t.NotBefore)))
 		b.WriteString("\n")
 	}
 

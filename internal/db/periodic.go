@@ -8,14 +8,18 @@ import (
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
-// PeriodicDef is a row in periodic_definitions: a scheduled-task definition
-// reconciled from the top-level periodic: section of .sakusen.yml.
+// PeriodicDef is a row in periodic_definitions: a routine reconciled from the
+// top-level routines: section of .sakusen.yml. Every routine gets a row so run
+// history and last-task tracking are uniform; a row with an empty cadence
+// never becomes due (it is after:-triggered or on-demand only).
 type PeriodicDef struct {
-	ID          int64
-	ProjectID   int64
-	Name        string
+	ID        int64
+	ProjectID int64
+	Name      string
+	// Cadence is the routine's cron/@every spec. Empty ⇒ after:-triggered (see
+	// AfterName) or on-demand only.
 	Cadence     string
-	WorkflowRef string // empty ⇒ inline hidden workflow "periodic:<name>"
+	WorkflowRef string
 	Input       string
 	// Priority is stored raw from .sakusen.yml. Empty ⇒ fall back to the
 	// project default at fire time (resolved in createTaskFromRequest), so a
@@ -31,7 +35,7 @@ type PeriodicDef struct {
 	LastFiredAt  *time.Time
 	LastTaskID   *int64
 	// AfterName, when set, makes this an event-triggered definition: it fires
-	// when the same-project periodic AfterName's run completes. Cadence is
+	// when the same-project routine AfterName's run completes. Cadence is
 	// empty and NextFireAt is unused for these rows.
 	AfterName string
 	// AfterLastTaskID is the upstream run already consumed (fired on or
@@ -137,11 +141,13 @@ func (db *DB) ListPeriodicsForProject(projectID int64) ([]*PeriodicDef, error) {
 	return scanPeriodicDefs(rows)
 }
 
-// ListDuePeriodics returns active (non-deleted, non-paused) cadence-driven
-// periodic definitions whose next_fire_at is at or before `now`.
+// ListDuePeriodics returns active (non-deleted, non-paused) scheduled routines
+// whose next_fire_at is at or before `now`. Cadence-less (after: or on-demand)
+// rows are excluded: they carry a next_fire_at only because the column is NOT
+// NULL.
 func (db *DB) ListDuePeriodics(now time.Time) ([]*PeriodicDef, error) {
 	rows, err := db.sqlDB.Query(
-		fmt.Sprintf(`SELECT %s FROM periodic_definitions WHERE deleted_at IS NULL AND paused = 0 AND after_name = '' AND next_fire_at <= ? ORDER BY next_fire_at ASC`, periodicColumns),
+		fmt.Sprintf(`SELECT %s FROM periodic_definitions WHERE deleted_at IS NULL AND paused = 0 AND after_name = '' AND cadence != '' AND next_fire_at <= ? ORDER BY next_fire_at ASC`, periodicColumns),
 		now,
 	)
 	if err != nil {
@@ -164,7 +170,7 @@ func (db *DB) ListAfterPeriodics() ([]*PeriodicDef, error) {
 	return scanPeriodicDefs(rows)
 }
 
-// upstreamLastTaskID returns the current last_task_id of the named periodic in
+// upstreamLastTaskID returns the current last_task_id of the named routine in
 // the project, or nil when it is absent or has never fired.
 func (db *DB) upstreamLastTaskID(projectID int64, name string) (*int64, error) {
 	up, err := db.GetPeriodicByName(projectID, name)
@@ -182,7 +188,8 @@ func (db *DB) upstreamLastTaskID(projectID int64, name string) (*int64, error) {
 // and clears deleted_at (so re-appearing entries revive with their run history
 // intact). next_fire_at is recomputed (set to nextFireAt) only when the cadence
 // changed or the row was previously soft-deleted; otherwise the existing
-// schedule is preserved.
+// schedule is preserved. An empty cadence (after: or on-demand routine) still
+// stores nextFireAt, which the due-query ignores.
 //
 // The `paused` argument is the value declared in .sakusen.yml. It is applied to
 // the runtime flag using a deferred-override approach that mirrors the cadence
@@ -285,13 +292,14 @@ func (db *DB) SoftDeletePeriodicDef(projectID int64, name string) error {
 
 // ClaimPeriodicFire atomically advances a definition's schedule for one fire.
 // It sets next_fire_at = newNextFire and last_fired_at = now, but only if the
-// row is still due (next_fire_at <= now), active, and not paused. Returns true
+// row is still due (next_fire_at <= now), scheduled, active, and not paused.
+// Returns true
 // when the claim succeeded — serializing fires across double-ticks and daemon
 // restarts (mirrors ClaimTask).
 func (db *DB) ClaimPeriodicFire(id int64, now, newNextFire time.Time) (bool, error) {
 	result, err := db.sqlDB.Exec(
 		`UPDATE periodic_definitions SET next_fire_at = ?, last_fired_at = ?, updated_at = ?
-		 WHERE id = ? AND next_fire_at <= ? AND deleted_at IS NULL AND paused = 0`,
+		 WHERE id = ? AND next_fire_at <= ? AND deleted_at IS NULL AND paused = 0 AND cadence != ''`,
 		newNextFire, now, now, id, now,
 	)
 	if err != nil {

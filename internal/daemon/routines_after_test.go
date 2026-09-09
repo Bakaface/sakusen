@@ -9,11 +9,28 @@ import (
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
+// afterRoutineConfig declares upstream "sync" (cadence) and downstream
+// "backfill" (after: sync), both bound to the project's "default" workflow.
+const afterRoutineConfig = `workflows:
+  - name: default
+    steps:
+      - name: impl
+        prompt: "do it"
+routines:
+  - name: sync
+    cadence: "@every 1h"
+    workflow: default
+  - name: backfill
+    after: sync
+    workflow: default
+`
+
 // afterFixture registers upstream "sync" (cadence, never due) and downstream
 // "backfill" (after: sync), both running the project's "default" workflow.
 func afterFixture(t *testing.T) (*Server, *db.DB, *db.Project, *db.PeriodicDef, *db.PeriodicDef) {
 	t.Helper()
 	s, database, proj := newSchedulerTestServer(t)
+	writeProjectConfig(t, proj.Path, afterRoutineConfig)
 	future := time.Now().Add(time.Hour)
 	up, err := database.UpsertPeriodicDef(proj.ID, "sync", "@every 1h", "", "default", "", "", false, future)
 	if err != nil {
@@ -150,7 +167,11 @@ func TestAfterFire_PausedNeverFires(t *testing.T) {
 func TestAfterFire_UpstreamRunNowTriggers(t *testing.T) {
 	s, database, _, up, down := afterFixture(t)
 
-	run, err := s.materializePeriodicTask(up, time.Now())
+	b, err := s.resolveRoutine(up)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	run, err := s.fireRoutine(b, up, "", time.Now())
 	if err != nil {
 		t.Fatalf("run-now: %v", err)
 	}
@@ -168,11 +189,11 @@ func TestAfterFire_UpstreamRunNowTriggers(t *testing.T) {
 	}
 }
 
-func TestReconcilePeriodics_AfterEntry(t *testing.T) {
+func TestReconcileRoutines_AfterEntry(t *testing.T) {
 	s, database, proj := newSchedulerTestServer(t)
 
 	cfg := &config.Config{
-		Periodic: []config.PeriodicEntry{
+		Routines: []config.RoutineConfig{
 			{Name: "sync", Cadence: "@every 1h", Workflow: "default"},
 			{Name: "backfill", After: "sync", Workflow: "default"},
 		},
@@ -193,7 +214,7 @@ func TestReconcilePeriodics_AfterEntry(t *testing.T) {
 	}
 	for _, p := range due {
 		if p.Name == "backfill" {
-			t.Error("after: entry returned by ListDuePeriodics")
+			t.Error("after: routine returned by ListDuePeriodics")
 		}
 	}
 }

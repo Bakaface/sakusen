@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -17,6 +18,12 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.prompt.showHelp = false
 		}
 		return m, nil
+	}
+
+	// Routine input mode collects exactly one field, so the pane, field-focus
+	// and git keys have nothing to act on.
+	if m.prompt.routineName != "" {
+		return m.handleRoutinePromptKey(msg)
 	}
 
 	// ── Shared keys (work identically in both task and workflow panes) ──
@@ -87,6 +94,30 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.handleTaskPaneKey(msg)
 }
 
+// handleRoutinePromptKey is the input-only mode's key handler: cancel, submit,
+// open the editor, and otherwise type into the input box.
+func (m Model) handleRoutinePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	pk := cachedPromptKeyMap
+
+	switch {
+	case key.Matches(msg, pk.Cancel):
+		m.prompt.routineName = ""
+		m.view = viewList
+		return m, nil
+
+	case key.Matches(msg, pk.Submit):
+		return m.handlePromptSubmit()
+
+	case key.Matches(msg, pk.Editor):
+		return m, m.openEditorForPrompt()
+
+	default:
+		m.prompt.validationError = ""
+		cmd := m.prompt.Update(msg)
+		return m, cmd
+	}
+}
+
 // handleTaskPaneKey handles keys specific to the task pane (title, description, git fields).
 func (m Model) handleTaskPaneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	pk := cachedPromptKeyMap
@@ -133,6 +164,20 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 		}
 		m.view = viewList
 		return m, deferred
+	}
+
+	// Routine input mode: the routine's binding supplies everything but the
+	// argument, so submitting runs it rather than creating a task here.
+	if name := m.prompt.routineName; name != "" {
+		input := strings.TrimSpace(description)
+		if input == "" {
+			m.prompt.validationError = "input required"
+			return m, nil
+		}
+		m.prompt.routineName = ""
+		m.view = viewList
+		m.statusMessage = fmt.Sprintf("ran routine %q", name)
+		return m, m.runRoutineCmd(name, input)
 	}
 
 	// New task mode

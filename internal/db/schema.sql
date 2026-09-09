@@ -75,13 +75,14 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_periodic_id ON tasks(periodic_id) WHERE periodic_id IS NOT NULL;
 
--- periodic_definitions stores scheduled-task definitions reconciled from the
--- top-level periodic: section of .sortie.yml. Each due definition is
--- materialized by the daemon's scheduler into an ordinary tasks row
--- (tasks.periodic_id FK). workflow_ref empty ⇒ the inline hidden workflow
--- "periodic:<name>". priority empty ⇒ the project default at fire time.
--- deleted_at is set (soft delete) when an entry disappears from the yml so its
--- run history (linked tasks) survives.
+-- periodic_definitions stores routines reconciled from the top-level routines:
+-- section of .sakusen.yml. A fire materializes an ordinary tasks row
+-- (tasks.periodic_id FK). cadence empty ⇒ an after:-triggered or on-demand
+-- routine: it keeps a row (and its run history) but never becomes due, so
+-- next_fire_at holds a filler value the due-scan ignores. workflow_ref names the workflow the routine
+-- binds. priority empty ⇒ the project default at fire time. deleted_at is set
+-- (soft delete) when a routine disappears from the yml so its run history
+-- (linked tasks) survives.
 CREATE TABLE IF NOT EXISTS periodic_definitions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -95,7 +96,7 @@ CREATE TABLE IF NOT EXISTS periodic_definitions (
     next_fire_at DATETIME NOT NULL,
     last_fired_at DATETIME,
     last_task_id INTEGER REFERENCES tasks(id),
-    -- Non-empty ⇒ event-triggered: fires when the named upstream periodic's
+    -- Non-empty ⇒ event-triggered: fires when the named upstream routine's
     -- run completes (cadence is '' and next_fire_at is unused).
     -- after_last_task_id is the upstream run already consumed.
     after_name TEXT NOT NULL DEFAULT '',

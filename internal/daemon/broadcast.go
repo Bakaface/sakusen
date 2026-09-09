@@ -198,7 +198,7 @@ func (s *Server) finalizeCompletedTask(t *task.Task, agentID string, taskTitle s
 	s.notifyCompleted(t, agentID, taskTitle)
 }
 
-// taskNotifications resolves t's notification switches from its periodic
+// taskNotifications resolves t's notification switches from its routine
 // entry and workflow over the global notifier config. Any tier that cannot be
 // looked up is skipped, falling back to the global switches.
 func (s *Server) taskNotifications(t *task.Task) config.EffectiveNotifications {
@@ -211,13 +211,13 @@ func (s *Server) taskNotifications(t *task.Task) config.EffectiveNotifications {
 			OnWaitingInput: base.OnWaitingInput,
 		}
 	}
-	periodicName := ""
+	routineName := ""
 	if t.PeriodicID != nil {
 		if d, err := s.database.GetPeriodicByID(*t.PeriodicID); err == nil {
-			periodicName = d.Name
+			routineName = d.Name
 		}
 	}
-	return pc.cfg.EffectiveNotifications(t.Workflow, periodicName, base)
+	return pc.cfg.EffectiveNotifications(t.Workflow, routineName, base)
 }
 
 // notifyCompleted sends t's completion notification (subject to its resolved

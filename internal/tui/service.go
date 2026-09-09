@@ -37,11 +37,12 @@ type TaskService interface {
 	// lost) gets it respawned before the TUI switches to it.
 	WakeTask(id int64) error
 
-	// Periodic definitions — the "P" view (list, run history, pause/run-now).
-	ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error)
-	ListPeriodicRuns(periodicID int64) ([]daemon.TaskInfo, error)
-	SetPeriodicPaused(id int64, paused bool) (*daemon.PeriodicInfo, error)
-	FirePeriodicNow(id int64) (*daemon.TaskInfo, error)
+	// Routines — the "P" view (list, run history, pause/run-now) and the
+	// :RunRoutine palette.
+	ListRoutines(projectPath string) ([]daemon.PeriodicInfo, error)
+	ListRoutineRuns(projectPath, name string) ([]daemon.TaskInfo, error)
+	SetRoutinePaused(projectPath, name string, paused bool) (*daemon.PeriodicInfo, error)
+	RunRoutine(projectPath, name, input string) (*daemon.TaskInfo, error)
 
 	// Connection lifecycle.
 	Connect() error

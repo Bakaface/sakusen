@@ -25,21 +25,18 @@ workflows:
       steps:
         - name: work
           prompt: "work"
-periodic:
-  - name: nightly-ref
+routines:
+  - name: nightly-report
     cadence: "0 3 * * *"
     workflow: report
     notifications:
       on_complete: false
-  - name: nightly-inline
-    cadence: "0 4 * * *"
+  - name: quiet-now
+    workflow: quiet
     notifications:
       on_failed: true
       notify_if:
-        step_context_nonempty: scan
-    steps:
-      - name: scan
-        prompt: "scan"
+        step_context_nonempty: work
 `
 
 func TestNotificationOverrides_Parse(t *testing.T) {
@@ -71,17 +68,17 @@ func TestNotificationOverrides_Parse(t *testing.T) {
 		t.Fatalf("named-body sugar workflow lost its notifications: %+v", quiet)
 	}
 
-	if len(cfg.Periodic) != 2 {
-		t.Fatalf("expected 2 periodic entries, got %d", len(cfg.Periodic))
+	if len(cfg.Routines) != 2 {
+		t.Fatalf("expected 2 routines, got %d", len(cfg.Routines))
 	}
-	if p := cfg.Periodic[0].Notifications; p == nil || p.OnComplete == nil || *p.OnComplete {
-		t.Errorf("ref-mode periodic notifications not parsed: %+v", p)
+	if p := cfg.Routines[0].Notifications; p == nil || p.OnComplete == nil || *p.OnComplete {
+		t.Errorf("scheduled routine notifications not parsed: %+v", p)
 	}
-	if p := cfg.Periodic[1].Notifications; p == nil || p.NotifyIf == nil || p.NotifyIf.StepContextNonempty != "scan" {
-		t.Errorf("inline periodic notifications not parsed: %+v", p)
+	if p := cfg.Routines[1].Notifications; p == nil || p.NotifyIf == nil || p.NotifyIf.StepContextNonempty != "work" {
+		t.Errorf("on-demand routine notifications not parsed: %+v", p)
 	}
-	if wf := cfg.GetTaskWorkflow("periodic:nightly-inline"); wf == nil || wf.Notifications != nil {
-		t.Errorf("inline periodic notifications must not be copied onto its hidden workflow: %+v", wf)
+	if quiet.Notifications.OnFailed != nil {
+		t.Errorf("routine notifications must not leak onto the bound workflow: %+v", quiet.Notifications)
 	}
 }
 
@@ -121,14 +118,17 @@ workflows:
 		{
 			name: "enabled is not an override key",
 			yaml: `
-periodic:
-  - name: p
-    cadence: "@every 1h"
-    notifications:
-      enabled: true
+workflows:
+  - name: w
     steps:
       - name: s
         prompt: p
+routines:
+  - name: p
+    cadence: "@every 1h"
+    workflow: w
+    notifications:
+      enabled: true
 `,
 			wantErr: `unknown field "enabled"`,
 		},
@@ -205,29 +205,14 @@ workflows:
 			wantErr: `step "nope" does not exist`,
 		},
 		{
-			name: "unknown step in inline periodic",
-			yaml: `
-periodic:
-  - name: p
-    cadence: "@every 1h"
-    notifications:
-      notify_if:
-        step_context_nonempty: nope
-    steps:
-      - name: s
-        prompt: p
-`,
-			wantErr: `step "nope" does not exist`,
-		},
-		{
-			name: "unknown step in ref-mode periodic",
+			name: "unknown step in routine",
 			yaml: `
 workflows:
   - name: w
     steps:
       - name: s
         prompt: p
-periodic:
+routines:
   - name: p
     cadence: "@every 1h"
     workflow: w
@@ -300,7 +285,7 @@ func TestEffectiveNotifications_Cascade(t *testing.T) {
 			{Name: "plain"},
 			{Name: "wf", Notifications: &NotificationOverrides{OnFailed: boolPtr(false), OnComplete: boolPtr(true), NotifyIf: wfCond}},
 		},
-		Periodic: []PeriodicEntry{
+		Routines: []RoutineConfig{
 			{Name: "only-complete", Workflow: "wf", Notifications: &NotificationOverrides{OnComplete: boolPtr(false)}},
 			{Name: "with-cond", Workflow: "wf", Notifications: &NotificationOverrides{NotifyIf: pCond}},
 			{Name: "no-block", Workflow: "wf"},
@@ -311,7 +296,7 @@ func TestEffectiveNotifications_Cascade(t *testing.T) {
 	cases := []struct {
 		name     string
 		workflow string
-		periodic string
+		routine  string
 		want     EffectiveNotifications
 	}{
 		{
@@ -333,9 +318,9 @@ func TestEffectiveNotifications_Cascade(t *testing.T) {
 			},
 		},
 		{
-			name:     "periodic and workflow merge field by field",
+			name:     "routine and workflow merge field by field",
 			workflow: "wf",
-			periodic: "only-complete",
+			routine:  "only-complete",
 			want: EffectiveNotifications{
 				OnComplete: false, OnFailed: false, OnWaitingInput: true,
 				OnCompleteOverridden: true, OnFailedOverridden: true, NotifyIf: wfCond,
@@ -344,22 +329,22 @@ func TestEffectiveNotifications_Cascade(t *testing.T) {
 		{
 			name:     "notify_if from most specific tier",
 			workflow: "wf",
-			periodic: "with-cond",
+			routine:  "with-cond",
 			want: EffectiveNotifications{
 				OnComplete: true, OnFailed: false, OnWaitingInput: true,
 				OnCompleteOverridden: true, OnFailedOverridden: true, NotifyIf: pCond,
 			},
 		},
 		{
-			name:     "periodic without block falls through",
+			name:     "routine without block falls through",
 			workflow: "plain",
-			periodic: "no-block",
+			routine:  "no-block",
 			want:     EffectiveNotifications{OnComplete: true, OnFailed: true, OnWaitingInput: true},
 		},
 		{
-			name:     "missing periodic entry skipped",
+			name:     "missing routine skipped",
 			workflow: "wf",
-			periodic: "deleted",
+			routine:  "deleted",
 			want: EffectiveNotifications{
 				OnComplete: true, OnFailed: false, OnWaitingInput: true,
 				OnCompleteOverridden: true, OnFailedOverridden: true, NotifyIf: wfCond,
@@ -368,7 +353,7 @@ func TestEffectiveNotifications_Cascade(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cfg.EffectiveNotifications(tc.workflow, tc.periodic, base); got != tc.want {
+			if got := cfg.EffectiveNotifications(tc.workflow, tc.routine, base); got != tc.want {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
 			}
 		})

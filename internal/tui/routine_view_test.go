@@ -9,34 +9,37 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func TestRenderPeriodicList_Structure(t *testing.T) {
+func TestRenderRoutineList_Structure(t *testing.T) {
 	now := time.Now()
 	last := now.Add(-time.Hour)
 	m := Model{
 		width:  120,
 		height: 40,
 		keys:   newKeyMap(),
-		periodic: periodicViewState{
+		routines: routineViewState{
 			defs: []daemon.PeriodicInfo{
 				{ID: 1, Name: "nightly-digest", Cadence: "0 3 * * *", WorkflowRef: "default", NextFireAt: now, LastFiredAt: &last},
-				{ID: 2, Name: "heartbeat", Cadence: "@every 5m", Inline: true, NextFireAt: now, Paused: true},
+				{ID: 2, Name: "heartbeat", Cadence: "@every 5m", WorkflowRef: "ping", NextFireAt: now, Paused: true},
+				{ID: 3, Name: "compose-wiki", WorkflowRef: "wiki-compose", NextFireAt: now},
 			},
 			cursor: 1,
 		},
 	}
 
-	out := m.renderPeriodicList()
-	if !strings.Contains(out, "Periodic Definitions") {
+	out := m.renderRoutineList()
+	if !strings.Contains(out, "Routines") {
 		t.Error("missing title")
 	}
-	if !strings.Contains(out, "nightly-digest") || !strings.Contains(out, "heartbeat") {
-		t.Error("missing definition rows")
+	for _, name := range []string{"nightly-digest", "heartbeat", "compose-wiki"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("missing row for %q", name)
+		}
 	}
 	if !strings.Contains(out, "paused") {
 		t.Error("missing paused status")
 	}
-	if !strings.Contains(out, "(inline)") {
-		t.Error("inline definition should show (inline) workflow label")
+	if !strings.Contains(out, "on-demand") {
+		t.Error("a cadence-less routine should show the on-demand status")
 	}
 	// The cursor row (heartbeat) should be highlighted with the selection marker.
 	if !strings.Contains(out, "> ") {
@@ -50,20 +53,51 @@ func TestRenderPeriodicList_Structure(t *testing.T) {
 	}
 }
 
-func TestRenderPeriodicList_Empty(t *testing.T) {
-	m := Model{width: 80, height: 24, keys: newKeyMap()}
-	out := m.renderPeriodicList()
-	if !strings.Contains(out, "No periodic definitions") {
-		t.Errorf("expected empty-state message, got: %q", out)
+// An on-demand routine has no schedule, so both time columns read "-" while the
+// row keeps the same shape as a scheduled one.
+func TestRenderRoutineList_OnDemandColumns(t *testing.T) {
+	m := Model{
+		width:  120,
+		height: 40,
+		keys:   newKeyMap(),
+		routines: routineViewState{
+			defs: []daemon.PeriodicInfo{
+				{ID: 1, Name: "compose-wiki", WorkflowRef: "wiki-compose", NextFireAt: time.Now()},
+			},
+		},
+	}
+	out := m.renderRoutineList()
+	row := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "compose-wiki") {
+			row = line
+		}
+	}
+	if row == "" {
+		t.Fatalf("routine row not rendered:\n%s", out)
+	}
+	if strings.Count(row, "-") < 2 {
+		t.Errorf("expected cadence and next-fire to render as \"-\", got %q", row)
+	}
+	if strings.Contains(row, time.Now().Format("15:04")) {
+		t.Errorf("on-demand routine must not show a next fire time, got %q", row)
 	}
 }
 
-func TestRenderPeriodicRuns_Structure(t *testing.T) {
+func TestRenderRoutineList_Empty(t *testing.T) {
+	m := Model{width: 80, height: 24, keys: newKeyMap()}
+	out := m.renderRoutineList()
+	if !strings.Contains(out, "No routines") || !strings.Contains(out, "routines:") {
+		t.Errorf("expected empty-state message naming routines:, got: %q", out)
+	}
+}
+
+func TestRenderRoutineRuns_Structure(t *testing.T) {
 	m := Model{
 		width:  100,
 		height: 30,
 		keys:   newKeyMap(),
-		periodic: periodicViewState{
+		routines: routineViewState{
 			selectedName: "nightly-digest",
 			runs: []daemon.TaskInfo{
 				{ID: 10, Status: "completed", CurrentStep: "impl", Title: "nightly-digest @ 2026"},
@@ -72,7 +106,7 @@ func TestRenderPeriodicRuns_Structure(t *testing.T) {
 			runsCursor: 0,
 		},
 	}
-	out := m.renderPeriodicRuns()
+	out := m.renderRoutineRuns()
 	if !strings.Contains(out, "Runs: nightly-digest") {
 		t.Error("missing runs title")
 	}
@@ -86,13 +120,13 @@ func TestRenderPeriodicRuns_Structure(t *testing.T) {
 	}
 }
 
-func TestRenderPeriodicList_AfterEntry(t *testing.T) {
+func TestRenderRoutineList_AfterTriggered(t *testing.T) {
 	now := time.Now()
 	m := Model{
 		width:  120,
 		height: 40,
 		keys:   newKeyMap(),
-		periodic: periodicViewState{
+		routines: routineViewState{
 			defs: []daemon.PeriodicInfo{
 				{ID: 1, Name: "intrum-sync", Cadence: "0 0 * * *", WorkflowRef: "default", NextFireAt: now},
 				{ID: 2, Name: "intrum-log-backfill", After: "intrum-sync", WorkflowRef: "default", NextFireAt: now},
@@ -100,7 +134,7 @@ func TestRenderPeriodicList_AfterEntry(t *testing.T) {
 		},
 	}
 
-	out := m.renderPeriodicList()
+	out := m.renderRoutineList()
 	var row string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "intrum-log-backfill") {
@@ -113,7 +147,10 @@ func TestRenderPeriodicList_AfterEntry(t *testing.T) {
 	if !strings.Contains(row, "after intrum-sync") {
 		t.Errorf("after: row should show the trigger instead of a fire time: %q", row)
 	}
-	if strings.Contains(row, fmtPeriodicTime(&now)) {
+	if strings.Contains(row, fmtRoutineTime(&now)) {
 		t.Errorf("after: row should not show a next-fire time: %q", row)
+	}
+	if strings.Contains(row, "on-demand") {
+		t.Errorf("after: row is triggered, not on-demand: %q", row)
 	}
 }

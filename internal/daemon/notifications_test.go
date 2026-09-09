@@ -72,8 +72,8 @@ func newNotifyTestServer(t *testing.T, base config.NotificationsConfig, cfg *con
 }
 
 // createNotifyTask creates a running task on workflowName with step "check"
-// completed with stepCtx, linked to periodicName when non-empty.
-func createNotifyTask(t *testing.T, s *Server, projID int64, workflowName, periodicName, stepCtx string) *task.Task {
+// completed with stepCtx, linked to routineName when non-empty.
+func createNotifyTask(t *testing.T, s *Server, projID int64, workflowName, routineName, stepCtx string) *task.Task {
 	t.Helper()
 	tk, err := s.database.CreateTask(projID, "Task", "desc", "slug", workflowName, "", task.StatusRunning, nil)
 	if err != nil {
@@ -85,8 +85,8 @@ func createNotifyTask(t *testing.T, s *Server, projID int64, workflowName, perio
 	if err := s.database.CompleteTaskStep(tk.ID, "check", &stepCtx, 0); err != nil {
 		t.Fatal(err)
 	}
-	if periodicName != "" {
-		d, err := s.database.UpsertPeriodicDef(projID, periodicName, "@every 1h", "", workflowName, "", "", false, time.Now().Add(time.Hour))
+	if routineName != "" {
+		d, err := s.database.UpsertPeriodicDef(projID, routineName, "@every 1h", "", workflowName, "", "", false, time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func createNotifyTask(t *testing.T, s *Server, projID int64, workflowName, perio
 	return tk
 }
 
-func notifyCfg(wfNotif, periodicNotif *config.NotificationOverrides) *config.Config {
+func notifyCfg(wfNotif, routineNotif *config.NotificationOverrides) *config.Config {
 	return &config.Config{
 		OnComplete: "none",
 		Workflows: []config.WorkflowConfig{{
@@ -111,11 +111,11 @@ func notifyCfg(wfNotif, periodicNotif *config.NotificationOverrides) *config.Con
 			Notifications: wfNotif,
 			Steps:         []config.StepConfig{{Name: "check", Prompt: "check"}},
 		}},
-		Periodic: []config.PeriodicEntry{{
+		Routines: []config.RoutineConfig{{
 			Name:          "nightly",
 			Cadence:       "@every 1h",
 			Workflow:      "wf",
-			Notifications: periodicNotif,
+			Notifications: routineNotif,
 		}},
 	}
 }
@@ -151,18 +151,18 @@ func TestNotify_NoOverridesUnchanged(t *testing.T) {
 
 func TestNotify_FailureOverride(t *testing.T) {
 	cases := []struct {
-		name     string
-		base     config.NotificationsConfig
-		periodic *config.NotificationOverrides
-		want     []string
+		name    string
+		base    config.NotificationsConfig
+		routine *config.NotificationOverrides
+		want    []string
 	}{
-		{"periodic on_failed beats workflow and global", config.NotificationsConfig{Enabled: true}, &config.NotificationOverrides{OnComplete: bptr(false), OnFailed: bptr(true)}, []string{"Agent Failed"}},
+		{"routine on_failed beats workflow and global", config.NotificationsConfig{Enabled: true}, &config.NotificationOverrides{OnComplete: bptr(false), OnFailed: bptr(true)}, []string{"Agent Failed"}},
 		{"global enabled false is a master switch", config.NotificationsConfig{Enabled: false}, &config.NotificationOverrides{OnComplete: bptr(false), OnFailed: bptr(true)}, nil},
 		{"suppressed failure skips all tasks completed", allOn, nil, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := notifyCfg(&config.NotificationOverrides{OnFailed: bptr(false)}, tc.periodic)
+			cfg := notifyCfg(&config.NotificationOverrides{OnFailed: bptr(false)}, tc.routine)
 			s, rec, projID := newNotifyTestServer(t, tc.base, cfg)
 			tk := createNotifyTask(t, s, projID, "wf", "nightly", "")
 			if err := s.database.UpdateTaskStatus(tk.ID, task.StatusFailed); err != nil {

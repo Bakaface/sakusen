@@ -21,7 +21,7 @@ func TestListView_RendersNotBeforeStatus(t *testing.T) {
 	l.SetTasks([]daemon.TaskInfo{waiting, elapsed, blocked})
 	l.SetSize(100, 24)
 
-	want := "pending (until " + fmtPeriodicTime(&future) + ")"
+	want := "pending (until " + fmtRoutineTime(&future) + ")"
 	if got := l.statusText(waiting); !strings.HasSuffix(got, want) {
 		t.Errorf("future not_before: statusText = %q, want suffix %q", got, want)
 	}
@@ -73,8 +73,8 @@ func TestTaskInfoView_RendersNotBefore(t *testing.T) {
 			line = stripANSI(l)
 		}
 	}
-	if !strings.Contains(line, fmtPeriodicTime(&at)) {
-		t.Errorf("Not before line = %q, want %q", line, fmtPeriodicTime(&at))
+	if !strings.Contains(line, fmtRoutineTime(&at)) {
+		t.Errorf("Not before line = %q, want %q", line, fmtRoutineTime(&at))
 	}
 
 	v.SetTask(&daemon.TaskInfo{ID: 1, Title: "Task", Status: string(taskpkg.StatusPending)})
