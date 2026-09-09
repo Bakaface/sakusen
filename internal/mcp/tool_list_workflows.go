@@ -10,7 +10,7 @@ import (
 
 // ListWorkflowsArgs is the typed input schema for list_workflows.
 type ListWorkflowsArgs struct {
-	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the git toplevel of the MCP process's cwd."`
+	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the nearest ancestor of the MCP process's cwd containing .sakusen.yml (not crossing the git toplevel), else the git toplevel."`
 }
 
 func registerListWorkflows(s *server.MCPServer, c *client.Client) {

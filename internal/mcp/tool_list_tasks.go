@@ -22,7 +22,7 @@ const defaultListTasksLimit = 50
 // ListTasksArgs is the typed input schema for list_tasks.
 type ListTasksArgs struct {
 	AllProjects bool   `json:"all_projects,omitempty" jsonschema:"List tasks across every project known to the daemon. Default false lists only the resolved project's tasks."`
-	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the git toplevel of the MCP process's cwd. Ignored when all_projects is true."`
+	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the nearest ancestor of the MCP process's cwd containing .sakusen.yml (not crossing the git toplevel), else the git toplevel. Ignored when all_projects is true."`
 	Status      string `json:"status,omitempty" jsonschema:"Filter to tasks whose status (raw or effective) equals this value, e.g. pending, running, awaiting-approval, merge-blocked, completed, failed, merge-failed."`
 	Track       string `json:"track,omitempty" jsonschema:"Filter to tasks attached to this track (slug or numeric ID). Tasks with no track are excluded."`
 	Limit       *int   `json:"limit,omitempty" jsonschema:"Maximum number of tasks to return, newest first. Defaults to 50; pass 0 for no limit."`

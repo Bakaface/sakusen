@@ -12,7 +12,7 @@ import (
 // GetTrackArgs is the typed input schema for get_track.
 type GetTrackArgs struct {
 	Track       string `json:"track" jsonschema:"Track to read: slug or numeric ID. Required. A project-scoped track shadows a global one with the same slug."`
-	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root the slug is resolved against. Defaults to the git toplevel of the MCP process's cwd."`
+	ProjectPath string `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root the slug is resolved against. Defaults to the nearest ancestor of the MCP process's cwd containing .sakusen.yml (not crossing the git toplevel), else the git toplevel."`
 }
 
 func registerGetTrack(s *server.MCPServer, c *client.Client) {

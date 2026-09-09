@@ -14,12 +14,14 @@ description: >
 1. Built-in defaults
 2. `~/.config/sakusen/config.yaml` (global daemon — `GlobalConfig`)
 3. `~/.sakusen.yml` (global workflow defaults)
-4. `./.sakusen.yml` (project-specific, wins)
+4. `<project root>/.sakusen.yml` (project-specific, wins)
 
 ```go
 Load() (*Config, error)                    // From current directory
 LoadForProject(projectDir string) (*Config, error)  // From specific path
 ```
+
+`Load()` finds the project root with `FindProjectRoot()` (`projectroot.go`): the nearest ancestor of cwd containing a `.sakusen.yml`, bounded by the git toplevel (which is itself checked, and is the fallback when no marker is found), so a `.sakusen.yml` in a subdirectory of a repo owns its own project. The TUI (`resolveProjectMode`) and the MCP server (`resolveProjectPath`) share the same helper.
 
 ## Key Types
 
@@ -354,6 +356,7 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 | `agents.go` | `AgentConfig`/`SummarizerConfig`, the step→workflow→default_agent→"claude" cascade (`StepAgent` etc.), `validateAgents`, `mergeAgents`, `checkRemovedProjectKeys` (removed-key migration errors) |
 | `accessors.go` | Workflow accessors, branch templates, save (`GetWorkflow()`, `ListWorkflowNames()`, `ResolveBranchTemplate()`, `Save()`) |
 | `prompts.go` | `{{prompt.<name>}}` includes — `PromptDirs()`, `ExpandPromptIncludes()`, `validatePromptIncludes()` |
+| `projectroot.go` | `FindProjectRoot()` — nearest ancestor `.sakusen.yml`, bounded by the git toplevel; shared by `Load()`, the TUI and the MCP server |
 | `detect.go` | Project type detection (`DetectProject()`) |
 | `validate.go` | Single-file validation for `sakusen validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |
 
