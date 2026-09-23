@@ -191,6 +191,12 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		return nil, "", refErr
 	}
 
+	// Explicit blocked_by edges get the same failed-blocker guard. Validated
+	// before the row is inserted so a rejected request leaves nothing behind.
+	if err := s.validateBlockedBy(req.BlockedBy); err != nil {
+		return nil, "", err
+	}
+
 	// Caller-supplied title wins. Otherwise: branch-derived for checkout-only,
 	// workflow-derived for tmux-first with no input, else sanitized input.
 	var title string
@@ -928,20 +934,31 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 
 	if err := s.database.FinalizeTaskIdentity(taskID, title, slug, branch); err != nil {
 		log.Printf("%sFailed to update title for task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
-		if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
-			log.Printf("%sFailed to transition task #%d to pending: %v", s.projectLogPrefix(projectID), taskID, err)
-		}
+		s.promoteInitTaskToPending(taskID, projectID)
 		s.broadcastTaskUpdate(taskID)
 		return
 	}
 
-	if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
-		log.Printf("%sFailed to transition task #%d to pending: %v", s.projectLogPrefix(projectID), taskID, err)
-		return
-	}
-
+	s.promoteInitTaskToPending(taskID, projectID)
 	s.broadcastTaskUpdate(taskID)
 	log.Printf("%sAI title for task #%d: %s (slug: %s, branch: %s)", s.projectLogPrefix(projectID), taskID, title, slug, branch)
+}
+
+// promoteInitTaskToPending flips a freshly-refined task out of StatusInit.
+//
+// It re-reads the row first because a task can leave init while its title is
+// still being generated — most importantly via cascadeFailDependents, which
+// fails tasks whose blocker failed and does not spare ones still in init.
+// Writing `pending` over that would put the task straight back into the
+// unclaimable-forever state the cascade exists to end.
+func (s *Server) promoteInitTaskToPending(taskID, projectID int64) {
+	if cur, err := s.database.GetTask(taskID); err == nil && cur.Status != task.StatusInit {
+		log.Printf("%sTask #%d left init as %s during title refinement; leaving its status alone", s.projectLogPrefix(projectID), taskID, cur.Status)
+		return
+	}
+	if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
+		log.Printf("%sFailed to transition task #%d to pending: %v", s.projectLogPrefix(projectID), taskID, err)
+	}
 }
 
 const (
@@ -1103,6 +1120,31 @@ func (s *Server) validateTaskRefs(value string, projectID, selfID int64, fieldLa
 		}
 	}
 	return autoBlockedBy, nil
+}
+
+// validateBlockedBy rejects an explicit blocked_by edge pointing at a task
+// that has already failed. GetClaimableTasks only treats a `completed`
+// blocker as satisfying a dependency, so such an edge would leave the new
+// task pending forever — the same deadlock validateTaskRefs already rejects
+// for {{tasks.<id>.<field>}} references, which is why the wording matches.
+//
+// merge-failed blockers pass: every workflow step of such a task succeeded
+// and only its merge did not land, so the user can retry it into `completed`,
+// which unblocks the dependent normally. This mirrors the cascade's
+// failed-only scope (see db.FailDependentTasks).
+func (s *Server) validateBlockedBy(blockedBy []int64) error {
+	for _, id := range blockedBy {
+		b, err := s.database.GetTask(id)
+		if err != nil || b == nil {
+			// Unknown ids keep their existing handling (the dependency insert
+			// fails and is logged); this guard only covers the failed case.
+			continue
+		}
+		if b.Status == task.StatusFailed {
+			return fmt.Errorf("task #%d in blocked_by is %s", id, b.Status)
+		}
+	}
+	return nil
 }
 
 // mergeBlockedBy returns the union of explicit and auto-collected BlockedBy

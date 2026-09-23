@@ -1,8 +1,10 @@
 package db
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/task"
 )
@@ -786,5 +788,222 @@ func TestRetryRearmsStartedAt(t *testing.T) {
 	}
 	if afterReclaim.StartedAt == nil {
 		t.Error("re-claiming a retried task must set a fresh started_at")
+	}
+}
+
+// newDepTestDB opens a throwaway DB with one project for the
+// FailDependentTasks cases below.
+func newDepTestDB(t *testing.T) (*DB, int64) {
+	t.Helper()
+	database, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	proj, err := database.GetOrCreateProject("/home/user/deps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return database, proj.ID
+}
+
+func mustCreateTask(t *testing.T, database *DB, projID int64, title string, status task.Status) *task.Task {
+	t.Helper()
+	tk, err := database.CreateTask(projID, title, title, task.Slugify(title), "", "", status, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
+func mustStatus(t *testing.T, database *DB, id int64) task.Status {
+	t.Helper()
+	tk, err := database.GetTask(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk.Status
+}
+
+// A dependent of a task that just failed can never be claimed, so it is
+// failed too with a reason naming the blocker.
+func TestFailDependentTasks_SingleLevel(t *testing.T) {
+	database, projID := newDepTestDB(t)
+
+	blocker := mustCreateTask(t, database, projID, "blocker", task.StatusFailed)
+	dep := mustCreateTask(t, database, projID, "dependent", task.StatusPending)
+	unrelated := mustCreateTask(t, database, projID, "unrelated", task.StatusPending)
+	if err := database.AddTaskDependency(dep.ID, blocker.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	failed, err := database.FailDependentTasks(blocker.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 || failed[0] != dep.ID {
+		t.Fatalf("expected only task #%d to be failed, got %v", dep.ID, failed)
+	}
+	if got := mustStatus(t, database, dep.ID); got != task.StatusFailed {
+		t.Errorf("dependent status: got %s, want %s", got, task.StatusFailed)
+	}
+	if got := mustStatus(t, database, unrelated.ID); got != task.StatusPending {
+		t.Errorf("unrelated task should be untouched, got %s", got)
+	}
+
+	updated, err := database.GetTask(dep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("blocker task #%d failed", blocker.ID)
+	if updated.ErrorMessage != want {
+		t.Errorf("status reason: got %q, want %q", updated.ErrorMessage, want)
+	}
+	if updated.CompletedAt == nil {
+		t.Error("cascaded failure should stamp completed_at like any other terminal transition")
+	}
+}
+
+// The cascade is transitive: a dependent of a dependent is stranded just as
+// badly, so it fails too, naming its own immediate blocker.
+func TestFailDependentTasks_Transitive(t *testing.T) {
+	database, projID := newDepTestDB(t)
+
+	blocker := mustCreateTask(t, database, projID, "blocker", task.StatusFailed)
+	mid := mustCreateTask(t, database, projID, "mid", task.StatusPending)
+	leaf := mustCreateTask(t, database, projID, "leaf", task.StatusInit)
+	if err := database.AddTaskDependency(mid.ID, blocker.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AddTaskDependency(leaf.ID, mid.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	failed, err := database.FailDependentTasks(blocker.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 2 || failed[0] != mid.ID || failed[1] != leaf.ID {
+		t.Fatalf("expected [%d %d] in visit order, got %v", mid.ID, leaf.ID, failed)
+	}
+	for _, id := range []int64{mid.ID, leaf.ID} {
+		if got := mustStatus(t, database, id); got != task.StatusFailed {
+			t.Errorf("task #%d status: got %s, want %s", id, got, task.StatusFailed)
+		}
+	}
+
+	leafRow, err := database.GetTask(leaf.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each level names its own immediate blocker, so the reasons chain.
+	if want := fmt.Sprintf("blocker task #%d failed", mid.ID); leafRow.ErrorMessage != want {
+		t.Errorf("leaf status reason: got %q, want %q", leafRow.ErrorMessage, want)
+	}
+}
+
+// A dependency cycle (which HasCircularDependency blocks on insert, but which
+// an older row could still carry) must terminate rather than loop forever.
+func TestFailDependentTasks_CycleTerminates(t *testing.T) {
+	database, projID := newDepTestDB(t)
+
+	blocker := mustCreateTask(t, database, projID, "blocker", task.StatusFailed)
+	a := mustCreateTask(t, database, projID, "a", task.StatusPending)
+	b := mustCreateTask(t, database, projID, "b", task.StatusPending)
+	// a ← blocker, and a ↔ b block each other.
+	for _, edge := range [][2]int64{{a.ID, blocker.ID}, {b.ID, a.ID}, {a.ID, b.ID}} {
+		if err := database.AddTaskDependency(edge[0], edge[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	done := make(chan []int64, 1)
+	go func() {
+		failed, err := database.FailDependentTasks(blocker.ID)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- failed
+	}()
+
+	select {
+	case failed := <-done:
+		if len(failed) != 2 {
+			t.Fatalf("expected both cycle members failed exactly once, got %v", failed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("FailDependentTasks did not terminate on a dependency cycle")
+	}
+
+	for _, id := range []int64{a.ID, b.ID} {
+		if got := mustStatus(t, database, id); got != task.StatusFailed {
+			t.Errorf("task #%d status: got %s, want %s", id, got, task.StatusFailed)
+		}
+	}
+}
+
+// merge-failed is user-recoverable — a retry can land the merge and flip it to
+// `completed`, unblocking dependents normally — so it must not cascade.
+// Already-terminal and already-started dependents are likewise left alone.
+func TestFailDependentTasks_SkipsNonStrandedDependents(t *testing.T) {
+	database, projID := newDepTestDB(t)
+
+	mergeFailed := mustCreateTask(t, database, projID, "merge failed", task.StatusMergeFailed)
+	blockedByMergeFailed := mustCreateTask(t, database, projID, "waiting on merge", task.StatusPending)
+	if err := database.AddTaskDependency(blockedByMergeFailed.ID, mergeFailed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if failed, err := database.FailDependentTasks(mergeFailed.ID); err != nil {
+		t.Fatal(err)
+	} else if len(failed) != 0 {
+		t.Fatalf("merge-failed must not cascade, got %v", failed)
+	}
+	if got := mustStatus(t, database, blockedByMergeFailed.ID); got != task.StatusPending {
+		t.Errorf("dependent of merge-failed: got %s, want %s", got, task.StatusPending)
+	}
+
+	blocker := mustCreateTask(t, database, projID, "blocker", task.StatusFailed)
+	running := mustCreateTask(t, database, projID, "already running", task.StatusRunning)
+	completed := mustCreateTask(t, database, projID, "already completed", task.StatusCompleted)
+	for _, id := range []int64{running.ID, completed.ID} {
+		if err := database.AddTaskDependency(id, blocker.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if failed, err := database.FailDependentTasks(blocker.ID); err != nil {
+		t.Fatal(err)
+	} else if len(failed) != 0 {
+		t.Fatalf("started/terminal dependents must not cascade, got %v", failed)
+	}
+	if got := mustStatus(t, database, running.ID); got != task.StatusRunning {
+		t.Errorf("running dependent: got %s, want %s", got, task.StatusRunning)
+	}
+	if got := mustStatus(t, database, completed.ID); got != task.StatusCompleted {
+		t.Errorf("completed dependent: got %s, want %s", got, task.StatusCompleted)
+	}
+}
+
+// GetClaimableTasks is what strands a dependent in the first place: the
+// cascade must take it out of the claimable set entirely.
+func TestFailDependentTasks_RemovesFromClaimable(t *testing.T) {
+	database, projID := newDepTestDB(t)
+
+	blocker := mustCreateTask(t, database, projID, "blocker", task.StatusFailed)
+	dep := mustCreateTask(t, database, projID, "dependent", task.StatusPending)
+	if err := database.AddTaskDependency(dep.ID, blocker.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := database.FailDependentTasks(blocker.ID); err != nil {
+		t.Fatal(err)
+	}
+	claimable, err := database.GetClaimableTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range claimable {
+		if c.ID == dep.ID {
+			t.Fatalf("task #%d should no longer be claimable after its blocker failed", dep.ID)
+		}
 	}
 }

@@ -70,6 +70,7 @@ type taskStore interface {
 	RemoveTaskDependency(taskID, blockedByID int64) error
 	SetTaskDependencies(taskID int64, blockedBy []int64) error
 	HasCircularDependency(taskID, newBlockedByID int64) (bool, error)
+	FailDependentTasks(blockerID int64) ([]int64, error)
 
 	// Mid-step child-task suspension (task_waits_on table).
 	AddTaskWaitsOn(taskID, waitsOnID int64) error

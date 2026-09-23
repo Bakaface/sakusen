@@ -771,3 +771,134 @@ func TestCreateTask_RejectsUnknownWorkflow(t *testing.T) {
 		t.Fatalf("known workflow should create: %v", err)
 	}
 }
+
+// A blocked_by edge pointing at an already-failed task can never be
+// satisfied — GetClaimableTasks only clears a dependency on a `completed`
+// blocker — so the create is rejected up front rather than logged and left to
+// strand the new task in `pending` forever.
+func TestCreateTaskFromRequest_RejectsFailedBlocker(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	blocker, err := s.database.CreateTask(projID, "failed blocker", "", "blocker", "", "main", task.StatusFailed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = s.createTaskFromRequest(CreateTaskRequest{
+		Input:       "do the thing",
+		ProjectPath: "/tmp/sakusen-test",
+		BlockedBy:   []int64{blocker.ID},
+	})
+	if err == nil {
+		t.Fatal("expected create to fail on a blocked_by pointing at a failed task")
+	}
+	if !strings.Contains(err.Error(), "#"+itoa(blocker.ID)) || !strings.Contains(err.Error(), "blocked_by") {
+		t.Errorf("error should name the blocker and the field, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "failed") {
+		t.Errorf("error should name the blocker's status, got %q", err.Error())
+	}
+
+	// Nothing was persisted: only the blocker itself exists.
+	tasks, err := s.database.GetTasksByProject(projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected the rejected create to leave no row behind, got %d tasks", len(tasks))
+	}
+}
+
+// merge-failed is user-recoverable (a retry can land the merge and flip it to
+// `completed`), so it stays an acceptable blocker.
+func TestCreateTaskFromRequest_AllowsMergeFailedBlocker(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	blocker, err := s.database.CreateTask(projID, "merge-failed blocker", "", "blocker", "", "main", task.StatusMergeFailed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
+		Input:       "do the thing",
+		ProjectPath: "/tmp/sakusen-test",
+		BlockedBy:   []int64{blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("merge-failed blocker should be accepted: %v", err)
+	}
+	if len(tk.BlockedBy) != 1 || tk.BlockedBy[0] != blocker.ID {
+		t.Errorf("blocked_by: got %v, want [%d]", tk.BlockedBy, blocker.ID)
+	}
+}
+
+// cascadeFailDependents is the daemon-side wiring: it must fail the whole
+// dependent chain of a task that just failed so nothing is left pending with
+// no way to ever run.
+func TestCascadeFailDependents(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+
+	blocker, err := s.database.CreateTask(projID, "blocker", "", "blocker", "", "main", task.StatusFailed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dep, err := s.database.CreateTask(projID, "dependent", "", "dep", "", "main", task.StatusPending, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := s.database.CreateTask(projID, "leaf", "", "leaf", "", "main", task.StatusPending, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.database.AddTaskDependency(dep.ID, blocker.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.database.AddTaskDependency(leaf.ID, dep.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	s.cascadeFailDependents(blocker.ID)
+
+	for _, id := range []int64{dep.ID, leaf.ID} {
+		updated, err := s.database.GetTask(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.Status != task.StatusFailed {
+			t.Errorf("task #%d status: got %s, want %s", id, updated.Status, task.StatusFailed)
+		}
+		if !strings.Contains(updated.ErrorMessage, "failed") {
+			t.Errorf("task #%d should carry a blocker reason, got %q", id, updated.ErrorMessage)
+		}
+	}
+}
+
+// A task can be cascade-failed while its title is still being refined. The
+// refinement goroutine must not write `pending` back over that, which would
+// restore the unclaimable-forever state the cascade exists to end.
+func TestPromoteInitTaskToPending_LeavesCascadedFailureAlone(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+
+	initTask, err := s.database.CreateTask(projID, "refining", "", "refining", "", "main", task.StatusInit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.promoteInitTaskToPending(initTask.ID, projID)
+	if got, err := s.database.GetTask(initTask.ID); err != nil {
+		t.Fatal(err)
+	} else if got.Status != task.StatusPending {
+		t.Errorf("init task should be promoted: got %s, want %s", got.Status, task.StatusPending)
+	}
+
+	cascaded, err := s.database.CreateTask(projID, "cascaded", "", "cascaded", "", "main", task.StatusInit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.database.UpdateTaskError(cascaded.ID, "blocker task #1 failed"); err != nil {
+		t.Fatal(err)
+	}
+	s.promoteInitTaskToPending(cascaded.ID, projID)
+	if got, err := s.database.GetTask(cascaded.ID); err != nil {
+		t.Fatal(err)
+	} else if got.Status != task.StatusFailed {
+		t.Errorf("cascaded failure must survive refinement: got %s, want %s", got.Status, task.StatusFailed)
+	}
+}

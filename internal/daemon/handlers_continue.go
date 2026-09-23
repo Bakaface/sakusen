@@ -356,6 +356,7 @@ func (s *Server) runFinalization(t *task.Task, pc *projectContext) {
 				log.Printf("%sError: failed to mark task #%d failed: %v", s.projectLogPrefix(t.ProjectID), t.ID, dbErr)
 			}
 			s.broadcastTaskUpdate(t.ID)
+			s.cascadeFailDependents(t.ID)
 			return
 		}
 		// The branch never landed, so this is not `completed`. Keep the worktree

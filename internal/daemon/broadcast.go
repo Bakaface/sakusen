@@ -88,7 +88,35 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 			log.Printf("%sWarning: notification failed: %v", prefix, err)
 		}
 
+		// Before checkProjectTasksDone, so its all-terminal scan sees the
+		// dependents this failure just resolved.
+		s.cascadeFailDependents(a.Task.ID)
+
 		s.checkProjectTasksDone(a.Task.ProjectID)
+	}
+}
+
+// cascadeFailDependents fails every task transitively blocked by a task that
+// has just failed, and broadcasts each one. A dependent of a failed blocker
+// can never be claimed (GetClaimableTasks only clears a dependency on a
+// `completed` blocker) and so would sit `pending` with nothing to time it
+// out, stranding any parent suspended on it too — see FailDependentTasks in
+// internal/db/task.go for the full rationale and for why `merge-failed` does
+// not cascade.
+//
+// Deliberately not wired into the daemon-shutdown sweep (Server.shutdown),
+// which marks every running task `daemon shutdown`-failed: that is a routine,
+// user-recoverable event, and cascading it would fail whole dependency trees
+// every time the daemon restarts.
+func (s *Server) cascadeFailDependents(blockerID int64) {
+	failed, err := s.database.FailDependentTasks(blockerID)
+	if err != nil {
+		log.Printf("Warning: failed to cascade failure of task #%d to its dependents: %v", blockerID, err)
+		return
+	}
+	for _, id := range failed {
+		log.Printf("Failed task #%d: cascaded from failed task #%d", id, blockerID)
+		s.broadcastTaskUpdate(id)
 	}
 }
 

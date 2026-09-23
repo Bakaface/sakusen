@@ -555,6 +555,114 @@ func (db *DB) HasCircularDependency(taskID, newBlockedByID int64) (bool, error) 
 	return false, nil
 }
 
+// FailDependentTasks transitively fails every task blocked by blockerID, and
+// every task blocked by those, and so on. It is the recovery for the deadlock
+// a failed blocker otherwise creates: GetClaimableTasks only treats a
+// `completed` blocker as satisfying a dependency, so a task whose blocker
+// failed stays `pending` forever, never reaches a terminal status, and leaves
+// any parent suspended on it (task_waits_on, released only once
+// AllWaitsOnTerminal) suspended forever too. Nothing times that out.
+//
+// Only `failed` cascades. StatusMergeFailed is deliberately NOT a trigger:
+// every workflow step of a merge-failed task succeeded and only finalization
+// did not land, so the user can retry it into `completed` — which unblocks
+// the dependents the ordinary way. Failing them on a state the user is about
+// to recover would destroy work; the asymmetry is intentional, not an
+// oversight.
+//
+// Each dependent is visited at most once, so a dependency cycle (which
+// HasCircularDependency guards against on insert, but which an older row
+// could still carry) terminates instead of looping. A dependent that is
+// already terminal, or that the engine has already claimed and started
+// (Status.IsActive), is left alone and not traversed through: only a task
+// still waiting to start — `pending` or `init` — is stranded by the blocker's
+// failure.
+//
+// Returns the IDs of the tasks it failed, in visit order.
+func (db *DB) FailDependentTasks(blockerID int64) ([]int64, error) {
+	tx, err := db.sqlDB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// The failed-only rule is enforced here rather than at the call sites, so
+	// no future caller can accidentally cascade a merge-failed (or any other)
+	// blocker.
+	var blockerStatus task.Status
+	if err := tx.QueryRow(`SELECT status FROM tasks WHERE id = ?`, blockerID).Scan(&blockerStatus); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if blockerStatus != task.StatusFailed {
+		return nil, nil
+	}
+
+	type dependent struct {
+		id     int64
+		status task.Status
+	}
+
+	now := time.Now()
+	visited := map[int64]bool{blockerID: true}
+	queue := []int64{blockerID}
+	var failed []int64
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		rows, err := tx.Query(
+			`SELECT td.task_id, t.status FROM task_dependencies td
+			 JOIN tasks t ON t.id = td.task_id
+			 WHERE td.blocked_by = ?`, current)
+		if err != nil {
+			return nil, err
+		}
+		// Drain the cursor before issuing the UPDATEs below: the pool is
+		// capped at one connection, so an Exec while this Query is still open
+		// would deadlock.
+		var deps []dependent
+		for rows.Next() {
+			var d dependent
+			if err := rows.Scan(&d.id, &d.status); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			deps = append(deps, d)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+
+		for _, d := range deps {
+			if visited[d.id] {
+				continue
+			}
+			visited[d.id] = true
+			if d.status.IsTerminal() || d.status.IsActive() {
+				continue
+			}
+			if _, err := tx.Exec(
+				`UPDATE tasks SET status = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+				task.StatusFailed, fmt.Sprintf("blocker task #%d failed", current), now, now, d.id,
+			); err != nil {
+				return nil, err
+			}
+			failed = append(failed, d.id)
+			queue = append(queue, d.id)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return failed, nil
+}
+
 func (db *DB) DeleteTask(id int64) error {
 	_, err := db.sqlDB.Exec("DELETE FROM chats WHERE task_id = ?", id)
 	if err != nil {
