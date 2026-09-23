@@ -633,6 +633,15 @@ func (l *listView) statusText(task daemon.TaskInfo) string {
 				statusLabel = "pending (blocked)"
 			}
 		}
+	case taskpkg.StatusAwaitingChildren:
+		switch n := len(task.WaitsOn); {
+		case n == 1:
+			statusLabel = "waiting on 1 child"
+		case n > 1:
+			statusLabel = fmt.Sprintf("waiting on %d children", n)
+		default:
+			statusLabel = "waiting on children"
+		}
 	}
 	if task.LoopIteration > 0 {
 		statusLabel += fmt.Sprintf(" [L%d]", task.LoopIteration)
@@ -870,8 +879,8 @@ func (l *listView) projectNameFor(task daemon.TaskInfo) string {
 }
 
 // statusIconFor returns the status icon for a given task status. Statuses
-// with no case (e.g. taskpkg.StatusInit, taskpkg.StatusAwaitingChildren)
-// fall through to the default icon — a pre-existing gap, preserved as-is.
+// with no case (e.g. taskpkg.StatusInit) fall through to the default icon —
+// a pre-existing gap, preserved as-is.
 func statusIconFor(status taskpkg.Status) string {
 	switch status {
 	case taskpkg.StatusCompleted:
@@ -880,6 +889,8 @@ func statusIconFor(status taskpkg.Status) string {
 		return "●"
 	case taskpkg.StatusAwaitingApproval:
 		return "◷"
+	case taskpkg.StatusAwaitingChildren:
+		return "⊙"
 	case taskpkg.StatusTmux:
 		return "▣"
 	case taskpkg.StatusPending:

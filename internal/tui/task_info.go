@@ -177,6 +177,17 @@ func (v *taskInfoView) renderMetadata() string {
 		b.WriteString("\n")
 	}
 
+	// Waiting on (child tasks this step is suspended for)
+	if len(t.WaitsOn) > 0 {
+		ids := make([]string, len(t.WaitsOn))
+		for i, id := range t.WaitsOn {
+			ids[i] = fmt.Sprintf("#%d", id)
+		}
+		b.WriteString(labelStyle.Render("Waiting on: "))
+		b.WriteString(valueStyle.Render(strings.Join(ids, ", ")))
+		b.WriteString("\n")
+	}
+
 	// Timestamps
 	b.WriteString(labelStyle.Render("Created:   "))
 	b.WriteString(dimStyle.Render(t.CreatedAt.Format("2006-01-02 15:04:05")))

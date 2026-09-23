@@ -47,13 +47,12 @@ var (
 
 	// stateStyles is keyed by task.Status so adding a new status forces every
 	// caller (stateStyle, statusIconFor) to be reconsidered at compile time.
-	// task.StatusAwaitingChildren has no entry (falls back to normalStyle via
-	// stateStyle) — a pre-existing gap, preserved as-is rather than fixed here.
 	stateStyles = map[task.Status]lipgloss.Style{
 		task.StatusPending:            lipgloss.NewStyle().Foreground(lipgloss.Color("#6B6B6B")),
 		task.StatusInit:               lipgloss.NewStyle().Foreground(lipgloss.Color("#D4A843")).Italic(true),
 		task.StatusRunning:            lipgloss.NewStyle().Foreground(lipgloss.Color("#D4A843")),
 		task.StatusAwaitingApproval:   lipgloss.NewStyle().Foreground(lipgloss.Color("#D4A843")).Bold(true),
+		task.StatusAwaitingChildren:   lipgloss.NewStyle().Foreground(lipgloss.Color("#5F8AB3")),
 		task.StatusTmux:               lipgloss.NewStyle().Foreground(lipgloss.Color("#B07AAD")).Bold(true),
 		task.StatusFinalizing:         lipgloss.NewStyle().Foreground(lipgloss.Color("#5F8AB3")),
 		task.StatusSummarizing:        lipgloss.NewStyle().Foreground(lipgloss.Color("#5F8AB3")),
