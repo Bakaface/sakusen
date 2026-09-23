@@ -1,0 +1,62 @@
+description: "Wayfinder research ticket: resolve one unattended decision question and report the answer. Read-only — nothing is committed or merged."
+# Child workflow for `research` tickets (and for `task` tickets the agent can
+# drive alone). See the `wayfinder-sakusen` skill for the tracker doc.
+#
+# Single step, so the step's captured context IS the task context — which is
+# exactly what the parent map task reads back as {{children.<id>.context}}.
+#
+# worktree: false — a decision ticket usually changes no files, and a worktree
+# task with no meaningful changes is fast-tracked past finalization, which
+# would skip the summarizer and hand the parent an EMPTY resolution. A
+# non-worktree task is exempt from that check. It also means nothing merges.
+worktree: false
+on_complete: none
+
+steps:
+  - name: researching
+    agent: planner
+    timeout: 1h
+    summarization_strategy: last_message
+    prompt: |
+      You are resolving ONE wayfinder research ticket: task #{{task.id}}, "{{task.title}}".
+
+      <task-input>
+      {{task.input}}
+      </task-input>
+
+      The map this ticket belongs to, for orientation only:
+      <map>
+      {{track.own_context}}
+      </map>
+
+      Invoke the `research` skill by name with the Skill tool and follow it. If it
+      is not installed, do the research directly: read the documentation, the
+      third-party APIs, or the local resources the question needs.
+
+      Rules:
+
+      - **Answer the question. Do not implement anything.** This is a decision
+        ticket: it exists so a decision can be made, not to deliver the
+        destination. Treat the repository as read-only — this task runs in the
+        project root and nothing here is committed or merged.
+      - **Never call `update_track`.** Only the parent map task writes the map;
+        a second writer clobbers it.
+      - Read the map above for context, but resolve only YOUR question. If you
+        surface new questions, report them — the parent turns them into tickets.
+      - If the question cannot be answered, say so plainly and state exactly what
+        is missing. A clean "unanswerable, because X" is a useful resolution; a
+        guess dressed as a finding is not.
+
+      Your final message IS the ticket's resolution — the parent folds a one-line
+      gist of it into the map and later sessions zoom into the rest. Keep it under
+      400 words and use this shape:
+
+      ## Answer
+      <the decision or fact this ticket was opened to settle, stated directly>
+
+      ## Evidence
+      - <source, URL, or file:line> — <what it shows>
+
+      ## Consequences for the map
+      <new questions this raises, anything it invalidates, anything it puts out of
+      scope. Omit the section if there are none.>

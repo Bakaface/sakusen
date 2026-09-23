@@ -232,7 +232,8 @@ internal/
   tmux/             Tmux session lifecycle, capture, monitoring
   client/           IPC client (RPC + event subscription) for tui/cli
   notify/           Desktop notifications
-claude-code-plugin/ Companion Claude Code plugin (sakusen-configurer skill)
+claude-code-plugin/ Companion Claude Code plugin (skills: sakusen-configurer,
+                    worktree-parity-audit, wayfinder-sakusen)
 ```
 
 The daemon listens on a Unix socket at `~/.config/sakusen/daemon.sock` (or `$XDG_CONFIG_HOME/sakusen/`) and persists state to `tasks.db` next to it. Project-level data (logs, the `.worktrees/` directory) lives under `.sakusen/` inside the repo.

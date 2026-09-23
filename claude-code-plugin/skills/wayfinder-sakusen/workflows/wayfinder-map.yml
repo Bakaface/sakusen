@@ -1,0 +1,230 @@
+description: "Wayfinder map: a human-gated charting conversation, then a headless orchestrator that spawns decision tickets in dependency waves until the way is clear."
+# Parent task for a wayfinder map. See the `wayfinder-sakusen` skill for the
+# tracker doc this implements.
+#
+# The map body lives in the task's TRACK, never in the worktree: `resolving`
+# is re-run as a fresh process after every wave and remembers nothing.
+# Create the track FIRST, then `sakusen create -w wayfinder-map --track <slug>`.
+#
+# worktree: false — this task writes no files, and a non-worktree task is
+# exempt from the no-meaningful-changes fast-track that would otherwise skip
+# the summarizer and leave the task with no context.
+worktree: false
+on_complete: none
+
+summarizer_prompt: |
+  Task #{{task.id}}: {{task.title}} — a wayfinder map.
+
+  Charting conversation:
+  <step-context name="charting">
+  {{steps.charting.context}}
+  </step-context>
+
+  Orchestrator handoff:
+  <step-context name="resolving">
+  {{steps.resolving.context}}
+  </step-context>
+
+  Write a durable record of where this map got to: the destination, the decisions
+  reached (one line each, with the ticket name and task id), anything ruled out of
+  scope, anything still open, and the recommended next move. The map itself lives
+  in the track and is not repeated here — index it, don't restate it.
+
+steps:
+  # --- 1. CHARTING (human-gated tmux) ---------------------------------
+  # Name the destination, grill breadth-first, write the map into the track.
+  # No tickets are spawned here — charted tickets land in the map's
+  # `## Open tickets` section and the next step spawns them in waves.
+  - name: charting
+    agent: smart-conversationist
+    human: true
+    timeout: 8h
+    summarization_strategy: summarize_chat
+    summarization_prompt: |
+      You are reading the transcript of a wayfinder CHARTING session for task #{{task.id}}.
+
+      Extract:
+      - The destination, as finally worded
+      - The open decisions surfaced, and which became tickets vs. stayed as fog
+      - Anything ruled out of scope, with the reason
+      - Standing preferences the user stated for this effort
+
+      <chat>
+      {{chat}}
+      </chat>
+    prompt: |
+      You are charting a wayfinder MAP for task #{{task.id}}: {{task.title}}.
+
+      <task-input>
+      {{task.input}}
+      </task-input>
+
+      The map lives in this task's track (id "{{track.id}}"). It is empty until
+      you write it:
+      <track-context>
+      {{track.own_context}}
+      </track-context>
+
+      Load two skills before you do anything else, in this order:
+
+      1. `wayfinder-sakusen` — the tracker doc for this repo. Its "Wayfinding
+         operations" section is authoritative for every tool call below, and its
+         "The map body" section gives the exact layout you must write.
+      2. `wayfinder` itself — invoke it by name with the Skill tool; it is marked
+         `disable-model-invocation` and will not load on its own. If it is not
+         installed, stop and tell the user to install it. This step drives
+         wayfinder; it does not reimplement it.
+
+      If the track id above is empty, this task is not attached to a track and
+      cannot host a map (a track cannot be attached after task creation). Stop and
+      tell the user to create the track first and re-create the task with
+      `--track <slug>`. An empty <track-context> with a track id is normal: that
+      is a fresh map waiting for you to write it.
+
+      Then run wayfinder's **Chart the map** mode, steps 1-4, with three
+      Sakusen-specific changes:
+
+      - Step 3 "Create the map": the map IS this task's track. Write the body by
+        calling the sakusen MCP tool `update_track` with task_id={{task.id}},
+        context_mode="replace", and the whole map body as `context`. Read it back
+        with `get_track` and confirm it landed.
+      - Step 4 "Create the tickets, then wire blocking edges": do NOT create
+        sakusen tasks here. Every ticket you can specify now goes into the map's
+        `## Open tickets` section with its type and its `Blocked by:` ticket
+        names. The `resolving` step spawns them in waves. Ticket names are the
+        identity — short, unique, stable.
+      - Skip wayfinder's step 5 (firing research subagents). Research tickets
+        become real sakusen tasks in the first wave instead.
+
+      This is a conversation. Grill the user breadth-first; never answer for them.
+      If the grilling surfaces no fog — the way is already clear and the whole
+      journey fits one session — say so and ask the user how they want to proceed
+      instead of charting a map nobody needs.
+
+      When the map is written and the user is happy with it, stop. This step pauses
+      for approval in the TUI; do NOT call advance_task.
+
+  # --- 2. RESOLVING (headless orchestrator, one run per wave) ---------
+  # Suspends on every `create_tasks_and_wait` call and is re-run from the SAME
+  # step index once the wave is terminal. Context capture, the step completion
+  # record and chat recording are all skipped on suspension, so nothing this
+  # step knows survives except what it wrote to the track.
+  - name: resolving
+    agent: planner
+    timeout: 4h
+    summarization_strategy: last_message
+    prompt: |
+      You are the "resolving" orchestrator for wayfinder map task #{{task.id}}: {{task.title}}.
+
+      You run ONCE PER WAVE and you remember NOTHING between waves. When you spawn
+      children, sakusen suspends this step, discards this session, and re-runs this
+      same prompt as a fresh process once every child is terminal. The map in the
+      track is your only memory.
+
+      <children-summary>
+      {{children.summary}}
+      </children-summary>
+
+      <map>
+      {{track.own_context}}
+      </map>
+
+      Load the `wayfinder-sakusen` skill first: it is the tracker doc, and its
+      "Wayfinding operations" section defines the map layout and every tool call
+      named below. If the track id "{{track.id}}" is empty, this task has no track
+      and cannot host a map — abort and say so. If it has a track but <map> is
+      empty, the charting step wrote nothing; abort and say that too rather than
+      inventing a map.
+
+      Which mode you are in:
+
+      - <children-summary> EMPTY     -> MODE A: spawn the first wave.
+      - <children-summary> POPULATED -> MODE B: fold the wave in, then spawn or finish.
+
+      ## MODE A — spawn the first wave
+
+      1. Compute the FRONTIER from <map>: every entry in `## Open tickets` whose
+         `Blocked by:` names all appear in `## Decisions so far`, or whose
+         `Blocked by:` is `none`.
+      2. `## Open tickets` empty -> nothing to work. Go to "Finishing".
+      3. `## Open tickets` non-empty but frontier empty -> blocking cycle. Do not
+         spawn. Report it and stop.
+      4. Spawn the whole frontier as ONE wave with the sakusen MCP tool
+         `create_tasks_and_wait` — one child per frontier ticket, with the spec
+         shape and the type-to-workflow mapping from the tracker doc's "Child
+         ticket" section. Spawning the whole frontier at once is the parallelism.
+         Cap the wave at ONE human-in-the-loop ticket (`wayfinder-hitl`): those
+         are not worktree-isolated and two live sessions collide. Hold the rest
+         back on the map for the next wave. Research tickets parallelise freely.
+      5. Check the tool's reply: it must list a child id for every ticket you meant
+         to spawn and say the parent will suspend. If it does not, say so and stop.
+      6. End your turn IMMEDIATELY. Final message: "Wave: spawned <N> tickets:
+         <names>." Nothing else — this session is about to be discarded, so any
+         work you queue after the call will not happen.
+
+      ## MODE B — fold the wave in
+
+      In this order. Steps 1-4 rewrite the map; only then may you spawn.
+
+      1. **Read the live map.** Call `get_track` with track="{{track.id}}" and work
+         from its `own_context`. The <map> block above was rendered when this
+         process started; a human may have edited the map since.
+      2. **Fold every child in.** Match children to map tickets by title. For each
+         child in <children-summary>:
+         - `completed`: add one line to `## Decisions so far` —
+           `- **<ticket name>** (#<child id>): <one-line gist of the answer>` — and
+           remove the ticket from `## Open tickets`. Gist only: the full resolution
+           stays on the child task, where `get_task` can zoom it. A decision lives
+           in exactly one place.
+         - `failed`: do NOT record a decision. Leave the ticket in `## Open
+           tickets`, re-worded if the failure showed the question was wrong, and
+           append `(attempt #<child id> failed: <reason>)`. Spawn it fresh next
+           wave rather than calling `retry_task` — see the tracker doc on why
+           waiting on an already-terminal child can silently record no suspension.
+         - If a resolution shows a ticket sits past the destination, move it to
+           `## Out of scope` with one line of why, instead of into Decisions so far.
+      3. **Advance the frontier.** Graduate anything in `## Not yet specified` the
+         wave made specifiable into `## Open tickets`, deleting the graduated patch
+         from Not yet specified so it lives in exactly one place. Add newly
+         surfaced tickets with their types and `Blocked by:` lines. Delete or
+         reword tickets the wave invalidated. Add new fog.
+      4. **Write the map back.** Call `update_track` with task_id={{task.id}},
+         context_mode="replace", and the COMPLETE rewritten map body as `context`.
+         `replace` overwrites the track's own context wholesale, so send the whole
+         map, never a fragment, and never use append. Confirm the tool returned ok.
+      5. **Next wave, or finish.** Recompute the frontier from the map you just
+         wrote.
+         - Frontier non-empty: spawn it exactly as in MODE A (same wave cap, same
+           reply check), then end your turn. This step suspends again.
+         - Frontier empty but `## Open tickets` non-empty: a blocking cycle, or
+           every remaining ticket is blocked by one that failed. Stop and report it.
+         - `## Open tickets` empty: go to "Finishing".
+
+      ## Finishing
+
+      The way to the destination is clear. Your final message is the handoff — it
+      becomes this step's context and feeds the task summary:
+
+      # Map complete: <destination>
+
+      ## Decisions
+      - **<ticket name>** (#<id>): <gist>
+
+      ## Ruled out of scope
+      - <gist> — <why>
+
+      ## Handoff
+      <What to run next — normally /to-spec, then /to-tickets, then /implement —
+      and anything the next session needs that the map does not already carry.>
+
+      Leave the map in the track. Do not delete it.
+
+      ## Rules that are not negotiable
+
+      - Only THIS step writes the map. Children never call `update_track`.
+      - Never `context_mode="append"` for the map: it is one document, and
+        appending duplicates it.
+      - Never end a turn that spawned children with work still queued. The process
+        is killed and its context capture is skipped.
+      - You are planning, not implementing. Tickets resolve decisions; they do not
+        deliver the destination.

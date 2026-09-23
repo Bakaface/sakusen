@@ -1,0 +1,88 @@
+description: "Wayfinder human-in-the-loop ticket (grilling, prototype, or manual task): one live conversation that resolves one decision."
+# Child workflow for `grilling` and `prototype` tickets (and for `task` tickets
+# that need a human). See the `wayfinder-sakusen` skill for the tracker doc.
+#
+# Single step, so the step's chat summary IS the task context — which is what
+# the parent map task reads back as {{children.<id>.context}}.
+#
+# worktree: false — see wayfinder-research.yml for why. The consequence worth
+# knowing: this session runs in the project root, so the orchestrator spawns at
+# most ONE of these per wave. Any prototype it leaves behind stays uncommitted
+# for the user to keep or discard.
+worktree: false
+on_complete: none
+
+steps:
+  - name: resolving
+    agent: smart-conversationist
+    human: true
+    timeout: 8h
+    require_context: true
+    summarization_strategy: summarize_chat
+    summarization_prompt: |
+      You are reading the transcript of a wayfinder ticket session for task
+      #{{task.id}}: "{{task.title}}".
+
+      Write the ticket's RESOLUTION. The parent map task folds a one-line gist of
+      it into the map, and later sessions zoom into this text for the detail, so it
+      must stand on its own. Under 400 words, in this shape:
+
+      ## Answer
+      <the decision reached, stated directly, in the user's own terms>
+
+      ## Why
+      <the reasoning and the alternatives rejected — one line each>
+
+      ## Assets
+      <paths to any prototype left in the working tree, and what to look at. Omit
+      if none.>
+
+      ## Consequences for the map
+      <new questions raised, anything invalidated, anything now out of scope. Omit
+      if none.>
+
+      If the conversation did not reach a decision, say so in the first line of
+      ## Answer and state what is still open.
+
+      <chat>
+      {{chat}}
+      </chat>
+    prompt: |
+      You are resolving ONE wayfinder ticket with the user: task #{{task.id}},
+      "{{task.title}}".
+
+      <task-input>
+      {{task.input}}
+      </task-input>
+
+      The map this ticket belongs to, for orientation only:
+      <map>
+      {{track.own_context}}
+      </map>
+
+      Load the `wayfinder` skill by name with the Skill tool (it is marked
+      `disable-model-invocation` and will not load on its own) and work this ticket
+      under its "Work through the map" rules, steps 2-3 only. The map's `## Notes`
+      section names the skills this effort wants; call them. Absent other
+      direction, call the Skill tool twice, for "grilling" and "domain-modeling" —
+      and for a prototype ticket, call it for "prototype" as well and build the
+      cheap, rough, concrete artifact the discussion needs to react to.
+
+      Rules:
+
+      - **This is human-in-the-loop.** The ticket resolves only through a live
+        exchange with the user. Never answer your own questions and never stand in
+        for their side of it.
+      - **Resolve only YOUR ticket.** One ticket per session. If the conversation
+        surfaces new questions, note them for the resolution — the parent map task
+        turns them into tickets.
+      - **Never call `update_track`.** Only the parent map task writes the map;
+        a second writer clobbers it.
+      - **Never call `advance_task`.** This step pauses for approval in the TUI;
+        the user ends it when the ticket is settled.
+      - You are planning, not implementing. A prototype is a thing to react to, not
+        the destination. It runs in the project root and is not committed — leave
+        it in the working tree and say where it is.
+
+      When the decision is made, state it back to the user in one short paragraph
+      and stop.
