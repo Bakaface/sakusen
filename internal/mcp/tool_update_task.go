@@ -18,6 +18,7 @@ type UpdateTaskArgs struct {
 	Input           string  `json:"input,omitempty" jsonschema:"New task input, replacing the existing one entirely. Seeds {{task.input}} in step prompts. May contain {{tasks.<id>.<field>}} references; the daemon validates them before applying and auto-adds newly referenced tasks as blockers."`
 	Title           string  `json:"title,omitempty" jsonschema:"New task title, replacing the existing one entirely."`
 	Priority        string  `json:"priority,omitempty" jsonschema:"New scheduling priority: low, medium, high, or urgent."`
+	Track           string  `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID), replacing any current track. The track's context becomes available to step prompts via {{track.context}}. Pass 'none' to detach the task from its track."`
 	AddBlockedBy    []int64 `json:"add_blocked_by,omitempty" jsonschema:"Task IDs to add as blockers — this task will not start until they complete. Adding an already-present blocker is a no-op; the daemon rejects edges that would create a cycle."`
 	RemoveBlockedBy []int64 `json:"remove_blocked_by,omitempty" jsonschema:"Task IDs to remove from this task's blockers. Removing the last incomplete blocker can make the task immediately eligible to run."`
 }
@@ -25,7 +26,7 @@ type UpdateTaskArgs struct {
 func registerUpdateTask(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"update_task",
-		mcp.WithDescription("Edit an existing sakusen task: its input, title, priority, and/or blocked_by dependencies. At least one field must be supplied; omitted fields are left untouched. Changes are applied one at a time in the order input, title, priority, dependency removals, dependency additions — so an ID listed in both add_blocked_by and remove_blocked_by ends up a blocker, and a failure part-way through leaves the earlier changes applied (the error says so). Returns the updated TaskInfo as JSON."),
+		mcp.WithDescription("Edit an existing sakusen task: its input, title, priority, track, and/or blocked_by dependencies. At least one field must be supplied; omitted fields are left untouched. Changes are applied one at a time in the order input, title, priority, track, dependency removals, dependency additions — so an ID listed in both add_blocked_by and remove_blocked_by ends up a blocker, and a failure part-way through leaves the earlier changes applied (the error says so). Returns the updated TaskInfo as JSON."),
 		mcp.WithInputSchema[UpdateTaskArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args UpdateTaskArgs) (*mcp.CallToolResult, error) {
@@ -37,9 +38,9 @@ func handleUpdateTask(c *client.Client, args UpdateTaskArgs) (*mcp.CallToolResul
 	if args.TaskID <= 0 {
 		return resultErr("task_id must be a positive integer")
 	}
-	if args.Input == "" && args.Title == "" && args.Priority == "" &&
+	if args.Input == "" && args.Title == "" && args.Priority == "" && args.Track == "" &&
 		len(args.AddBlockedBy) == 0 && len(args.RemoveBlockedBy) == 0 {
-		return resultErr("at least one of input, title, priority, add_blocked_by or remove_blocked_by must be supplied")
+		return resultErr("at least one of input, title, priority, track, add_blocked_by or remove_blocked_by must be supplied")
 	}
 	if args.Input != "" && strings.TrimSpace(args.Input) == "" {
 		return resultErr("input must not be empty")
@@ -49,6 +50,9 @@ func handleUpdateTask(c *client.Client, args UpdateTaskArgs) (*mcp.CallToolResul
 	}
 	if args.Priority != "" && !task.IsValidPriority(args.Priority) {
 		return resultErr("invalid priority %q: must be low, medium, high, or urgent", args.Priority)
+	}
+	if args.Track != "" && strings.TrimSpace(args.Track) == "" {
+		return resultErr("track must not be empty")
 	}
 	for _, ids := range [][]int64{args.AddBlockedBy, args.RemoveBlockedBy} {
 		for _, id := range ids {
@@ -86,6 +90,13 @@ func handleUpdateTask(c *client.Client, args UpdateTaskArgs) (*mcp.CallToolResul
 		t, err := c.UpdateTaskPriority(args.TaskID, args.Priority)
 		if err != nil {
 			return resultErr("failed to update priority: %v%s", err, appliedSuffix(updated))
+		}
+		apply(t)
+	}
+	if args.Track != "" {
+		t, err := c.UpdateTaskField(args.TaskID, "track", args.Track)
+		if err != nil {
+			return resultErr("failed to update track: %v%s", err, appliedSuffix(updated))
 		}
 		apply(t)
 	}

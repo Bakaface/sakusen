@@ -1061,6 +1061,96 @@ func TestMCP_UpdateTask_AppliesFieldsInOrder(t *testing.T) {
 	}
 }
 
+// TestMCP_UpdateTask_ForwardsTrack pins the track edit: it travels as an
+// ordinary "track" field update, positioned after the priority change and
+// before the dependency edits, and "none" is passed through untouched for the
+// daemon to interpret as a detach.
+func TestMCP_UpdateTask_ForwardsTrack(t *testing.T) {
+	call := func(t *testing.T, track string) ([]daemon.UpdateFieldRequest, []daemon.MessageType) {
+		t.Helper()
+		fake := newFakeDaemon(t)
+		var fields []daemon.UpdateFieldRequest
+		var order []daemon.MessageType
+
+		fake.handle(daemon.MsgUpdateField, func(msg *daemon.Message) *daemon.Message {
+			var req daemon.UpdateFieldRequest
+			_ = msg.DecodePayload(&req)
+			fields = append(fields, req)
+			order = append(order, daemon.MsgUpdateField)
+			resp, _ := daemon.NewMessage(daemon.MsgUpdateField, daemon.UpdateFieldResponse{
+				Task: daemon.TaskInfo{ID: req.TaskID},
+			})
+			return resp
+		})
+		fake.handle(daemon.MsgUpdatePriority, func(msg *daemon.Message) *daemon.Message {
+			var req daemon.UpdatePriorityRequest
+			_ = msg.DecodePayload(&req)
+			order = append(order, daemon.MsgUpdatePriority)
+			resp, _ := daemon.NewMessage(daemon.MsgUpdatePriority, daemon.UpdatePriorityResponse{
+				Task: daemon.TaskInfo{ID: req.TaskID},
+			})
+			return resp
+		})
+		fake.handle(daemon.MsgUpdateDependency, func(msg *daemon.Message) *daemon.Message {
+			var req daemon.UpdateDependencyRequest
+			_ = msg.DecodePayload(&req)
+			order = append(order, daemon.MsgUpdateDependency)
+			resp, _ := daemon.NewMessage(daemon.MsgUpdateDependency, daemon.UpdateDependencyResponse{
+				Task: daemon.TaskInfo{ID: req.TaskID},
+			})
+			return resp
+		})
+
+		c := startMCPServer(t, fake)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		res, err := c.CallTool(ctx, mcp.CallToolRequest{
+			Params: mcp.CallToolParams{
+				Name: "update_task",
+				Arguments: map[string]any{
+					"task_id":        10,
+					"priority":       "high",
+					"track":          track,
+					"add_blocked_by": []int{5},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("tool returned error: %v", textOf(res))
+		}
+		return fields, order
+	}
+
+	t.Run("slug", func(t *testing.T) {
+		fields, order := call(t, "payments-api")
+		want := daemon.UpdateFieldRequest{TaskID: 10, Field: "track", Value: "payments-api"}
+		if len(fields) != 1 || fields[0] != want {
+			t.Fatalf("field requests: got %+v, want [%+v]", fields, want)
+		}
+		wantOrder := []daemon.MessageType{daemon.MsgUpdatePriority, daemon.MsgUpdateField, daemon.MsgUpdateDependency}
+		if len(order) != len(wantOrder) {
+			t.Fatalf("call order: got %v, want %v", order, wantOrder)
+		}
+		for i, w := range wantOrder {
+			if order[i] != w {
+				t.Fatalf("call order: got %v, want %v", order, wantOrder)
+			}
+		}
+	})
+
+	t.Run("none passed through as the detach sentinel", func(t *testing.T) {
+		fields, _ := call(t, "none")
+		want := daemon.UpdateFieldRequest{TaskID: 10, Field: "track", Value: "none"}
+		if len(fields) != 1 || fields[0] != want {
+			t.Fatalf("field requests: got %+v, want [%+v]", fields, want)
+		}
+	})
+}
+
 // TestMCP_UpdateTask_PartialFieldsOnly pins that omitted fields cause no
 // daemon traffic at all — an input-only edit must not touch priority or deps.
 func TestMCP_UpdateTask_PartialFieldsOnly(t *testing.T) {
@@ -1190,7 +1280,7 @@ func TestMCP_UpdateTask_RejectsInvalidArgs(t *testing.T) {
 		{
 			name:      "no fields",
 			arguments: map[string]any{"task_id": 1},
-			wantErr:   "at least one of input, title, priority, add_blocked_by or remove_blocked_by",
+			wantErr:   "at least one of input, title, priority, track, add_blocked_by or remove_blocked_by",
 		},
 		{
 			name:      "blank input",
@@ -1201,6 +1291,11 @@ func TestMCP_UpdateTask_RejectsInvalidArgs(t *testing.T) {
 			name:      "blank title",
 			arguments: map[string]any{"task_id": 1, "title": "  "},
 			wantErr:   "title must not be empty",
+		},
+		{
+			name:      "blank track",
+			arguments: map[string]any{"task_id": 1, "track": "  "},
+			wantErr:   "track must not be empty",
 		},
 		{
 			name:      "invalid priority",

@@ -61,6 +61,7 @@ type taskStore interface {
 	UpdateTaskContext(id int64, taskContext string) error
 	UpdateTaskTitle(id int64, title string) error
 	UpdateTaskInput(id int64, input string) error
+	UpdateTaskTrack(id int64, trackID *int64) error
 	FinalizeTaskIdentity(id int64, title, slug, branch string) error
 	SetWorktreeDetached(id int64, detached bool) error
 	GetTaskCommits(id int64) ([]string, error)

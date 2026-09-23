@@ -338,6 +338,16 @@ func (db *DB) UpdateTaskInput(id int64, input string) error {
 	return err
 }
 
+// UpdateTaskTrack attaches a task to a track, or detaches it when trackID is
+// nil (the column is nullable — nil = trackless).
+func (db *DB) UpdateTaskTrack(id int64, trackID *int64) error {
+	_, err := db.sqlDB.Exec(
+		"UPDATE tasks SET track_id = ?, updated_at = ? WHERE id = ?",
+		trackID, time.Now(), id,
+	)
+	return err
+}
+
 func (db *DB) FinalizeTaskIdentity(id int64, title, slug, branch string) error {
 	_, err := db.sqlDB.Exec(
 		"UPDATE tasks SET title = ?, slug = ?, branch = ?, updated_at = ? WHERE id = ?",

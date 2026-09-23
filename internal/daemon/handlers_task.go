@@ -538,6 +538,8 @@ func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {
 		err = s.database.UpdateTaskInput(req.TaskID, req.Value)
 	case "context":
 		err = s.database.UpdateTaskContext(req.TaskID, req.Value)
+	case "track":
+		err = s.updateTaskTrack(req.TaskID, req.Value)
 	default:
 		s.sendError(conn, fmt.Sprintf("unknown field: %s", req.Field))
 		return
@@ -563,6 +565,26 @@ func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
 	s.sendMessage(conn, MsgUpdateField, UpdateFieldResponse{Task: s.taskToInfo(t)})
+}
+
+// updateTaskTrack attaches an existing task to a track, or detaches it when
+// the value is the explicit-none sentinel the create tools already document.
+// The reference is resolved exactly as task creation resolves its track
+// argument — slug or numeric ID, visible from the task's own project (project
+// tracks shadow global, a track owned by another project is rejected).
+func (s *Server) updateTaskTrack(taskID int64, value string) error {
+	t, err := s.database.GetTask(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %v", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(value), "none") {
+		return s.database.UpdateTaskTrack(taskID, nil)
+	}
+	tr, err := s.resolveTrackRef(&t.ProjectID, value)
+	if err != nil {
+		return err
+	}
+	return s.database.UpdateTaskTrack(taskID, &tr.ID)
 }
 
 func (s *Server) handleRevertTask(conn net.Conn, req RevertTaskRequest) {

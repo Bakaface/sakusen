@@ -298,6 +298,69 @@ func TestUpdateTaskTitle(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskTrack covers the three transitions the update path needs:
+// attaching a trackless task, moving it to another track, and detaching it.
+func TestUpdateTaskTrack(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	proj, err := database.GetOrCreateProject("/home/user/myproject")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := database.CreateTrack(&proj.ID, "First", "first", "", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := database.CreateTrack(&proj.ID, "Second", "second", "", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := database.CreateTask(proj.ID, "Task", "Description", "task-slug", "", "", "pending", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.TrackID != nil {
+		t.Fatalf("expected a trackless task, got track %d", *created.TrackID)
+	}
+
+	trackOf := func(id int64) *int64 {
+		t.Helper()
+		got, err := database.GetTask(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.TrackID
+	}
+
+	if err := database.UpdateTaskTrack(created.ID, &first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := trackOf(created.ID); got == nil || *got != first.ID {
+		t.Errorf("after attach TrackID = %v, want %d", got, first.ID)
+	}
+
+	if err := database.UpdateTaskTrack(created.ID, &second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := trackOf(created.ID); got == nil || *got != second.ID {
+		t.Errorf("after change TrackID = %v, want %d", got, second.ID)
+	}
+
+	if err := database.UpdateTaskTrack(created.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := trackOf(created.ID); got != nil {
+		t.Errorf("after detach TrackID = %d, want nil", *got)
+	}
+}
+
 func TestGetClaimableTasks_SortedByPriority(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	database, err := Open(dbPath)
