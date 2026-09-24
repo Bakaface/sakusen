@@ -9,6 +9,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/agent"
 	"github.com/Bakaface/sakusen/internal/config"
+	"github.com/Bakaface/sakusen/internal/db"
 	gitpkg "github.com/Bakaface/sakusen/internal/git"
 	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/Bakaface/sakusen/internal/tmux"
@@ -248,6 +249,13 @@ func (s *Server) recoverOrphanedTasks() error {
 			waits, _ := s.database.GetTaskWaitsOn(t.ID)
 			log.Printf("%sTask #%d is awaiting %d children (will resume when all reach terminal status)", prefix, t.ID, len(waits))
 		case task.StatusTmux:
+			// A hibernated task deliberately has no session: restoring it here
+			// would resurrect every idle agent the daemon spent the last run
+			// shutting down. It wakes on attach instead.
+			if t.HibernatedAt != nil {
+				log.Printf("%sTask #%d is hibernated; leaving its tmux session down until attach", prefix, t.ID)
+				continue
+			}
 			tmuxTasksToRestore = append(tmuxTasksToRestore, t)
 		}
 	}
@@ -260,6 +268,10 @@ func (s *Server) recoverOrphanedTasks() error {
 			if err != nil {
 				log.Printf("%sFailed to restore tmux session for task #%d: %v", prefix, t.ID, err)
 			} else if resumed {
+				// A resumed conversation lands at the agent's prompt without
+				// starting a turn, so the session is hibernation-eligible as
+				// soon as it goes idle.
+				s.markTmuxAtPrompt(t.ID)
 				log.Printf("%sRestored tmux session for task #%d (auto-resumed previous agent session)", prefix, t.ID)
 			} else {
 				log.Printf("%sRestored tmux session for task #%d (no resumable agent session; started fresh)", prefix, t.ID)
@@ -270,13 +282,104 @@ func (s *Server) recoverOrphanedTasks() error {
 	return nil
 }
 
-// restoreTmuxSession recreates a tmux session for a task whose session was
-// lost during a daemon restart. The agent is re-resolved from the CURRENT
-// config: the paused step's agent when the task sits on a workflow step, else
-// the interactive fallback agent. When a previous agent session id is
-// recorded in the chats table AND the agent defines a resume_command, the
-// session is resumed; otherwise a fresh session starts (with the still-on-disk
-// step prompt for step restores).
+// adHocSessionLabels are the pseudo-step labels interactive sessions that
+// have no owning workflow step run under: continuing a terminal task and
+// tmux_direct tasks (see spawnInteractiveSession's callers). They scope the
+// session's sentinels and chat rows the same way a step name does.
+var adHocSessionLabels = []string{"continue", "tmux-direct"}
+
+// tmuxResumeTarget describes how a tmux task's session would be (re)created:
+// the pseudo-step label scoping its artifacts, the agent record that runs it,
+// and the recorded chat a resume would pick up.
+type tmuxResumeTarget struct {
+	// label scopes the prompt file, wrapper script, sentinels and chat row —
+	// a real step name for step sessions, else an adHocSessionLabels entry.
+	label string
+	// isStep is true when label names a workflow step the task is paused on
+	// (as opposed to an ad-hoc session).
+	isStep bool
+	slug   string
+	agent  config.AgentConfig
+	// chat is the conversation a resume would continue, or nil when none was
+	// found.
+	chat *db.Chat
+	// scoped reports whether chat came from the label-scoped lookup rather
+	// than the any-step GetLatestChat fallback. Hibernation requires a scoped
+	// hit so it can never kill a session that would come back holding some
+	// OTHER step's conversation; startup restore keeps the looser fallback
+	// because a fresh-but-wrong session is still better than no session.
+	scoped bool
+}
+
+// resumable reports whether spawning this target would actually resume the
+// recorded conversation: there must be a session id to resume AND an agent
+// that knows how to resume one.
+func (r tmuxResumeTarget) resumable() bool {
+	return r.chat != nil && r.chat.SessionID != "" && r.agent.ResumeCommand != ""
+}
+
+// resolveTmuxResume works out how a tmux task's interactive session would be
+// (re)created from the CURRENT config. It is the single resolver behind
+// daemon-restart restore, wake-on-attach and hibernation eligibility, so all
+// three agree on which agent runs and which conversation comes back.
+//
+// The agent is the paused step's when the task sits on a workflow tmux step,
+// else the interactive fallback. The chat is looked up label-scoped first
+// (the step's own row, or the most recent ad-hoc row), falling back to the
+// task's latest chat of any step — see tmuxResumeTarget.scoped.
+func (s *Server) resolveTmuxResume(pc *projectContext, t *task.Task) (tmuxResumeTarget, error) {
+	var target tmuxResumeTarget
+
+	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
+	if step, ok := workflow.PausedStep(t, wf); ok && pc.cfg.StepIsTmux(wf, &step) {
+		slug, agentCfg, err := pc.cfg.StepAgent(wf, &step)
+		if err != nil {
+			return target, err
+		}
+		target.label, target.isStep, target.slug, target.agent = step.Name, true, slug, agentCfg
+	} else {
+		slug, agentCfg, err := interactiveAgent(pc.cfg)
+		if err != nil {
+			return target, err
+		}
+		target.label, target.slug, target.agent = adHocSessionLabels[0], slug, agentCfg
+	}
+
+	// Chat lookup failures are non-fatal: without a chat the caller starts a
+	// fresh session (and hibernation declines the task).
+	var chat *db.Chat
+	var err error
+	if target.isStep {
+		chat, err = s.database.GetChatByStep(t.ID, target.label)
+	} else {
+		chat, err = s.database.GetLatestChatForSteps(t.ID, adHocSessionLabels)
+	}
+	if err != nil {
+		log.Printf("%sWarning: failed to look up chat for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+	} else if chat != nil {
+		target.chat, target.scoped = chat, true
+		if !target.isStep {
+			// Restore under the label the conversation was actually recorded
+			// under, so a tmux_direct task doesn't come back as "continue".
+			target.label = chat.StepName
+		}
+		return target, nil
+	}
+
+	if fallback, err := s.database.GetLatestChat(t.ID); err != nil {
+		log.Printf("%sWarning: failed to look up chat for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+	} else if fallback != nil {
+		target.chat = fallback
+	}
+	return target, nil
+}
+
+// restoreTmuxSession recreates a tmux session for a task whose session is
+// gone — killed by a daemon restart, by hibernation, or by the user. The
+// agent, label and resumable conversation are resolved from the CURRENT
+// config by resolveTmuxResume; when a session id is recorded AND the agent
+// defines a resume_command the conversation is resumed, otherwise a fresh
+// session starts (with the still-on-disk step prompt for step restores).
 // Returns (resumed, error) where resumed indicates whether a prior session
 // was found and resumed.
 func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
@@ -305,54 +408,32 @@ func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
 		return false, fmt.Errorf("no project context for task #%d", t.ID)
 	}
 
-	// Resolve the agent from the current config. A task paused on a workflow
-	// step restores that step's agent; ad-hoc sessions (continue/tmux-direct)
-	// restore the interactive fallback.
-	label := "continue"
-	var slug string
-	var agentCfg config.AgentConfig
-	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
-	if step, ok := workflow.PausedStep(t, wf); ok && pc.cfg.StepIsTmux(wf, &step) {
-		var agentErr error
-		slug, agentCfg, agentErr = pc.cfg.StepAgent(wf, &step)
-		if agentErr != nil {
-			return false, agentErr
-		}
-		label = step.Name
-	} else {
-		var agentErr error
-		slug, agentCfg, agentErr = interactiveAgent(pc.cfg)
-		if agentErr != nil {
-			return false, agentErr
-		}
+	target, err := s.resolveTmuxResume(pc, t)
+	if err != nil {
+		return false, err
 	}
 
-	// Look up the most recent recorded agent session for this task so we can
-	// auto-resume it (only effective when the agent defines resume_command).
-	// Failures here are non-fatal: we fall back to a fresh session.
-	var resumeSessionID string
-	if chat, err := s.database.GetLatestChat(t.ID); err != nil {
-		log.Printf("%sWarning: failed to look up chat for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-	} else if chat != nil {
-		resumeSessionID = chat.SessionID
+	resumeSessionID := ""
+	if target.chat != nil {
+		resumeSessionID = target.chat.SessionID
 	}
 
 	// For step restores, re-feed the step prompt still on disk so a
 	// non-resumed session at least starts with its instructions. Ad-hoc
 	// restores start blank.
 	prompt := ""
-	if label != "continue" {
-		if data, err := os.ReadFile(workflow.StepPromptFile(t.WorktreePath, label)); err == nil {
+	if target.isStep {
+		if data, err := os.ReadFile(workflow.StepPromptFile(t.WorktreePath, target.label)); err == nil {
 			prompt = string(data)
 		}
 	}
 
 	return s.spawnInteractiveSession(pc, t, interactiveSpawnOpts{
-		label:           label,
+		label:           target.label,
 		prompt:          prompt,
 		resumeSessionID: resumeSessionID,
-		slug:            slug,
-		agent:           agentCfg,
+		slug:            target.slug,
+		agent:           target.agent,
 		keepSentinels:   true,
 	})
 }

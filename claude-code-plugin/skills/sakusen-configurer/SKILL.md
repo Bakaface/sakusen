@@ -82,6 +82,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `worktree-setup-command` | string | — | Single shell command run after worktree creation (`{{worktree_path}}` available). Also settable per-workflow. |
 | `worktree-setup-commands` | list[string] | — | Multiple setup commands run in order; preferred over the singular form when more than one step is needed. Also settable per-workflow. |
 | `tmux-setup-command` | string | — | Shell command run when launching a tmux step. Variables: `{{session_name}}`, `{{worktree_path}}`, `{{run_agent}}`, `{{agent_command}}`. Also settable per-workflow. |
+| `tmux` | object | — | Hibernation of idle interactive sessions: `hibernate_after` (duration, default `4h`), `max_live_sessions` (int, default `12`); either `0` disables. Read daemon-level like `max_workers`. See [Tmux Session Hibernation](references/config-reference.md#tmux-session-hibernation). |
 
 ### Removed keys (hard load errors — never emit these)
 
@@ -104,7 +105,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 Top-level field names mix two casing styles — **don't guess, copy exactly**:
 
 - **kebab-case:** `worktree-sync-paths`, `worktree-setup-command`, `worktree-setup-commands`, `tmux-setup-command`
-- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `base_branch`, `branch_template`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`, `resume_command`, `chat_log_command`
+- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `hibernate_after`, `max_live_sessions`, `base_branch`, `branch_template`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`, `resume_command`, `chat_log_command`
 
 If you author an unrecognized variant (`worktree_sync_paths`, `tmux_setup_command`, etc.), Sakusen will silently ignore it.
 

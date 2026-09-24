@@ -151,6 +151,11 @@ type Task struct {
 	StartedAt        *time.Time
 	CompletedAt      *time.Time
 	UpdatedAt        time.Time
+	// HibernatedAt is set while a tmux task's interactive session has been
+	// hibernated (killed after idling at its prompt, or to respect the live
+	// session cap). The task stays in StatusTmux — attach wakes it via the
+	// agent's resume_command. Cleared on any status change.
+	HibernatedAt *time.Time
 }
 
 // MaxTitleLength is the maximum allowed length for a task title.

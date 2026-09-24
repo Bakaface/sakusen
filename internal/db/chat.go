@@ -75,6 +75,47 @@ func (db *DB) GetLatestChat(taskID int64) (*Chat, error) {
 	return &c, nil
 }
 
+// GetLatestChatForSteps returns the most recently created chat for a task
+// among the given step names, or nil when none exists. Used to find the
+// resumable conversation of an ad-hoc interactive session, whose chat rows
+// are keyed by pseudo-step label ("continue" / "tmux-direct") rather than a
+// workflow step name. Unlike GetLatestChat it never returns a row belonging
+// to some other step, so a caller can tell "this exact session is resumable"
+// from "some conversation exists for this task".
+func (db *DB) GetLatestChatForSteps(taskID int64, stepNames []string) (*Chat, error) {
+	if len(stepNames) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(stepNames))
+	args := make([]any, 0, len(stepNames)+1)
+	args = append(args, taskID)
+	for i, name := range stepNames {
+		placeholders[i] = "?"
+		args = append(args, name)
+	}
+	query := `SELECT id, task_id, session_id, tmux_session_name, step_name, created_at
+		 FROM chats WHERE task_id = ? AND step_name IN (` + strings.Join(placeholders, ",") + `)
+		 ORDER BY created_at DESC, id DESC LIMIT 1`
+
+	var c Chat
+	var tmuxSessionName sql.NullString
+	var stepName sql.NullString
+	err := db.sqlDB.QueryRow(query, args...).Scan(&c.ID, &c.TaskID, &c.SessionID, &tmuxSessionName, &stepName, &c.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if tmuxSessionName.Valid {
+		c.TmuxSessionName = tmuxSessionName.String
+	}
+	if stepName.Valid {
+		c.StepName = stepName.String
+	}
+	return &c, nil
+}
+
 // GetChatByStep returns the chat for a specific task and step.
 func (db *DB) GetChatByStep(taskID int64, stepName string) (*Chat, error) {
 	var c Chat

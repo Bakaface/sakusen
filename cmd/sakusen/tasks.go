@@ -455,14 +455,28 @@ var attachCmd = &cobra.Command{
 		// attached to from a sibling project, resolves to a different project
 		// row. Ask the daemon for the task's own project and fall back to cwd's
 		// only when it can't answer.
+		c := client.New(cfg)
 		projectName := cfg.Project.Name
-		if info, err := client.New(cfg).GetTask(id); err == nil && info.ProjectName != "" {
-			projectName = info.ProjectName
+		taskStatus := ""
+		if info, err := c.GetTask(id); err == nil {
+			if info.ProjectName != "" {
+				projectName = info.ProjectName
+			}
+			taskStatus = info.Status
 		}
 
 		session := tmux.NewSession(projectName, taskID, "")
 		if !session.Exists() {
-			return fmt.Errorf("no tmux session found for task #%s", taskID)
+			// A tmux task with no session is hibernated (or lost its session
+			// some other way): ask the daemon to bring it back rather than
+			// making the user work out why attach failed. The daemon replies
+			// once the session exists.
+			if task.Status(taskStatus) != task.StatusTmux {
+				return fmt.Errorf("no tmux session found for task #%s", taskID)
+			}
+			if err := c.WakeTask(id); err != nil {
+				return fmt.Errorf("failed to wake tmux session for task #%s: %w", taskID, err)
+			}
 		}
 
 		attach := tmux.AttachCommand(session.Name)

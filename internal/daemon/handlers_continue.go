@@ -223,6 +223,82 @@ func (s *Server) handleAdvanceTask(conn net.Conn, req AdvanceTaskRequest) {
 	s.sendMessage(conn, MsgOK, OKResponse{Message: outcome.message})
 }
 
+// handleWakeTask brings a tmux task's interactive session back up, whether it
+// went away through hibernation or some other way (a crash, a stray
+// kill-session). The reply is sent only once the session exists: `tmux
+// new-session -d` returns after the session is created, so a client may
+// attach the moment it sees the OK.
+func (s *Server) handleWakeTask(conn net.Conn, req WakeTaskRequest) {
+	message, err := s.wakeTmuxTask(req.TaskID)
+	if err != nil {
+		log.Printf("Wake failed for task #%d: %v", req.TaskID, err)
+		s.sendError(conn, err.Error())
+		return
+	}
+	s.sendMessage(conn, MsgOK, OKResponse{Message: message})
+}
+
+// wakeTmuxTask is the implementation behind handleWakeTask. Serialized per
+// task via taskFlowLock with a re-read under the lock, so it cannot race a
+// concurrent advance/continue (both of which kill the session on purpose) or
+// a hibernation pass.
+//
+// Waking is allowed for ANY tmux task whose session is missing, not just
+// hibernated ones: that makes attach self-heal a session lost outside
+// sakusen's control, exactly as daemon-startup restore would have.
+func (s *Server) wakeTmuxTask(taskID int64) (string, error) {
+	mu := s.taskFlowLock(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	t, err := s.database.GetTask(taskID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get task: %v", err)
+	}
+	if t.Status != task.StatusTmux {
+		return "", fmt.Errorf("task is not in tmux state (status: %s)", t.Status)
+	}
+
+	clearMarker := func() {
+		if t.HibernatedAt == nil {
+			return
+		}
+		if err := s.database.SetTaskHibernatedAt(t.ID, nil); err != nil {
+			log.Printf("%sWarning: failed to clear hibernation marker for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+			return
+		}
+		s.broadcastTaskUpdate(t.ID)
+	}
+
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get project context: %v", err)
+	}
+	session := tmux.NewSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.WorktreePath)
+	if session.Exists() {
+		// Nothing to spawn, but a stale marker would keep rendering the task
+		// as hibernated — e.g. after the user started a session by hand.
+		clearMarker()
+		return fmt.Sprintf("task #%d already has a live tmux session", t.ID), nil
+	}
+
+	resumed, err := s.restoreTmuxSession(t)
+	if err != nil {
+		return "", fmt.Errorf("failed to wake tmux session: %v", err)
+	}
+	clearMarker()
+	if resumed {
+		// A resumed conversation sits at the agent's prompt without starting
+		// a turn, so the woken session is hibernation-eligible again as soon
+		// as it goes idle.
+		s.markTmuxAtPrompt(t.ID)
+		log.Printf("%sWoke tmux session for task #%d (resumed previous agent session)", s.projectLogPrefix(t.ProjectID), t.ID)
+		return fmt.Sprintf("task #%d woken (resumed previous agent session)", t.ID), nil
+	}
+	log.Printf("%sWoke tmux session for task #%d (no resumable agent session; started fresh)", s.projectLogPrefix(t.ProjectID), t.ID)
+	return fmt.Sprintf("task #%d woken (started a fresh agent session)", t.ID), nil
+}
+
 // tmuxAdvanceOutcome describes the action taken by advanceTmuxTask. The
 // `message` field is used as the OKResponse body for socket callers and as
 // a log line for the auto-advance path. The `advanced` flag distinguishes

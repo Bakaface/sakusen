@@ -182,6 +182,38 @@ func (s *Session) SendKeys(keys string) error {
 	return nil
 }
 
+// Attached reports whether at least one tmux client is currently attached to
+// the session. Used by hibernation: a session a user is sitting in must never
+// be killed, however idle its pane looks. An error (missing session, tmux not
+// running) is returned to the caller rather than swallowed — callers treat a
+// failed query as "attached" so an unknown state never costs a live session.
+func (s *Session) Attached() (bool, error) {
+	// The target is "=<name>:": the "=" demands an EXACT session-name match
+	// and the trailing ":" scopes the target to the session rather than a
+	// pane. Without the "=", tmux resolves targets by prefix, so querying a
+	// dead "proj-1" would silently report on "proj-10"; without the ":", the
+	// "=" form doesn't resolve at all. An exact miss prints nothing (with a
+	// zero exit status), which this reports as an error — and since callers
+	// read an error as "attached", a session whose exact name is gone is
+	// never acted on.
+	cmd := exec.Command("tmux", "display-message", "-p", "-t", "="+s.Name+":", "#{session_attached}")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("failed to query session_attached: %w (stderr: %s)", err, stderr.String())
+	}
+	value := strings.TrimSpace(stdout.String())
+	if value == "" {
+		return false, fmt.Errorf("no tmux session named %q", s.Name)
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return false, fmt.Errorf("unexpected session_attached value %q: %w", value, err)
+	}
+	return n > 0, nil
+}
+
 func (s *Session) IsAlive() bool {
 	cmd := exec.Command("tmux", "list-panes", "-t", s.Name, "-F", "#{pane_dead}")
 	var stdout bytes.Buffer

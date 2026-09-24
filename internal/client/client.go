@@ -604,6 +604,14 @@ func (c *Client) AdvanceTask(id int64) (string, error) {
 	return resp.Message, nil
 }
 
+// WakeTask asks the daemon to bring a tmux task's interactive session back
+// up (after hibernation, or after the session was lost some other way). It
+// returns once the session exists, so callers may attach immediately.
+func (c *Client) WakeTask(id int64) error {
+	_, err := c.request(daemon.MsgWakeTask, daemon.WakeTaskRequest{TaskID: id})
+	return err
+}
+
 func (c *Client) UpdateTaskPriority(id int64, priority string) (*daemon.TaskInfo, error) {
 	msg, err := c.request(daemon.MsgUpdatePriority, daemon.UpdatePriorityRequest{
 		TaskID:   id,

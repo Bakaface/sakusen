@@ -85,6 +85,7 @@ var migrations = []func(db *DB) error{
 	migrateV21,
 	migrateV22,
 	migrateV23,
+	migrateV24,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -462,6 +463,24 @@ func migrateV23(db *DB) error {
 	}
 	if _, err := db.sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_periodic_due ON periodic_definitions(next_fire_at) WHERE deleted_at IS NULL AND paused = 0`); err != nil {
 		return fmt.Errorf("failed to create idx_periodic_due index: %w", err)
+	}
+	return nil
+}
+
+// migrateV24 adds tasks.hibernated_at — the marker set while a tmux task's
+// interactive session has been hibernated (see the tmux: config block). The
+// task stays in 'tmux' status; only restore, wake and the render sites read
+// the column.
+func migrateV24(db *DB) error {
+	hasHibernatedAt, err := db.tasksHasColumn("hibernated_at")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tasks columns: %w", err)
+	}
+	if hasHibernatedAt {
+		return nil
+	}
+	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN hibernated_at DATETIME`); err != nil {
+		return fmt.Errorf("failed to add hibernated_at column: %w", err)
 	}
 	return nil
 }

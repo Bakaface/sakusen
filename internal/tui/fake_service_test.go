@@ -38,6 +38,7 @@ type fakeTaskService struct {
 	getTaskSteps           func(int64) ([]daemon.TaskStepDetail, error)
 	updateStepContext      func(int64, string, string) error
 	advanceTask            func(int64) (string, error)
+	wakeTask               func(int64) error
 	connect                func() error
 	subscribe              func() error
 	messages               func() <-chan *daemon.Message
@@ -177,6 +178,13 @@ func (f *fakeTaskService) AdvanceTask(id int64) (string, error) {
 		return "", errNotStubbedTUI
 	}
 	return f.advanceTask(id)
+}
+
+func (f *fakeTaskService) WakeTask(id int64) error {
+	if f.wakeTask == nil {
+		return errNotStubbedTUI
+	}
+	return f.wakeTask(id)
 }
 
 func (f *fakeTaskService) ListPeriodics(projectPath string) ([]daemon.PeriodicInfo, error) {

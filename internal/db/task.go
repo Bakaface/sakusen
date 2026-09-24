@@ -47,7 +47,7 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workfl
 
 const taskColumns = `id, project_id, track_id, title, input, slug, workflow, status, priority, step_index, current_step, loop_iteration,
 	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, exit_code, error_message, context, images, commits, periodic_id,
-	created_at, started_at, completed_at, updated_at`
+	created_at, started_at, completed_at, updated_at, hibernated_at`
 
 func (db *DB) GetTask(id int64) (*task.Task, error) {
 	row := db.sqlDB.QueryRow(fmt.Sprintf(`SELECT %s FROM tasks WHERE id = ?`, taskColumns), id)
@@ -220,6 +220,11 @@ func (db *DB) ClaimTask(id int64) (bool, error) {
 	return rows > 0, nil
 }
 
+// UpdateTaskStatus writes a task's status. Every branch also clears
+// hibernated_at, as does every other status-writing statement in this file:
+// the marker only means anything while a task sits in 'tmux' status, so
+// leaving tmux by any route (advance, continue, retry, fail, finalize) must
+// drop it rather than leave a stale timestamp for the TUI to render.
 func (db *DB) UpdateTaskStatus(id int64, status task.Status) error {
 	now := time.Now()
 	var query string
@@ -233,13 +238,13 @@ func (db *DB) UpdateTaskStatus(id int64, status task.Status) error {
 		// reports the task as having started at its last summarizer round
 		// trip instead of at its actual claim. ClaimTask sets the real start;
 		// the retry paths NULL the column out to re-arm it.
-		query = "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?"
+		query = "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?), updated_at = ?, hibernated_at = NULL WHERE id = ?"
 		args = []interface{}{status, now, now, id}
 	case task.StatusCompleted, task.StatusFailed:
-		query = "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?"
+		query = "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?"
 		args = []interface{}{status, now, now, id}
 	default:
-		query = "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?"
+		query = "UPDATE tasks SET status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?"
 		args = []interface{}{status, now, id}
 	}
 
@@ -289,9 +294,18 @@ func (db *DB) UpdateTaskExitCode(id int64, exitCode int, errorMessage string) er
 
 func (db *DB) UpdateTaskError(id int64, errMsg string) error {
 	_, err := db.sqlDB.Exec(
-		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ? WHERE id = ?",
+		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?",
 		errMsg, task.StatusFailed, time.Now(), id,
 	)
+	return err
+}
+
+// SetTaskHibernatedAt stamps (or with a nil at, clears) the hibernation
+// marker for a task. Deliberately does not touch status or updated_at:
+// hibernation is invisible to the task lifecycle — the task stays exactly
+// where it was, only its interactive session went away.
+func (db *DB) SetTaskHibernatedAt(id int64, at *time.Time) error {
+	_, err := db.sqlDB.Exec(`UPDATE tasks SET hibernated_at = ? WHERE id = ?`, at, id)
 	return err
 }
 
@@ -300,7 +314,7 @@ func (db *DB) UpdateTaskError(id int64, errMsg string) error {
 // status without its reason (or vice versa).
 func (db *DB) UpdateTaskStatusError(id int64, status task.Status, errMsg string) error {
 	_, err := db.sqlDB.Exec(
-		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ? WHERE id = ?",
+		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?",
 		errMsg, status, time.Now(), id,
 	)
 	return err
@@ -368,7 +382,7 @@ func (db *DB) ResetTaskForRetry(id int64) error {
 	_, err := db.sqlDB.Exec(
 		`UPDATE tasks SET status = ?, step_index = 0, current_step = NULL, loop_iteration = 0,
 		 exit_code = NULL, error_message = NULL, started_at = NULL,
-		 completed_at = NULL, updated_at = ? WHERE id = ?`,
+		 completed_at = NULL, hibernated_at = NULL, updated_at = ? WHERE id = ?`,
 		task.StatusPending, time.Now(), id,
 	)
 	if err != nil {
@@ -384,7 +398,7 @@ func (db *DB) ResetTaskForRetryFromStep(id int64) error {
 	_, err := db.sqlDB.Exec(
 		`UPDATE tasks SET status = ?, current_step = NULL,
 		 exit_code = NULL, error_message = NULL, started_at = NULL,
-		 completed_at = NULL, updated_at = ? WHERE id = ?`,
+		 completed_at = NULL, hibernated_at = NULL, updated_at = ? WHERE id = ?`,
 		task.StatusPending, time.Now(), id,
 	)
 	if err != nil {
@@ -408,7 +422,7 @@ func (db *DB) ResetTaskForRetryAtStep(id int64, stepIdx int, stepNames []string)
 	_, err := db.sqlDB.Exec(
 		`UPDATE tasks SET status = ?, step_index = ?, current_step = NULL, loop_iteration = 0,
 		 exit_code = NULL, error_message = NULL, started_at = NULL,
-		 completed_at = NULL, updated_at = ? WHERE id = ?`,
+		 completed_at = NULL, hibernated_at = NULL, updated_at = ? WHERE id = ?`,
 		task.StatusPending, stepIdx, time.Now(), id,
 	)
 	if err != nil {
@@ -425,7 +439,7 @@ func (db *DB) ResetTaskForContinue(id int64, workflow, prompt string) error {
 		_, err := db.sqlDB.Exec(
 			`UPDATE tasks SET status = ?, workflow = ?, input = ?, step_index = 0, current_step = NULL, loop_iteration = 0,
 			 exit_code = NULL, error_message = NULL, started_at = NULL,
-			 completed_at = NULL, updated_at = ? WHERE id = ?`,
+			 completed_at = NULL, hibernated_at = NULL, updated_at = ? WHERE id = ?`,
 			task.StatusPending, workflow, prompt, time.Now(), id,
 		)
 		if err != nil {
@@ -439,7 +453,7 @@ func (db *DB) ResetTaskForContinue(id int64, workflow, prompt string) error {
 	_, err := db.sqlDB.Exec(
 		`UPDATE tasks SET status = ?, workflow = ?, step_index = 0, current_step = NULL, loop_iteration = 0,
 		 exit_code = NULL, error_message = NULL, started_at = NULL,
-		 completed_at = NULL, updated_at = ? WHERE id = ?`,
+		 completed_at = NULL, hibernated_at = NULL, updated_at = ? WHERE id = ?`,
 		task.StatusPending, workflow, time.Now(), id,
 	)
 	if err != nil {
@@ -657,7 +671,7 @@ func (db *DB) FailDependentTasks(blockerID int64) ([]int64, error) {
 				continue
 			}
 			if _, err := tx.Exec(
-				`UPDATE tasks SET status = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+				`UPDATE tasks SET status = ?, error_message = ?, completed_at = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?`,
 				task.StatusFailed, fmt.Sprintf("blocker task #%d failed", current), now, now, d.id,
 			); err != nil {
 				return nil, err
@@ -711,13 +725,13 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	var worktreeInt int
 	var worktreeDetached int
 	var startedAt, completedAt sql.NullTime
-	var updatedAt sql.NullTime
+	var updatedAt, hibernatedAt sql.NullTime
 
 	err := s.Scan(
 		&t.ID, &projectID, &trackID, &title, &t.Input, &slug, &workflow, &t.Status, &priority,
 		&t.StepIndex, &currentStep, &t.LoopIteration,
 		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON, &periodicID,
-		&t.CreatedAt, &startedAt, &completedAt, &updatedAt,
+		&t.CreatedAt, &startedAt, &completedAt, &updatedAt, &hibernatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -797,6 +811,9 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	}
 	if updatedAt.Valid {
 		t.UpdatedAt = updatedAt.Time
+	}
+	if hibernatedAt.Valid {
+		t.HibernatedAt = &hibernatedAt.Time
 	}
 
 	return &t, nil

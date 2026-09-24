@@ -13,6 +13,7 @@ import (
 	"github.com/Bakaface/sakusen/internal/client"
 	"github.com/Bakaface/sakusen/internal/daemon"
 	gitpkg "github.com/Bakaface/sakusen/internal/git"
+	taskpkg "github.com/Bakaface/sakusen/internal/task"
 	"github.com/Bakaface/sakusen/internal/tmux"
 	"github.com/Bakaface/sakusen/internal/workflow"
 	tea "github.com/charmbracelet/bubbletea"
@@ -467,52 +468,63 @@ func (m Model) tmuxProjectNameFor(t daemon.TaskInfo) string {
 	return ""
 }
 
+// attachTmuxSession attaches to (or switches the client to) a task's tmux
+// session, waking a hibernated — or otherwise missing — session first.
+//
+// Everything runs inside the returned tea.Cmd, including the existence check:
+// waking is a daemon round trip that spawns a process, which must not block
+// Update. The attach itself is still produced by tea.ExecProcess; calling it
+// here and returning its message hands the runtime exactly what it would have
+// received had Update returned the cmd directly.
 func (m Model) attachTmuxSession(t daemon.TaskInfo) tea.Cmd {
 	taskID := t.ID
 	taskIDStr := fmt.Sprintf("%d", taskID)
 	session := tmux.NewSession(m.tmuxProjectNameFor(t), taskIDStr, "")
-	if !session.Exists() {
-		return func() tea.Msg {
-			return errorMsg(fmt.Errorf("no tmux session found for task #%d", taskID))
-		}
-	}
-
 	sessionName := session.Name
 
-	if tmux.IsInsideTmux() {
-		behavior := ""
-		if m.cfg != nil {
-			behavior = m.cfg.TmuxNestedAttachBehavior
-		}
-		if behavior == "" {
-			behavior = "switch"
+	behavior := ""
+	if m.cfg != nil {
+		behavior = m.cfg.TmuxNestedAttachBehavior
+	}
+	if behavior == "" {
+		behavior = "switch"
+	}
+
+	return func() tea.Msg {
+		if !session.Exists() {
+			if taskpkg.Status(t.Status) != taskpkg.StatusTmux {
+				return errorMsg(fmt.Errorf("no tmux session found for task #%d", taskID))
+			}
+			if err := m.client.WakeTask(taskID); err != nil {
+				return errorMsg(fmt.Errorf("failed to wake tmux session for task #%d: %w", taskID, err))
+			}
 		}
 
-		if behavior == "nest" {
-			// Nested attach: unset $TMUX and attach (creates nested tmux).
-			// User detaches with prefix+d to return to the TUI.
-			cmd := tmux.NestedAttachCommand(sessionName)
-			return tea.ExecProcess(cmd, func(err error) tea.Msg {
-				return tmuxDetachedMsg{taskID: taskID}
-			})
-		}
+		if tmux.IsInsideTmux() {
+			if behavior == "nest" {
+				// Nested attach: unset $TMUX and attach (creates nested tmux).
+				// User detaches with prefix+d to return to the TUI.
+				cmd := tmux.NestedAttachCommand(sessionName)
+				return tea.ExecProcess(cmd, func(err error) tea.Msg {
+					return tmuxDetachedMsg{taskID: taskID}
+				})()
+			}
 
-		// Default "switch": switch the client to the target session.
-		// The TUI keeps running in the background. User returns with prefix+L.
-		return func() tea.Msg {
+			// Default "switch": switch the client to the target session.
+			// The TUI keeps running in the background. User returns with prefix+L.
 			cmd := tmux.SwitchClientCommand(sessionName)
 			if err := cmd.Run(); err != nil {
 				return errorMsg(fmt.Errorf("failed to switch to tmux session: %w", err))
 			}
 			return tmuxDetachedMsg{taskID: taskID}
 		}
-	}
 
-	// Not inside tmux: hand over the terminal to tmux attach.
-	cmd := tmux.AttachCommand(sessionName)
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return tmuxDetachedMsg{taskID: taskID}
-	})
+		// Not inside tmux: hand over the terminal to tmux attach.
+		cmd := tmux.AttachCommand(sessionName)
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return tmuxDetachedMsg{taskID: taskID}
+		})()
+	}
 }
 
 // tmuxProjectNames returns the distinct project names whose task sessions the

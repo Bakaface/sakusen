@@ -109,6 +109,27 @@ type ProjectConfig struct {
 	// tasks rows on a cron/@every cadence. Top-level (sibling to workflows:).
 	// See PeriodicEntry.
 	Periodic []PeriodicEntry `yaml:"periodic,omitempty"`
+	// Tmux configures tmux session hibernation. See TmuxConfig.
+	Tmux *TmuxConfig `yaml:"tmux,omitempty"`
+}
+
+// TmuxConfig is the top-level tmux: block governing hibernation of idle
+// interactive task sessions. Accepted in every config tier, but read
+// daemon-level (from the daemon's own merged Config) exactly like
+// max_workers — another project's .sakusen.yml never changes what the
+// running daemon does.
+type TmuxConfig struct {
+	// HibernateAfter is how long a tmux session may sit idle at its agent's
+	// prompt before the daemon kills it (the task, worktree and conversation
+	// survive; attach resumes it). Parsed with time.ParseDuration. Empty
+	// inherits the lower tier; "0" disables idle hibernation.
+	HibernateAfter string `yaml:"hibernate_after,omitempty"`
+	// MaxLiveSessions is a soft cap on live sakusen tmux task sessions across
+	// all projects. When exceeded, the daemon hibernates eligible sessions
+	// oldest-idle-first until it is back at the cap. A pointer so an explicit
+	// 0 (disable the cap) is distinguishable from "not set"; nil inherits the
+	// lower tier.
+	MaxLiveSessions *int `yaml:"max_live_sessions,omitempty"`
 }
 
 // PeriodicEntry is a single scheduled-task definition under the top-level
@@ -999,6 +1020,7 @@ type GlobalConfig struct {
 	DefaultAgent             string                 `yaml:"default_agent,omitempty"`
 	MergeConflicts           *MergeConflictsConfig  `yaml:"merge_conflicts,omitempty"`
 	Summarizer               *SummarizerConfig      `yaml:"summarizer,omitempty"`
+	Tmux                     *TmuxConfig            `yaml:"tmux,omitempty"`
 }
 
 type NotificationsConfig struct {
@@ -1064,6 +1086,14 @@ type Config struct {
 
 	// Command to run after creating a tmux session (e.g. layout setup)
 	TmuxSetupCommand string
+
+	// TmuxHibernateAfter is the resolved tmux.hibernate_after (0 = idle
+	// hibernation disabled).
+	TmuxHibernateAfter time.Duration
+
+	// TmuxMaxLiveSessions is the resolved tmux.max_live_sessions soft cap
+	// (0 = cap disabled).
+	TmuxMaxLiveSessions int
 
 	// From global config
 	Notifications            NotificationsConfig

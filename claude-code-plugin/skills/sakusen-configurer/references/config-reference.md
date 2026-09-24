@@ -14,6 +14,7 @@
 - [Worktree Sync Paths](#worktree-sync-paths)
 - [Worktree Setup Commands](#worktree-setup-commands)
 - [Tmux Setup Command](#tmux-setup-command)
+- [Tmux Session Hibernation](#tmux-session-hibernation)
 - [Prompt Includes (`.sakusen/prompts/`)](#prompt-includes-sakusenprompts)
 - [Step Configuration, Loops, Cross-Task and Child References](#step-configuration-loops-cross-task-and-child-references) — moved to [workflow-building.md](workflow-building.md)
 - [Task States](#task-states)
@@ -335,6 +336,39 @@ Variables:
 The command runs via `sh -c` with the **worktree** as `cwd`; a non-zero exit fails the session launch.
 
 **Agent-launch control:** when the command contains `{{run_agent}}` or `{{agent_command}}`, Sakusen assumes *you* place the agent (as in the example above) and does not auto-start it. When neither appears, Sakusen starts the agent itself in window 0 after your command runs. If you do not set `tmux-setup-command` at all, Sakusen uses a minimal default that just starts the agent.
+
+---
+
+## Tmux Session Hibernation
+
+Tasks paused in `tmux` status hold a live interactive agent process, and they do not count
+against `max_workers`. The top-level `tmux:` block bounds how many of those processes survive
+and for how long.
+
+```yaml
+tmux:
+  hibernate_after: 4h        # idle-at-prompt time before the session is killed; "0" disables
+  max_live_sessions: 12      # soft cap on live sakusen tmux task sessions; 0 disables
+```
+
+Both keys are on by default at the values above. Hibernating kills the tmux session only: the
+task stays in `tmux` status, and its worktree, branch, step cursor and recorded agent
+conversation are untouched. Attaching (TUI or `sakusen attach`) wakes the task first, restarting
+the agent through its `resume_command`, so the conversation comes back. The TUI renders a
+hibernated task with a `[zz]` postfix.
+
+A session is hibernated only when every one of these holds: the tmux monitor reports the pane
+idle; a turn-end sentinel (or a resume) left the agent parked at its prompt rather than stalled
+mid-turn; no tmux client is attached; no advance is in flight; and the session is genuinely
+resumable — a recorded session id for that step (or ad-hoc `continue` / `tmux-direct` session)
+**plus** an agent record with a `resume_command`. Agents without `resume_command` are therefore
+never hibernated. The `max_live_sessions` cap reclaims eligible sessions oldest-idle-first and
+is soft: it never touches busy, attached or non-resumable sessions and never blocks new work.
+
+Both settings are read **daemon-level**, exactly like `max_workers`: the running daemon uses the
+values merged from the global tiers plus its own project file, so setting them in another
+project's `.sakusen.yml` has no effect on it. `hibernate_after` is a Go duration string; an
+unparseable duration or a negative value for either key is a hard load error.
 
 ---
 

@@ -99,6 +99,13 @@ func (v *taskInfoView) renderMetadata() string {
 	b.WriteString(stateStyle(status).Render(t.Status))
 	b.WriteString("\n")
 
+	// Hibernated (tmux session killed while idle; attach wakes it)
+	if t.HibernatedAt != nil {
+		b.WriteString(labelStyle.Render("Hibernated: "))
+		b.WriteString(dimStyle.Render(t.HibernatedAt.Format("2006-01-02 15:04:05")))
+		b.WriteString("\n")
+	}
+
 	// Priority
 	if t.Priority != "" {
 		b.WriteString(labelStyle.Render("Priority:  "))

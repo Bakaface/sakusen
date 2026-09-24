@@ -49,6 +49,10 @@ type TaskSummary struct {
 	WaitsOn         []int64    `json:"waits_on,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	// HibernatedAt is set while a tmux task's interactive session has been
+	// hibernated: the status is still "tmux", but no agent process is running
+	// until someone attaches.
+	HibernatedAt *time.Time `json:"hibernated_at,omitempty"`
 }
 
 // ListTasksResult is the payload returned by list_tasks. Project fields are
@@ -199,5 +203,6 @@ func taskSummaryFrom(t daemon.TaskInfo) TaskSummary {
 		WaitsOn:         t.WaitsOn,
 		CreatedAt:       t.CreatedAt,
 		CompletedAt:     t.CompletedAt,
+		HibernatedAt:    t.HibernatedAt,
 	}
 }

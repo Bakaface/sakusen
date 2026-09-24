@@ -206,3 +206,36 @@ func TestExtractTaskID(t *testing.T) {
 		})
 	}
 }
+
+// Attached reports 0 clients for a detached session, and — because its target
+// is an EXACT name match — refuses to answer for a session name that does not
+// exist even when a longer name shares its prefix. Callers read that error as
+// "attached", which is what stops hibernation from acting on the wrong
+// session.
+func TestSessionAttached(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	base := "sakusen-attached-test"
+	live := &Session{Name: base + "10", WorkDir: t.TempDir()}
+	if err := live.Create("sleep", "600"); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	t.Cleanup(func() { live.Kill() })
+
+	attached, err := live.Attached()
+	if err != nil {
+		t.Fatalf("Attached: %v", err)
+	}
+	if attached {
+		t.Error("a detached session must report no attached clients")
+	}
+
+	// "…-1" does not exist; only "…-10" does. A prefix-matching query would
+	// happily answer for the latter.
+	missing := &Session{Name: base + "1"}
+	if _, err := missing.Attached(); err == nil {
+		t.Error("expected Attached to fail for a name that only matches by prefix")
+	}
+}

@@ -23,6 +23,7 @@ const (
 	MsgCreateTask              MessageType = "create_task"
 	MsgContinueTask            MessageType = "continue_task"
 	MsgAdvanceTask             MessageType = "advance_task"
+	MsgWakeTask                MessageType = "wake_task"
 	MsgDeleteTask              MessageType = "delete_task"
 	MsgUpdatePriority          MessageType = "update_priority"
 	MsgUpdateField             MessageType = "update_field"
@@ -189,6 +190,12 @@ type ContinueTaskRequest struct {
 }
 
 type AdvanceTaskRequest struct {
+	TaskID int64 `json:"task_id"`
+}
+
+// WakeTaskRequest asks the daemon to bring a tmux task's interactive session
+// back up — after hibernation, or after the session was lost some other way.
+type WakeTaskRequest struct {
 	TaskID int64 `json:"task_id"`
 }
 
@@ -618,6 +625,10 @@ type TaskInfo struct {
 	LatestChat   *ChatInfo         `json:"latest_chat,omitempty"`
 	// PeriodicID is set when the task was materialized by a periodic definition.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
+	// HibernatedAt is set while a tmux task's interactive session has been
+	// hibernated: the status is still "tmux", but no agent process is running
+	// and attaching wakes it first.
+	HibernatedAt *time.Time `json:"hibernated_at,omitempty"`
 }
 
 // PeriodicInfo is the client-facing projection of a periodic_definitions row.

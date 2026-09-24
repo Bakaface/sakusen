@@ -157,6 +157,13 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 		return nil, fmt.Errorf(`default_priority: invalid value %q (must be "low", "medium", "high", or "urgent")`, proj.DefaultPriority)
 	}
 
+	// tmux: is read daemon-level (like max_workers), but an unparseable
+	// duration or a negative cap is a load error wherever it is written, so
+	// surface it here with the same rules the merge path applies.
+	if err := applyTmuxConfig(defaultConfig(), proj.Tmux); err != nil {
+		return nil, err
+	}
+
 	// Agent record shapes are checkable from the file alone. Refs (step/
 	// workflow `agent:`, default_agent) are NOT resolved here — they may point
 	// at agents defined in the global tier, which single-file diagnosis

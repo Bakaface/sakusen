@@ -62,6 +62,9 @@ type taskStore interface {
 	UpdateTaskTitle(id int64, title string) error
 	UpdateTaskInput(id int64, input string) error
 	UpdateTaskTrack(id int64, trackID *int64) error
+	// SetTaskHibernatedAt stamps/clears the tmux session hibernation marker
+	// (see internal/daemon/tmux_monitor.go).
+	SetTaskHibernatedAt(id int64, at *time.Time) error
 	FinalizeTaskIdentity(id int64, title, slug, branch string) error
 	SetWorktreeDetached(id int64, detached bool) error
 	GetTaskCommits(id int64) ([]string, error)
@@ -132,6 +135,7 @@ type taskStore interface {
 	// workflow.Engine.RecordTmuxStepSentinelSession (see tmux_monitor.go).
 	UpsertChat(taskID int64, stepName, sessionID, tmuxSessionName string) error
 	GetLatestChat(taskID int64) (*db.Chat, error)
+	GetLatestChatForSteps(taskID int64, stepNames []string) (*db.Chat, error)
 	GetChatByStep(taskID int64, stepName string) (*db.Chat, error)
 
 	// Forwarded to workflow.Engine (via workflow.NewEngine(cfg, s.database, ...)

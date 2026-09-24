@@ -60,7 +60,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     started_at DATETIME,
     completed_at DATETIME,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Set while a tmux task's interactive session is hibernated (killed to
+    -- free memory; the task stays in 'tmux' status and its worktree, branch,
+    -- step cursor and agent conversation are intact). NULL = live session.
+    hibernated_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

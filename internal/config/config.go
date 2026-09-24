@@ -44,7 +44,40 @@ func defaultConfig() *Config {
 			},
 		},
 		PollInterval: 5 * time.Second,
+		// Hibernation is on by default: an unbounded pile of idle interactive
+		// agent processes is what it exists to prevent, so a config that never
+		// mentions tmux: still gets bounded.
+		TmuxHibernateAfter:  4 * time.Hour,
+		TmuxMaxLiveSessions: 12,
 	}
+}
+
+// applyTmuxConfig merges one tier's tmux: block into the resolved config.
+// Merging is PER FIELD rather than wholesale so a tier may set only one key:
+// a non-empty hibernate_after overrides, and a non-nil max_live_sessions
+// pointer overrides (which is what lets an explicit 0 disable the cap rather
+// than read as "unset").
+func applyTmuxConfig(cfg *Config, t *TmuxConfig) error {
+	if t == nil {
+		return nil
+	}
+	if t.HibernateAfter != "" {
+		d, err := time.ParseDuration(t.HibernateAfter)
+		if err != nil {
+			return fmt.Errorf("invalid tmux.hibernate_after %q: %w", t.HibernateAfter, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("invalid tmux.hibernate_after %q: must not be negative", t.HibernateAfter)
+		}
+		cfg.TmuxHibernateAfter = d
+	}
+	if t.MaxLiveSessions != nil {
+		if *t.MaxLiveSessions < 0 {
+			return fmt.Errorf("invalid tmux.max_live_sessions %d: must not be negative", *t.MaxLiveSessions)
+		}
+		cfg.TmuxMaxLiveSessions = *t.MaxLiveSessions
+	}
+	return nil
 }
 
 // DefaultWorkflow returns the single-step default workflow when no workflow is configured
@@ -228,6 +261,9 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	override(&cfg.DefaultAgent, global.DefaultAgent)
 	overrideFromPtr(&cfg.MergeConflicts, global.MergeConflicts)
 	overrideFromPtr(&cfg.Summarizer, global.Summarizer)
+	if err := applyTmuxConfig(cfg, global.Tmux); err != nil {
+		return err
+	}
 	if global.Options != nil {
 		override(&cfg.Options.Number, global.Options.Number)
 		override(&cfg.Options.Branch, global.Options.Branch)
@@ -296,6 +332,9 @@ func loadProjectConfig(path string, cfg *Config) error {
 	override(&cfg.DefaultAgent, proj.DefaultAgent)
 	overrideFromPtr(&cfg.MergeConflicts, proj.MergeConflicts)
 	overrideFromPtr(&cfg.Summarizer, proj.Summarizer)
+	if err := applyTmuxConfig(cfg, proj.Tmux); err != nil {
+		return err
+	}
 	if proj.Options != nil {
 		override(&cfg.Options.Number, proj.Options.Number)
 		override(&cfg.Options.Branch, proj.Options.Branch)

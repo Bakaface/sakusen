@@ -131,8 +131,20 @@ type Server struct {
 // task, so re-entrant ticks of the monitor loop don't fire StartAgent
 // twice while ResumeAfterApproval is still spinning up. Cleared when
 // the task leaves StatusTmux.
+// atPrompt records that the agent inside the session has finished a turn and
+// is parked at its prompt, as opposed to stalled mid-turn — the pane hash
+// alone cannot tell those apart (see maybeAutoAdvance). It is set when a
+// turn-end sentinel is observed and when a session is spawned through the
+// agent's resume_command (a resumed conversation starts at the prompt), and
+// cleared whenever the pane starts repainting again.
+//
+// idleSince is when the monitor last saw activity go idle, zeroed on the
+// transition back to wip. Both feed hibernation eligibility and are
+// in-memory only: a daemon restart re-derives them from the next few ticks.
 type tmuxAutoEntry struct {
 	advancing bool
+	atPrompt  bool
+	idleSince time.Time
 }
 
 func NewServer(cfg *config.Config, database taskStore) *Server {
@@ -156,6 +168,25 @@ func NewServer(cfg *config.Config, database taskStore) *Server {
 		cancel:             cancel,
 		shutdownDone:       make(chan struct{}),
 	}
+}
+
+// tmuxAutoEntryFor returns the per-task tmux state entry, creating it if this
+// is the first tick that needs one. Callers MUST hold s.mu for writing.
+func (s *Server) tmuxAutoEntryFor(taskID int64) *tmuxAutoEntry {
+	entry, ok := s.tmuxAutoState[taskID]
+	if !ok {
+		entry = &tmuxAutoEntry{}
+		s.tmuxAutoState[taskID] = entry
+	}
+	return entry
+}
+
+// markTmuxAtPrompt records that a task's interactive agent is parked at its
+// prompt (see tmuxAutoEntry.atPrompt).
+func (s *Server) markTmuxAtPrompt(taskID int64) {
+	s.mu.Lock()
+	s.tmuxAutoEntryFor(taskID).atPrompt = true
+	s.mu.Unlock()
 }
 
 // markEnginePaused is the Engine pause callback (see Server.enginePaused).
@@ -585,6 +616,14 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 			return
 		}
 		s.handleContinueTask(conn, req)
+
+	case MsgWakeTask:
+		var req WakeTaskRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleWakeTask(conn, req)
 
 	case MsgAdvanceTask:
 		var req AdvanceTaskRequest

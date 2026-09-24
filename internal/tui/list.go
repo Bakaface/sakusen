@@ -653,20 +653,27 @@ func (l *listView) statusText(task daemon.TaskInfo) string {
 		// non-tmux Claude process even though a stale tmux session for the
 		// previous step may still be visible to ListSessions for a beat.
 	} else if taskpkg.Status(task.Status) == taskpkg.StatusTmux || l.tmuxSessions[task.ID] {
-		switch task.TmuxActivity {
-		case "wip":
-			statusLabel += " [wip]"
-		case "idle":
-			statusLabel += " [T]"
-		default:
-			// No live monitor signal. Only claim work-in-progress when the
-			// pane is both Claude-owned (non-human step) AND actually live;
-			// a dead session (e.g. after a daemon restart) or a human step
-			// where Claude has handed over the wheel reads as stale [T].
-			if !task.StepHuman && l.tmuxSessions[task.ID] {
+		if task.HibernatedAt != nil {
+			// Hibernated: the task is parked exactly where it was, but there
+			// is no agent process left to report activity for. Attaching
+			// wakes it.
+			statusLabel += " [zz]"
+		} else {
+			switch task.TmuxActivity {
+			case "wip":
 				statusLabel += " [wip]"
-			} else {
+			case "idle":
 				statusLabel += " [T]"
+			default:
+				// No live monitor signal. Only claim work-in-progress when the
+				// pane is both Claude-owned (non-human step) AND actually live;
+				// a dead session (e.g. after a daemon restart) or a human step
+				// where Claude has handed over the wheel reads as stale [T].
+				if !task.StepHuman && l.tmuxSessions[task.ID] {
+					statusLabel += " [wip]"
+				} else {
+					statusLabel += " [T]"
+				}
 			}
 		}
 	}
