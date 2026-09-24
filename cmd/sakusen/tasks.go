@@ -441,7 +441,8 @@ var attachCmd = &cobra.Command{
 	ValidArgsFunction: completeTaskIDs(task.StatusRunning, task.StatusTmux),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		taskID := args[0]
-		if _, err := strconv.ParseInt(taskID, 10, 64); err != nil {
+		id, err := strconv.ParseInt(taskID, 10, 64)
+		if err != nil {
 			return fmt.Errorf("invalid task ID: %s", taskID)
 		}
 
@@ -449,7 +450,17 @@ var attachCmd = &cobra.Command{
 			return fmt.Errorf("tmux is not installed or not in PATH")
 		}
 
-		session := tmux.NewSession(cfg.Project.Name, taskID, "")
+		// The session is named after the TASK's project, which is not
+		// necessarily cwd's — a task created under a nested .sakusen.yml, or
+		// attached to from a sibling project, resolves to a different project
+		// row. Ask the daemon for the task's own project and fall back to cwd's
+		// only when it can't answer.
+		projectName := cfg.Project.Name
+		if info, err := client.New(cfg).GetTask(id); err == nil && info.ProjectName != "" {
+			projectName = info.ProjectName
+		}
+
+		session := tmux.NewSession(projectName, taskID, "")
 		if !session.Exists() {
 			return fmt.Errorf("no tmux session found for task #%s", taskID)
 		}

@@ -258,6 +258,35 @@ func ListTaskSessions(projectName string) (map[int64]*Session, error) {
 	return result, nil
 }
 
+// ListTaskSessionsForProjects returns the live task sessions belonging to any
+// of projectNames, keyed by task ID. Task IDs are globally unique, so the
+// per-project results merge into one map; the first name matching a session
+// wins. One `tmux list-sessions` call serves all names, since this runs on the
+// TUI's refresh tick. An empty projectNames yields an empty map without
+// shelling out. Sessions that merely share a project's name prefix are
+// excluded (see TaskIDFromSessionName).
+func ListTaskSessionsForProjects(projectNames []string) (map[int64]*Session, error) {
+	if len(projectNames) == 0 {
+		return map[int64]*Session{}, nil
+	}
+
+	sessions, err := ListSessions("")
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64]*Session, len(sessions))
+	for _, s := range sessions {
+		for _, projectName := range projectNames {
+			if taskID, ok := TaskIDFromSessionName(projectName, s.Name); ok {
+				result[taskID] = s
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 // ExtractTaskID extracts the task ID from a session name.
 // Strips the projectName prefix, then returns the next numeric segment.
 func ExtractTaskID(projectName, sessionName string) string {

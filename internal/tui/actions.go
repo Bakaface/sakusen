@@ -448,13 +448,29 @@ func (m Model) openLogInEditor(task *daemon.TaskInfo) tea.Cmd {
 	})
 }
 
-func (m Model) attachTmuxSession(taskID int64) tea.Cmd {
-	taskIDStr := fmt.Sprintf("%d", taskID)
-	projectName := ""
-	if m.cfg != nil {
-		projectName = m.cfg.Project.Name
+// tmuxProjectNameFor returns the project name a task's tmux session was
+// created under. The daemon names sessions from the TASK's project
+// (`spawnInteractiveSession` uses `pc.cfg.Project.Name`), which is not
+// necessarily the project the TUI was launched in: global mode lists every
+// project, and a `.sakusen.yml` nested below another one makes cwd resolve to
+// a different project row than the task's. Deriving the name from `m.cfg`
+// instead sent attach looking for `<cwd project>-<id>`, which never exists.
+// The cwd config remains the fallback for TaskInfo values that predate
+// ProjectName enrichment.
+func (m Model) tmuxProjectNameFor(t daemon.TaskInfo) string {
+	if t.ProjectName != "" {
+		return t.ProjectName
 	}
-	session := tmux.NewSession(projectName, taskIDStr, "")
+	if m.cfg != nil {
+		return m.cfg.Project.Name
+	}
+	return ""
+}
+
+func (m Model) attachTmuxSession(t daemon.TaskInfo) tea.Cmd {
+	taskID := t.ID
+	taskIDStr := fmt.Sprintf("%d", taskID)
+	session := tmux.NewSession(m.tmuxProjectNameFor(t), taskIDStr, "")
 	if !session.Exists() {
 		return func() tea.Msg {
 			return errorMsg(fmt.Errorf("no tmux session found for task #%d", taskID))
@@ -499,13 +515,33 @@ func (m Model) attachTmuxSession(taskID int64) tea.Cmd {
 	})
 }
 
-func (m Model) checkTmuxSessions() tea.Cmd {
-	projectName := ""
-	if m.cfg != nil {
-		projectName = m.cfg.Project.Name
+// tmuxProjectNames returns the distinct project names whose task sessions the
+// list could contain, in order of first appearance. Sessions are named after
+// the owning task's project, so the cwd's project name covers only a slice of
+// the visible tasks in global mode — and none of them when cwd resolves to a
+// different project row than the tasks' (see tmuxProjectNameFor). It falls back
+// to the cwd's project before the first task load, so the indicators are
+// populated on the first tick.
+func (m Model) tmuxProjectNames() []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, t := range m.list.allTasks {
+		if name := m.tmuxProjectNameFor(t); name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
 	}
+	if len(names) == 0 && m.cfg != nil && m.cfg.Project.Name != "" {
+		names = append(names, m.cfg.Project.Name)
+	}
+	return names
+}
+
+func (m Model) checkTmuxSessions() tea.Cmd {
+	projectNames := m.tmuxProjectNames()
+
 	return func() tea.Msg {
-		sessions, err := tmux.ListTaskSessions(projectName)
+		sessions, err := tmux.ListTaskSessionsForProjects(projectNames)
 		if err != nil {
 			return nil
 		}

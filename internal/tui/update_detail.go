@@ -40,7 +40,7 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, fk.Attach): // "t"
 		if m.detail.task != nil {
-			return m, m.attachTmuxSession(m.detail.task.ID)
+			return m, m.attachTmuxSession(*m.detail.task)
 		}
 		return m, nil
 	case key.Matches(msg, fk.EditLog): // "e"

@@ -183,7 +183,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Attach):
 		if task := m.list.Selected(); task != nil {
-			return m, m.attachTmuxSession(task.ID)
+			return m, m.attachTmuxSession(*task)
 		}
 		return m, nil
 

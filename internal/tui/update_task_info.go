@@ -50,7 +50,7 @@ func (m Model) handleTaskInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, tk.Attach): // "t"
 		if m.taskInfo.task != nil {
-			return m, m.attachTmuxSession(m.taskInfo.task.ID)
+			return m, m.attachTmuxSession(*m.taskInfo.task)
 		}
 		return m, nil
 	case key.Matches(msg, tk.Logs): // "l"
