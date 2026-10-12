@@ -154,13 +154,14 @@ agents:
     command: >-
       claude -p "$(cat "$SAKUSEN_PROMPT_FILE")" --model "$SAKUSEN_MODEL"
       $([ "$SAKUSEN_PLUGINS" = true ] && echo --plugin-dir=./plugins)
-      --output-format text > "$SAKUSEN_RESULT_FILE"
+      --verbose --output-format stream-json
+      | "$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-stream-format.sh"
     env:
       SAKUSEN_MODEL: default
       SAKUSEN_PLUGINS: "false"
     variants:
       opus:         { env: { SAKUSEN_MODEL: claude-opus-4-1 } }
-      fable:        { env: { SAKUSEN_MODEL: claude-fable-5-1 } }
+      sonnet:       { env: { SAKUSEN_MODEL: claude-sonnet-5 } }
       with-plugins: { env: { SAKUSEN_PLUGINS: "true" } }
 ```
 
@@ -174,7 +175,7 @@ A ref is a parent slug followed by any number of that parent's variants, used as
 
 - **Any order.** `claude:with-plugins:opus` and `claude:opus:with-plugins` are the same agent: modifiers are sorted alphabetically into a canonical form, and that canonical form is the record's registry key.
 - **Only referenced combinations exist.** A combination becomes a registry entry when some `agent:`, `default_agent:`, or alias target mentions it — the parent's cross product is never materialized.
-- **Conflict rule.** Two modifiers in one ref that set the same env key, or the same whole field, to *different* values is a load error naming both modifiers. Identical values are fine. This gives mutually-exclusive dimensions for free: `opus` and `fable` both write `SAKUSEN_MODEL`, so `claude:opus:fable` fails.
+- **Conflict rule.** Two modifiers in one ref that set the same env key, or the same whole field, to *different* values is a load error naming both modifiers. Identical values are fine. This gives mutually-exclusive dimensions for free: `opus` and `sonnet` both write `SAKUSEN_MODEL`, so `claude:opus:sonnet` fails.
 - Every field a single variant may set is allowed on a modifier (`command`, `mode`, `resume_command`, `chat_log_command`, `env`); the composed record is shape-checked like any other.
 - A modifier must be a variant declared by *that* parent — `claude:with-plugins` fails when `claude` doesn't declare `with-plugins`, listing the declared names. Repeating a modifier (`claude:opus:opus`) is also an error.
 
@@ -191,8 +192,8 @@ Variants are declared per-parent — there is no shared modifier namespace in Sa
 
 ```yaml
 x-models: &models
-  opus:  { env: { SAKUSEN_MODEL: claude-opus-4-1 } }
-  fable: { env: { SAKUSEN_MODEL: claude-fable-5-1 } }
+  opus:   { env: { SAKUSEN_MODEL: claude-opus-4-1 } }
+  sonnet: { env: { SAKUSEN_MODEL: claude-sonnet-5 } }
 
 agents:
   claude:
@@ -215,7 +216,7 @@ The top-level `agent_aliases:` map (alias → target) gives roles stable semanti
 ```yaml
 agent_aliases:
   headless-implementer: claude:opus                    # target may be an agent or a variant
-  conversationist: claude-tmux:fable:with-plugins      # ...or a composed ref
+  conversationist: claude-tmux:sonnet:with-plugins      # ...or a composed ref
   reviewer: claude
 ```
 

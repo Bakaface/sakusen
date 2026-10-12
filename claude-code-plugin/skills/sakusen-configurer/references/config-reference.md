@@ -45,7 +45,7 @@ Every workflow step runs one of these shell commands (via `sh -c`, in the task w
 
 `agents:` and `default_agent:` may also be set in the global `~/.sakusen.yml`; project-tier records override global ones **per slug, wholesale** (records are not field-merged, and a redefinition replaces the record's `variants:` too).
 
-An agent may declare `variants:` (variant name → partial record): each variant inherits every parent field, overrides what it redefines (`env` merges per-key, variant wins), and becomes an ordinary agent named `<parent>:<variant>` usable anywhere a slug is accepted. A ref may stack several of a parent's variants as modifiers in any order (`claude-tmux:fable:with-plugins` ≡ `claude-tmux:with-plugins:fable`); two modifiers setting the same env key or field to different values is a load error. Variants cannot nest and cannot unset a parent field. The top-level `agent_aliases:` map (alias → agent, variant, or composed ref) adds stable semantic names, merged per-key across tiers (more-local wins, so a project can re-point a global alias):
+An agent may declare `variants:` (variant name → partial record): each variant inherits every parent field, overrides what it redefines (`env` merges per-key, variant wins), and becomes an ordinary agent named `<parent>:<variant>` usable anywhere a slug is accepted. A ref may stack several of a parent's variants as modifiers in any order (`claude-tmux:sonnet:with-plugins` ≡ `claude-tmux:with-plugins:sonnet`); two modifiers setting the same env key or field to different values is a load error. Variants cannot nest and cannot unset a parent field. The top-level `agent_aliases:` map (alias → agent, variant, or composed ref) adds stable semantic names, merged per-key across tiers (more-local wins, so a project can re-point a global alias):
 
 ```yaml
 agents:
@@ -53,7 +53,8 @@ agents:
     command: >-
       claude -p "$(cat "$SAKUSEN_PROMPT_FILE")" --model "$SAKUSEN_MODEL"
       $([ "$SAKUSEN_PLUGINS" = true ] && echo --plugin-dir=./plugins)
-      --output-format text > "$SAKUSEN_RESULT_FILE"
+      --verbose --output-format stream-json
+      | "$SAKUSEN_PROJECT_PATH/.sakusen/agents/claude-stream-format.sh"
     env:
       SAKUSEN_MODEL: default
       SAKUSEN_PLUGINS: "false"
