@@ -436,11 +436,12 @@ func TestCheckTmuxActivity_TracksIdleAndPromptState(t *testing.T) {
 	}
 }
 
-// A session that came back through resume_command starts parked at the
-// prompt, and the monitor's first reading of it (always "wip": it starts
-// from unknown) must not undo that — otherwise a restored or woken session
-// could never hibernate again until someone ran a turn in it.
-func TestCheckTmuxActivity_FirstReadingKeepsResumeAtPrompt(t *testing.T) {
+// A woken session is NOT eligible to hibernate again just because its pane
+// settled: the user woke it to use it, and a turn they start before the pane
+// first goes idle produces no idle->wip edge, so an at-prompt mark set on wake
+// would survive into that turn and get the session killed mid-turn. Only the
+// next turn-end sentinel makes it eligible.
+func TestCheckTmuxActivity_WokenSessionWaitsForTurnEnd(t *testing.T) {
 	f, tk := setupEligible(t, hibernateYML)
 	if !f.server.hibernateTmuxTask(tk, "idle") {
 		t.Fatal("setup: expected the task to hibernate")
@@ -463,14 +464,17 @@ func TestCheckTmuxActivity_FirstReadingKeepsResumeAtPrompt(t *testing.T) {
 		t.Fatal("expected the woken pane to settle into idle")
 	}
 
-	f.server.mu.RLock()
-	entry := f.server.tmuxAutoState[tk.ID]
-	f.server.mu.RUnlock()
-	if entry == nil || !entry.atPrompt {
-		t.Error("the monitor's initial wip reading must not clear a resume's at-prompt mark")
+	refreshed, err := f.database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !f.server.eligibleForHibernation(tk) {
-		t.Error("a woken session that settled idle must be eligible to hibernate again")
+	if f.server.eligibleForHibernation(refreshed) {
+		t.Error("a woken session must not be eligible before its next turn ends")
+	}
+
+	f.server.markTmuxAtPrompt(tk.ID)
+	if !f.server.eligibleForHibernation(refreshed) {
+		t.Error("a woken session must be eligible again once a turn-end sentinel parks it at its prompt")
 	}
 }
 
@@ -737,6 +741,69 @@ func TestHibernateIdleTmuxSessions_Cap(t *testing.T) {
 	}
 }
 
+// A session restored at daemon startup is marked at-prompt once it first
+// settles, so untouched restored sessions stay reclaimable by the cap.
+func TestCheckTmuxActivity_RestoredSessionMarkedOnFirstIdle(t *testing.T) {
+	f := setupHibernationFixture(t, hibernateYML)
+	tk := f.newTask(t, 1)
+	f.spawnSession(t, tk, "implement")
+	f.server.markTmuxAtPromptOnIdle(tk.ID)
+
+	monitor := tmux.NewMonitor(tmux.DefaultMonitorConfig())
+	settled := false
+	for i := 0; i < 30; i++ {
+		f.server.checkTmuxActivity(monitor)
+		if _, ok := f.server.tmuxIdleSince(tk.ID); ok {
+			settled = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !settled {
+		t.Fatal("expected the restored pane to settle into idle")
+	}
+
+	f.server.mu.RLock()
+	entry := f.server.tmuxAutoState[tk.ID]
+	f.server.mu.RUnlock()
+	if entry == nil || !entry.atPrompt || entry.atPromptOnIdle {
+		t.Error("expected the first idle transition to turn the deferred mark into atPrompt")
+	}
+}
+
+// The cap never reclaims a session idle for less than capMinIdle, however far
+// over the cap the daemon is: a user who just looked away (or a pane briefly
+// static mid-turn) must not lose the session.
+func TestHibernateIdleTmuxSessions_CapSparesRecentlyIdle(t *testing.T) {
+	f := setupHibernationFixture(t, hibernateYML)
+	f.server.cfg.TmuxHibernateAfter = 0 // threshold off: isolate the cap pass
+	f.server.cfg.TmuxMaxLiveSessions = 1
+
+	now := time.Now()
+	var live []*task.Task
+	for i, age := range []time.Duration{capMinIdle - time.Minute, 15 * time.Second} {
+		tk := f.newTask(t, 1)
+		if err := f.database.UpsertChat(tk.ID, "implement", fmt.Sprintf("sess-%d", i), ""); err != nil {
+			t.Fatal(err)
+		}
+		f.spawnSession(t, tk, "implement")
+		f.markIdleAtPrompt(tk.ID, now.Add(-age))
+		live = append(live, tk)
+	}
+
+	f.server.hibernateIdleTmuxSessions(live)
+
+	for _, tk := range live {
+		refreshed, err := f.database.GetTask(tk.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if refreshed.HibernatedAt != nil {
+			t.Errorf("task #%d was idle under capMinIdle and must not be reclaimed by the cap", tk.ID)
+		}
+	}
+}
+
 // ------------------------------------------------------------------- wake
 
 func TestWakeTmuxTask_ResumesHibernatedSession(t *testing.T) {
@@ -768,8 +835,8 @@ func TestWakeTmuxTask_ResumesHibernatedSession(t *testing.T) {
 	f.server.mu.RLock()
 	entry := f.server.tmuxAutoState[tk.ID]
 	f.server.mu.RUnlock()
-	if entry == nil || !entry.atPrompt {
-		t.Error("a resumed conversation starts parked at the agent's prompt")
+	if entry != nil && entry.atPrompt {
+		t.Error("wake must not mark the session at-prompt; only a turn-end sentinel does")
 	}
 }
 

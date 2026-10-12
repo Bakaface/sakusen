@@ -268,10 +268,10 @@ func (s *Server) recoverOrphanedTasks() error {
 			if err != nil {
 				log.Printf("%sFailed to restore tmux session for task #%d: %v", prefix, t.ID, err)
 			} else if resumed {
-				// A resumed conversation lands at the agent's prompt without
-				// starting a turn, so the session is hibernation-eligible as
-				// soon as it goes idle.
-				s.markTmuxAtPrompt(t.ID)
+				// Nobody is typing into a session restored at startup, so
+				// once the resumed conversation settles it is parked at its
+				// prompt and hibernation-eligible.
+				s.markTmuxAtPromptOnIdle(t.ID)
 				log.Printf("%sRestored tmux session for task #%d (auto-resumed previous agent session)", prefix, t.ID)
 			} else {
 				log.Printf("%sRestored tmux session for task #%d (no resumable agent session; started fresh)", prefix, t.ID)

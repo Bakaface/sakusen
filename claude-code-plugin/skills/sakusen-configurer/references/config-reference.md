@@ -359,12 +359,14 @@ the agent through its `resume_command`, so the conversation comes back. The TUI 
 hibernated task with a `[zz]` postfix.
 
 A session is hibernated only when every one of these holds: the tmux monitor reports the pane
-idle; a turn-end sentinel (or a resume) left the agent parked at its prompt rather than stalled
-mid-turn; no tmux client is attached; no advance is in flight; and the session is genuinely
+idle; a turn-end sentinel left the agent parked at its prompt rather than stalled mid-turn (a
+session woken on attach waits for its next turn end, so the cap never reclaims a session you
+just woke); no tmux client is attached; no advance is in flight; and the session is genuinely
 resumable — a recorded session id for that step (or ad-hoc `continue` / `tmux-direct` session)
 **plus** an agent record with a `resume_command`. Agents without `resume_command` are therefore
-never hibernated. The `max_live_sessions` cap reclaims eligible sessions oldest-idle-first and
-is soft: it never touches busy, attached or non-resumable sessions and never blocks new work.
+never hibernated. The `max_live_sessions` cap reclaims eligible sessions oldest-idle-first, only
+once they have been idle for at least 30 minutes, and is soft: it never touches busy, attached,
+recently-idle or non-resumable sessions and never blocks new work.
 
 Both settings are read **daemon-level**, exactly like `max_workers`: the running daemon uses the
 values merged from the global tiers plus its own project file, so setting them in another

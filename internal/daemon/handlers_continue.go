@@ -288,10 +288,11 @@ func (s *Server) wakeTmuxTask(taskID int64) (string, error) {
 	}
 	clearMarker()
 	if resumed {
-		// A resumed conversation sits at the agent's prompt without starting
-		// a turn, so the woken session is hibernation-eligible again as soon
-		// as it goes idle.
-		s.markTmuxAtPrompt(t.ID)
+		// Deliberately NOT marked at-prompt: wake means the user is about to
+		// use the session, and a turn they start before the pane first settles
+		// produces no idle->wip edge to clear the mark — so it would survive
+		// into that turn and let a quiet stretch get the session killed
+		// mid-turn. The next turn-end sentinel makes it eligible again.
 		log.Printf("%sWoke tmux session for task #%d (resumed previous agent session)", s.projectLogPrefix(t.ProjectID), t.ID)
 		return fmt.Sprintf("task #%d woken (resumed previous agent session)", t.ID), nil
 	}

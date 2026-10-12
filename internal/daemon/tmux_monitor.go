@@ -76,6 +76,9 @@ func (s *Server) checkTmuxActivity(monitor *tmux.Monitor) {
 			entry := s.tmuxAutoEntryFor(t.ID)
 			if activity == tmux.ActivityIdle {
 				entry.idleSince = time.Now()
+				if entry.atPromptOnIdle {
+					entry.atPrompt, entry.atPromptOnIdle = true, false
+				}
 			} else {
 				entry.idleSince = time.Time{}
 				// An idle pane repainting again means whatever sentinel parked
@@ -83,8 +86,7 @@ func (s *Server) checkTmuxActivity(monitor *tmux.Monitor) {
 				// the pane was merely redrawn, which conservatively costs the
 				// task its hibernation eligibility until the next turn ends).
 				// The very first reading of a session is always wip — the
-				// monitor starts from unknown — and must not clear the
-				// at-prompt mark a resume just set.
+				// monitor starts from unknown — and is not such a transition.
 				if previous == string(tmux.ActivityIdle) {
 					entry.atPrompt = false
 				}
@@ -134,6 +136,13 @@ func (s *Server) checkTmuxActivity(monitor *tmux.Monitor) {
 	s.hibernateIdleTmuxSessions(liveTasks)
 }
 
+// capMinIdle is how long a session must have sat idle before the soft cap
+// may reclaim it. Without a floor the cap fired on the monitor's idle
+// threshold alone (~12s of unchanged pane), so whenever the daemon sat over
+// the cap every session was killed seconds after its user looked away — and
+// a pane that went briefly static mid-turn was killed mid-turn.
+const capMinIdle = 30 * time.Minute
+
 // hibernateIdleTmuxSessions runs the two hibernation passes over the tmux
 // tasks whose session was live this tick: first the idle threshold
 // (tmux.hibernate_after), then the soft cap on live sessions
@@ -153,9 +162,9 @@ func (s *Server) hibernateIdleTmuxSessions(live []*task.Task) {
 	}
 
 	hibernated := make(map[int64]bool)
+	now := time.Now()
 
 	if hibernateAfter > 0 {
-		now := time.Now()
 		for _, t := range live {
 			idleSince, ok := s.tmuxIdleSince(t.ID)
 			if !ok || now.Sub(idleSince) < hibernateAfter {
@@ -179,7 +188,8 @@ func (s *Server) hibernateIdleTmuxSessions(live []*task.Task) {
 	}
 
 	// Over the cap: reclaim oldest-idle-first among the eligible. Busy,
-	// attached, mid-turn and non-resumable sessions are simply skipped — the
+	// recently-idle (under capMinIdle), attached, mid-turn and non-resumable
+	// sessions are simply skipped — the
 	// cap is soft and must never interrupt work or block new tasks, so
 	// staying over it is an acceptable outcome.
 	type candidate struct {
@@ -191,7 +201,7 @@ func (s *Server) hibernateIdleTmuxSessions(live []*task.Task) {
 		if hibernated[t.ID] {
 			continue
 		}
-		if idleSince, ok := s.tmuxIdleSince(t.ID); ok {
+		if idleSince, ok := s.tmuxIdleSince(t.ID); ok && now.Sub(idleSince) >= capMinIdle {
 			candidates = append(candidates, candidate{task: t, idleSince: idleSince})
 		}
 	}

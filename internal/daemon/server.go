@@ -140,17 +140,24 @@ type Server struct {
 // atPrompt records that the agent inside the session has finished a turn and
 // is parked at its prompt, as opposed to stalled mid-turn — the pane hash
 // alone cannot tell those apart (see maybeAutoAdvance). It is set when a
-// turn-end sentinel is observed and when a session is spawned through the
-// agent's resume_command (a resumed conversation starts at the prompt), and
-// cleared whenever the pane starts repainting again.
+// turn-end sentinel is observed, and cleared whenever the pane starts
+// repainting again.
+//
+// atPromptOnIdle defers that mark to the session's first idle transition. Set
+// for sessions resumed at daemon startup, which nobody is typing into: once
+// the resumed conversation settles it is parked at its prompt. Sessions woken
+// on attach are never marked this way — the user may start a turn before the
+// pane first settles, and a pane briefly static mid-turn would then read as
+// parked.
 //
 // idleSince is when the monitor last saw activity go idle, zeroed on the
 // transition back to wip. Both feed hibernation eligibility and are
 // in-memory only: a daemon restart re-derives them from the next few ticks.
 type tmuxAutoEntry struct {
-	advancing bool
-	atPrompt  bool
-	idleSince time.Time
+	advancing      bool
+	atPrompt       bool
+	atPromptOnIdle bool
+	idleSince      time.Time
 }
 
 func NewServer(cfg *config.Config, database taskStore) *Server {
@@ -192,6 +199,14 @@ func (s *Server) tmuxAutoEntryFor(taskID int64) *tmuxAutoEntry {
 func (s *Server) markTmuxAtPrompt(taskID int64) {
 	s.mu.Lock()
 	s.tmuxAutoEntryFor(taskID).atPrompt = true
+	s.mu.Unlock()
+}
+
+// markTmuxAtPromptOnIdle defers the at-prompt mark to the task's next idle
+// transition (see tmuxAutoEntry.atPromptOnIdle).
+func (s *Server) markTmuxAtPromptOnIdle(taskID int64) {
+	s.mu.Lock()
+	s.tmuxAutoEntryFor(taskID).atPromptOnIdle = true
 	s.mu.Unlock()
 }
 
