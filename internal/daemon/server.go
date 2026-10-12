@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -48,6 +49,11 @@ type projectContext struct {
 	// track workflow files created at runtime would never be picked up —
 	// the config cache invalidates only on .sakusen.yml mtime otherwise.
 	tracksFingerprint string
+	// globalConfigFingerprint is the same kind of signal over the global
+	// config files (globalConfigFingerprint()), so edits to ~/.sakusen.yml —
+	// agents, aliases, global workflows' wiring — reach already-cached
+	// projects without a daemon restart.
+	globalConfigFingerprint string
 }
 
 type Server struct {
@@ -264,6 +270,10 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 		if fresh && tracksFingerprint(pc.repoRoot) != pc.tracksFingerprint {
 			fresh = false
 		}
+		// Third: the global config files every project inherits.
+		if fresh && globalConfigFingerprint() != pc.globalConfigFingerprint {
+			fresh = false
+		}
 		if fresh {
 			return pc, nil
 		}
@@ -302,12 +312,13 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	engine.SetPauseCallback(s.markEnginePaused)
 
 	pc := &projectContext{
-		cfg:               projCfg,
-		engine:            engine,
-		repoRoot:          proj.Path,
-		repo:              gitpkg.NewRepo(proj.Path),
-		configModTime:     modTime,
-		tracksFingerprint: tracksFingerprint(proj.Path),
+		cfg:                     projCfg,
+		engine:                  engine,
+		repoRoot:                proj.Path,
+		repo:                    gitpkg.NewRepo(proj.Path),
+		configModTime:           modTime,
+		tracksFingerprint:       tracksFingerprint(proj.Path),
+		globalConfigFingerprint: globalConfigFingerprint(),
 	}
 
 	s.projectsMu.Lock()
@@ -315,6 +326,19 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	s.projectsMu.Unlock()
 
 	return pc, nil
+}
+
+// globalConfigFingerprint returns "path:mtimeUnixNano" for each existing global
+// config file (config.GlobalConfigPaths), joined by ";", or "" when none
+// exists. Used by getProjectContext as a config-cache freshness signal.
+func globalConfigFingerprint() string {
+	var parts []string
+	for _, p := range config.GlobalConfigPaths() {
+		if info, err := os.Stat(p); err == nil {
+			parts = append(parts, fmt.Sprintf("%s:%d", p, info.ModTime().UnixNano()))
+		}
+	}
+	return strings.Join(parts, ";")
 }
 
 // tracksFingerprint returns "maxMtimeUnixNano:fileCount" over the project's

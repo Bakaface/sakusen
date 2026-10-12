@@ -445,7 +445,8 @@ func setupServerWithPinnedWorkflow(t *testing.T, projectPath string, wf config.W
 		repoRoot: projectPath,
 		// Match the live fingerprint so the tracks-workflows freshness check
 		// doesn't evict this hand-primed entry.
-		tracksFingerprint: tracksFingerprint(projectPath),
+		tracksFingerprint:       tracksFingerprint(projectPath),
+		globalConfigFingerprint: globalConfigFingerprint(),
 	}
 	s.projectsMu.Unlock()
 

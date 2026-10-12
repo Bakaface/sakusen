@@ -1023,6 +1023,19 @@ func getGlobalConfigPath() string {
 	return filepath.Join(homeDir, ".config", "sakusen", "config.yaml")
 }
 
+// GlobalConfigPaths returns the global config files loadCommon reads
+// (~/.config/sakusen/config.yaml and ~/.sakusen.yml), skipping unresolvable
+// ones. Used by the daemon's config cache as a freshness signal.
+func GlobalConfigPaths() []string {
+	var paths []string
+	for _, p := range []string{getGlobalConfigPath(), getGlobalSakusenYmlPath()} {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 func getGlobalSakusenYmlPath() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 		path := filepath.Join(xdgConfig, "sakusen", "config.yml")

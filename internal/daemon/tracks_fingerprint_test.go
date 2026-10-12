@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
@@ -197,5 +198,60 @@ func TestGetProjectContextReloadsOnTrackWorkflowChange(t *testing.T) {
 	}
 	if pc3.cfg.GetTaskWorkflow("pay:impl") != nil {
 		t.Error("removed track workflow must no longer resolve")
+	}
+}
+
+// TestGetProjectContextReloadsOnGlobalConfigChange proves the third freshness
+// signal: editing ~/.sakusen.yml after a project's config was cached evicts the
+// entry, even for a project with no .sakusen.yml of its own (whose mtime signal
+// can therefore never fire).
+func TestGetProjectContextReloadsOnGlobalConfigChange(t *testing.T) {
+	homeDir := isolateTracksHome(t)
+	globalPath := filepath.Join(homeDir, ".sakusen.yml")
+	if err := os.WriteFile(globalPath, []byte("git:\n  base_branch: main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	proj, err := database.GetOrCreateProject(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(&config.Config{}, database)
+
+	pc1, err := s.getProjectContext(proj.ID)
+	if err != nil {
+		t.Fatalf("getProjectContext: %v", err)
+	}
+	if got := pc1.cfg.Git.BaseBranch; got != "main" {
+		t.Fatalf("precondition: base branch = %q, want main", got)
+	}
+	if pc1Again, _ := s.getProjectContext(proj.ID); pc1Again != pc1 {
+		t.Fatal("expected cached project context while nothing changed")
+	}
+
+	if err := os.WriteFile(globalPath, []byte("git:\n  base_branch: develop\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Force a distinct mtime regardless of filesystem timestamp granularity.
+	future := time.Now().Add(time.Minute)
+	if err := os.Chtimes(globalPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	pc2, err := s.getProjectContext(proj.ID)
+	if err != nil {
+		t.Fatalf("getProjectContext after edit: %v", err)
+	}
+	if pc2 == pc1 {
+		t.Fatal("expected cache eviction after the global config changed")
+	}
+	if got := pc2.cfg.Git.BaseBranch; got != "develop" {
+		t.Errorf("reloaded base branch = %q, want develop", got)
 	}
 }

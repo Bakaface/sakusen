@@ -78,9 +78,10 @@ func setupSlugServer(t *testing.T, cfg *config.Config) (*Server, *task.Task) {
 	s := NewServer(&config.Config{}, database)
 	s.projectsMu.Lock()
 	s.projects[proj.ID] = &projectContext{
-		cfg:               cfg,
-		repoRoot:          projectPath,
-		tracksFingerprint: tracksFingerprint(projectPath),
+		cfg:                     cfg,
+		repoRoot:                projectPath,
+		tracksFingerprint:       tracksFingerprint(projectPath),
+		globalConfigFingerprint: globalConfigFingerprint(),
 	}
 	s.projectsMu.Unlock()
 

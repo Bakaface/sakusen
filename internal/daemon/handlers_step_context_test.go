@@ -89,7 +89,8 @@ func createPausedTmuxStep(t *testing.T, s *Server, projID int64, stepName string
 		// Match the live fingerprint so getProjectContext's tracks-workflows
 		// freshness check doesn't evict this hand-primed entry (a developer
 		// machine may have a real ~/.sakusen/tracks tree).
-		tracksFingerprint: tracksFingerprint(repoRoot),
+		tracksFingerprint:       tracksFingerprint(repoRoot),
+		globalConfigFingerprint: globalConfigFingerprint(),
 	}
 	s.projectsMu.Unlock()
 

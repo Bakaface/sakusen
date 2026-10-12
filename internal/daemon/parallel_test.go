@@ -46,10 +46,11 @@ func primeParallelProject(t *testing.T, s *Server, projID int64) *config.Config 
 	repoRoot := "/tmp/sakusen-test"
 	s.projectsMu.Lock()
 	s.projects[projID] = &projectContext{
-		cfg:               cfg,
-		engine:            workflow.NewEngine(cfg, s.database, s.notifier, repoRoot),
-		repoRoot:          repoRoot,
-		tracksFingerprint: tracksFingerprint(repoRoot),
+		cfg:                     cfg,
+		engine:                  workflow.NewEngine(cfg, s.database, s.notifier, repoRoot),
+		repoRoot:                repoRoot,
+		tracksFingerprint:       tracksFingerprint(repoRoot),
+		globalConfigFingerprint: globalConfigFingerprint(),
 	}
 	s.projectsMu.Unlock()
 	return cfg
@@ -170,10 +171,11 @@ func TestTaskToInfoBranchStatusAbsentWithoutGroup(t *testing.T) {
 	repoRoot := "/tmp/sakusen-test"
 	s.projectsMu.Lock()
 	s.projects[projID] = &projectContext{
-		cfg:               cfg,
-		engine:            workflow.NewEngine(cfg, s.database, s.notifier, repoRoot),
-		repoRoot:          repoRoot,
-		tracksFingerprint: tracksFingerprint(repoRoot),
+		cfg:                     cfg,
+		engine:                  workflow.NewEngine(cfg, s.database, s.notifier, repoRoot),
+		repoRoot:                repoRoot,
+		tracksFingerprint:       tracksFingerprint(repoRoot),
+		globalConfigFingerprint: globalConfigFingerprint(),
 	}
 	s.projectsMu.Unlock()
 
