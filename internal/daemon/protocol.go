@@ -307,6 +307,7 @@ type WorkflowStepSummary struct {
 	Tmux        bool   `json:"tmux,omitempty"`  // resolved agent runs in tmux mode
 	Human       bool   `json:"human,omitempty"`
 	Loop        bool   `json:"loop,omitempty"`
+	Advance     string `json:"advance,omitempty"` // "explicit" when the step advances only via advance_task / the user
 	// Parallel is set when this step is a parallel group; its branches are
 	// nested here rather than flattened into the parent list, because a group
 	// occupies exactly one workflow step slot.

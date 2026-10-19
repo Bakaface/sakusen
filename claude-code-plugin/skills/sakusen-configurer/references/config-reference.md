@@ -415,7 +415,7 @@ There is no top-level `prompts:` map and no agent-level prompt — files only. S
 ## Step Configuration, Loops, Cross-Task and Child References
 
 Moved to [workflow-building.md](workflow-building.md) — the single workflow-authoring
-reference. It covers step fields (`description`, `timeout`, `human`, `require_context`,
+reference. It covers step fields (`description`, `timeout`, `human`, `advance`, `require_context`,
 summarization strategies), step context flow, execution mode, loops and their validation
 rules, [parallel groups](workflow-building.md#parallel-groups) (the `parallel:` step field —
 concurrent headless branches on one worktree, joined by a `require:` policy into one aggregated

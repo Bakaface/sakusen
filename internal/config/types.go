@@ -478,9 +478,15 @@ type StepConfig struct {
 	// Agent, when non-empty, selects the agent record this step runs with,
 	// overriding the workflow-level `agent:` and the top-level default_agent.
 	// The agent's mode (headless vs tmux) decides how the step executes.
-	Agent                 string      `yaml:"agent,omitempty"`
-	Timeout               string      `yaml:"timeout"`
-	Human                 bool        `yaml:"human"`
+	Agent   string `yaml:"agent,omitempty"`
+	Timeout string `yaml:"timeout"`
+	Human   bool   `yaml:"human"`
+	// Advance controls how a tmux step advances. "auto" (the default when
+	// empty) advances on the step-done sentinel; "explicit" ignores sentinels
+	// for advancement (they still drive session capture and at-prompt
+	// tracking), so the step advances only via advance_task or the user.
+	// Only valid on tmux-mode steps; not a human gate.
+	Advance               string      `yaml:"advance,omitempty"`
 	Loop                  *LoopConfig `yaml:"loop,omitempty"`
 	SummarizationStrategy string      `yaml:"summarization_strategy,omitempty"`
 	// SummarizationPrompt is the prompt template used when summarization_strategy is
@@ -693,6 +699,18 @@ func (s *StepConfig) EffectiveBranches() []StepConfig {
 	return out
 }
 
+// Step advance modes (StepConfig.Advance).
+const (
+	AdvanceAuto     = "auto"
+	AdvanceExplicit = "explicit"
+)
+
+// ExplicitAdvance reports whether the step advances only on an explicit
+// advance_task / user action, never on its step-done sentinel.
+func (s *StepConfig) ExplicitAdvance() bool {
+	return s.Advance == AdvanceExplicit
+}
+
 // IsParallel reports whether this step entry is a parallel group.
 func (s *StepConfig) IsParallel() bool {
 	return s != nil && s.Parallel != nil
@@ -888,6 +906,15 @@ func (wf *WorkflowConfig) ValidateSteps() error {
 				step.Name, step.SummarizationStrategy,
 				SummarizationStrategyLastMessage, SummarizationStrategySummarizeChat, SummarizationStrategyNone)
 		}
+		switch step.Advance {
+		case "", AdvanceAuto, AdvanceExplicit:
+		default:
+			return fmt.Errorf("step %q: invalid advance %q (must be %q or %q)",
+				step.Name, step.Advance, AdvanceAuto, AdvanceExplicit)
+		}
+		if step.ExplicitAdvance() && step.Human {
+			return fmt.Errorf("step %q: advance: explicit cannot be combined with human: true (a human step never auto-advances)", step.Name)
+		}
 	}
 	return nil
 }
@@ -909,6 +936,7 @@ func validateParallelGroup(step *StepConfig) error {
 		{step.Prompt != "", "prompt"},
 		{step.Loop != nil, "loop"},
 		{step.Human, "human"},
+		{step.Advance != "", "advance"},
 		{step.SummarizationStrategy != "", "summarization_strategy"},
 		{step.SummarizationPrompt != "", "summarization_prompt"},
 		{step.RequireContext, "require_context"},
@@ -949,6 +977,9 @@ func validateParallelGroup(step *StepConfig) error {
 		}
 		if b.Human {
 			return fmt.Errorf("step %q: branch %q cannot have human: true", step.Name, b.Name)
+		}
+		if b.Advance != "" {
+			return fmt.Errorf("step %q: branch %q cannot set advance", step.Name, b.Name)
 		}
 		if !ValidSummarizationStrategies[b.SummarizationStrategy] {
 			return fmt.Errorf("step %q: branch %q: invalid summarization_strategy %q (must be %q, %q, or %q)",

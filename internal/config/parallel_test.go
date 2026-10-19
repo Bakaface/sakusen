@@ -348,6 +348,34 @@ steps:
 `,
 			wantErr: "invalid summarization_strategy",
 		},
+		{
+			name: "group with advance",
+			yaml: `
+name: wf
+steps:
+  - name: review
+    advance: explicit
+    parallel:
+      branches:
+        - name: a
+          prompt: "a"
+`,
+			wantErr: "cannot set advance",
+		},
+		{
+			name: "branch with advance",
+			yaml: `
+name: wf
+steps:
+  - name: review
+    parallel:
+      branches:
+        - name: a
+          prompt: "a"
+          advance: auto
+`,
+			wantErr: `branch "a" cannot set advance`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

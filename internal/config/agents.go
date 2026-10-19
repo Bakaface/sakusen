@@ -864,6 +864,13 @@ func validateAgentRefs(cfg *Config) error {
 					return fmt.Errorf("workflow %q step %q: loop steps cannot use a tmux-mode agent", wf.Name, step.Name)
 				}
 			}
+			// Explicit advance only changes how the tmux monitor treats
+			// sentinels; a headless step would silently ignore it.
+			if step.ExplicitAdvance() {
+				if agent, ok := cfg.ResolveAgent(cfg.StepAgentSlug(wf, step)); ok && !agent.IsTmux() {
+					return fmt.Errorf("workflow %q step %q: advance: explicit requires a tmux-mode agent", wf.Name, step.Name)
+				}
+			}
 			// Parallel branches run concurrently and are joined synchronously,
 			// so they must be headless for the same reason loop steps are.
 			if step.IsParallel() {

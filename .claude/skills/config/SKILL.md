@@ -236,6 +236,7 @@ type StepConfig struct {
     Agent                 string         // agent slug override; empty = inherit workflow/default
     Timeout               string         // Parsed duration, default 30m (DefaultStepTimeout)
     Human                 bool           // Approval gate
+    Advance               string         // "" | "auto" (default) | "explicit": tmux step advances only via advance_task / the user; not a gate
     Loop                  *LoopConfig    // Optional retry loop
     SummarizationStrategy string         // Strategy for summarizing step output
     SummarizationPrompt   string         // Custom summarize_chat prompt ({{chat}} placeholder)
@@ -273,14 +274,16 @@ A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor s
 
 **Group/branch validation** (`ValidateSteps` → `validateParallelGroup`, reached by every load path and `sakusen validate`):
 
-- A group may not set `prompt`, `loop`, `human`, `summarization_strategy`, `summarization_prompt`, or `require_context` — all belong on a branch.
+- A group may not set `prompt`, `loop`, `human`, `advance`, `summarization_strategy`, `summarization_prompt`, or `require_context` — all belong on a branch.
 - `branches` needs ≥ 1 entry; `require` must be `""`, `all`, `any`, or an integer in `1..len(branches)`.
-- A branch may not be a group (no nesting), may not have `loop` or `human`, and must be an inline mapping (a bare-scalar entry parses as a step *reference*, which only resolves against top-level steps).
+- A branch may not be a group (no nesting), may not have `loop`, `human` or `advance`, and must be an inline mapping (a bare-scalar entry parses as a step *reference*, which only resolves against top-level steps).
 - Step names and branch names share ONE namespace and must be unique across the whole workflow — `{{steps.<name>.context}}` addresses both. Also enforced in `validateUniqueNames` and `resolveWorkflowSteps`.
 - `ValidateLoops`: a `goto` naming a branch is an error (target the group); exit conditions may name a branch or a group.
 - `validateAgentRefs` (production load only): every branch's EFFECTIVE agent must be headless — the join is synchronous, so a tmux branch could never complete. `collectAgentRefs`, `validatePromptIncludes` and `validatePeriodic` all walk branches too.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
+
+**Advance validation**: `advance` must be `""`, `auto` or `explicit` and `explicit` cannot be combined with `human: true` (`ValidateSteps`); an `advance: explicit` step must not resolve to a headless agent (`validateAgentRefs`, skipped when an implicit slug does not resolve).
 
 ### LoopConfig
 

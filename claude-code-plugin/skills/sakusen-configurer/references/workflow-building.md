@@ -276,6 +276,7 @@ steps:
     agent: claude-tmux     # per-step agent override (omit to inherit workflow/default_agent)
     timeout: "30m"         # Go duration string; default "30m"
     human: false           # pause at awaiting-approval after the step
+    advance: auto          # tmux steps only: auto (default) | explicit — see below
     summarization_strategy: summarize_chat   # how this step's context is captured
     summarization_prompt: "..."              # prompt fed to the summarizer for THIS step
     require_context: false # true = fail the task if summarize_chat context can't be captured
@@ -293,6 +294,14 @@ a step that runs an agent. See [Parallel Groups](#parallel-groups).
 - **`timeout:`** Go duration strings: `"30m"`, `"1h"`, `"1h30m"`, `"45m"`, `"2h"`.
 - **`human: true`** pauses the task at `awaiting-approval`; the user reviews in the TUI and
   approves to continue. Use for review gates.
+- **`advance: explicit`** stops a tmux step from auto-advancing on its turn-end sentinel. The
+  step advances only when the agent calls the MCP `advance_task` tool or the user advances it.
+  Sentinels still record the session id and mark the agent idle at its prompt. Unlike `human:
+  true`, it is **not** an approval gate: the task reads as running, not `awaiting-approval`. Use
+  it for steps that must sit through several turns before the agent decides the work is done,
+  such as waiting through a long call before capturing it. The default is `advance: auto`. It
+  requires a tmux-mode agent, cannot be combined with `human: true`, and is not allowed on a
+  parallel group or branch. `list_workflows` reports it as `advance: "explicit"`.
 - **Agent cascade:** step `agent:` → workflow `agent:` → top-level `default_agent:` → the
   `"claude"` slug. Explicit references to unknown slugs are load errors.
 - **`require_context: true`** makes a failure to capture this step's `summarize_chat` context
@@ -349,6 +358,7 @@ A step's execution mode comes from the **agent record it resolves to**, never fr
 | `headless` | `false` | headless spawn + auto-advance on exit |
 | `headless` | `true` | headless spawn, then pause at `awaiting-approval` |
 | `tmux` | `false` | tmux + auto-advance on turn-end sentinel (manual-advance for hookless agents) |
+| `tmux` + `advance: explicit` | `false` | tmux, advances only via `advance_task` or the user (not an approval gate) |
 | `tmux` | `true` | tmux + manual approval |
 
 > **⚠️ The `print:` and `tmux:` fields were removed and the daemon refuses to load any config
@@ -578,9 +588,9 @@ whole workflow.
 
 ### Rules
 
-- A group sets none of `prompt`, `loop`, `human`, `summarization_strategy`, `summarization_prompt`,
-  `require_context` — those belong on a branch.
-- A branch may not contain a nested `parallel:`, a `loop:`, or `human: true`, and must be written
+- A group sets none of `prompt`, `loop`, `human`, `advance`, `summarization_strategy`,
+  `summarization_prompt`, `require_context` — those belong on a branch.
+- A branch may not contain a nested `parallel:`, a `loop:`, `human: true` or `advance:`, and must be written
   as an inline mapping (a bare string is a step *reference*, which only resolves against
   top-level steps).
 - A loop's `goto:` may target a **group** but not a branch; an `exit_condition` may name either.
@@ -1003,11 +1013,15 @@ remaining steps run unattended off that conversation's output:
    happen.
 4. Every later step templates `{{steps.<gate-step>.context}}` and runs headless.
 
+The step needs `advance: explicit`. Without it, a hooked tmux agent advances on its first turn
+end, because the Stop hook writes a turn-end sentinel after every turn.
+
 ```yaml
 - name: shared-implement
   steps:
     - name: researching
       agent: claude-tmux
+      advance: explicit
       description: "Human-gated interview that produces the decision record"
       require_context: true
       prompt: |
@@ -1050,7 +1064,8 @@ Hard errors at config load:
 - Duplicate workflow names in the flat list; duplicate step names within a workflow
 - A step reference names a step absent from the base workflow, or there is no base workflow
 - Any loop validation failure (see [Loops](#loops))
-- An invalid `summarization_strategy` or `on_complete` value
+- An invalid `summarization_strategy`, `advance` or `on_complete` value
+- `advance: explicit` combined with `human: true`, or on a step resolving to a headless agent
 - The removed `print:` / `tmux:` fields on a workflow or step; step-level
   `allowed_summarization_models:`
 - An explicit `agent:` / `default_agent:` naming a slug that does not exist
