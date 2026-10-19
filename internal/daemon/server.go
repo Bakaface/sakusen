@@ -54,6 +54,9 @@ type projectContext struct {
 	// agents, aliases, global workflows' wiring — reach already-cached
 	// projects without a daemon restart.
 	globalConfigFingerprint string
+	// loadErr is the config.LoadForProject failure that made cfg fall back to
+	// the daemon defaults; nil when the project config loaded.
+	loadErr error
 }
 
 type Server struct {
@@ -306,9 +309,9 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 		return nil, fmt.Errorf("failed to get project: %w", err)
 	}
 
-	projCfg, err := config.LoadForProject(proj.Path)
-	if err != nil {
-		log.Printf("Warning: failed to load config for project %s, using defaults: %v", proj.Path, err)
+	projCfg, loadErr := config.LoadForProject(proj.Path)
+	if loadErr != nil {
+		log.Printf("Warning: failed to load config for project %s, using defaults: %v", proj.Path, loadErr)
 		projCfg = s.cfg
 	}
 
@@ -334,6 +337,7 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 		configModTime:           modTime,
 		tracksFingerprint:       tracksFingerprint(proj.Path),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		loadErr:                 loadErr,
 	}
 
 	s.projectsMu.Lock()
