@@ -57,7 +57,7 @@ workflows:
 Sugar detection is structural: a mapping with **exactly one key** that is not one of
 `name`, `description`, `input`, `agent`, `on_complete`, `steps`, `summarizer_prompt`,
 `worktree-sync-paths`, `worktree-setup-command`, `worktree-setup-commands`,
-`tmux-setup-command`. Indent the body one level deeper than the name key — a sibling
+`tmux-setup-command`, `notifications`. Indent the body one level deeper than the name key — a sibling
 `steps:` makes it a two-key mapping and the sugar is not recognized.
 
 Prefer the standard inline form for new configs. The sugar is most useful when overriding a
@@ -257,6 +257,7 @@ no implicit shadowing of ordinary workflows — `auth:harden` and `harden` are u
   worktree-setup-command: "..."
   worktree-setup-commands: ["...", "..."]
   tmux-setup-command: "..."
+  notifications: {...}       # per-event notification overrides + notify_if (see config reference)
   steps: [...]               # ordered list of steps (required)
 ```
 

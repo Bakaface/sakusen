@@ -15,7 +15,19 @@ type Notifier struct {
 }
 
 func New(cfg *config.NotificationsConfig) *Notifier {
-	return &Notifier{cfg: cfg, backend: selectBackend()}
+	return NewWithBackend(cfg, selectBackend())
+}
+
+// NewWithBackend builds a Notifier that delivers through backend instead of
+// the OS default.
+func NewWithBackend(cfg *config.NotificationsConfig, backend Backend) *Notifier {
+	return &Notifier{cfg: cfg, backend: backend}
+}
+
+// Config returns the global notification switches, the base tier that
+// per-task overrides are resolved against.
+func (n *Notifier) Config() config.NotificationsConfig {
+	return *n.cfg
 }
 
 type Urgency string
@@ -87,8 +99,11 @@ func (n *Notifier) Send(title, body string, urgency Urgency) error {
 	return n.backend.Notify(title, body, urgency)
 }
 
-func (n *Notifier) AgentCompleted(taskID, description string) error {
-	if !n.cfg.OnComplete {
+// AgentCompleted, AgentFailed and AgentWaitingForInput send only when on is
+// true; callers pass the task's resolved per-event switch. Send still applies
+// the global Enabled gate.
+func (n *Notifier) AgentCompleted(taskID, description string, on bool) error {
+	if !on {
 		return nil
 	}
 
@@ -99,8 +114,8 @@ func (n *Notifier) AgentCompleted(taskID, description string) error {
 	)
 }
 
-func (n *Notifier) AgentFailed(taskID, description, errMsg string) error {
-	if !n.cfg.OnFailed {
+func (n *Notifier) AgentFailed(taskID, description, errMsg string, on bool) error {
+	if !on {
 		return nil
 	}
 
@@ -128,8 +143,8 @@ func (n *Notifier) AllTasksCompleted() error {
 	)
 }
 
-func (n *Notifier) AgentWaitingForInput(taskID, description string) error {
-	if !n.cfg.OnWaitingInput {
+func (n *Notifier) AgentWaitingForInput(taskID, description string, on bool) error {
+	if !on {
 		return nil
 	}
 

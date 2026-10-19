@@ -230,6 +230,49 @@ notifications:
   on_waiting_input: true     # Notify when task awaits human input
 ```
 
+The daemon reads this block from the global config. `enabled` is the master switch: when it is
+`false`, nothing is sent, whatever any override says.
+
+### Per-workflow and per-periodic overrides
+
+A workflow or a `periodic:` entry may carry its own `notifications:` block to override the
+per-event switches for the tasks it runs. Every key is optional:
+
+```yaml
+workflows:
+  - name: radar-refresh
+    notifications:
+      on_complete: false       # quiet successful runs
+      on_failed: true          # but always report failures
+    steps: [...]
+
+periodic:
+  - name: anki-enrich
+    cadence: "0 3 * * *"
+    workflow: anki-enrich
+    notifications:
+      notify_if:               # "only on change": notify on completion only when...
+        step_context_contains: report
+        marker: NEW_CARDS      # ...step `report`'s context contains this literal
+```
+
+- **Cascade, per field:** periodic entry → the task's workflow → global `notifications:`.
+  The first tier that sets a field wins, so a periodic that sets only `on_complete` still
+  inherits `on_failed` from its workflow or from the global config.
+- **No `enabled` key:** an override can silence events but cannot turn notifications on while
+  the global `enabled` is `false`.
+- **`notify_if`** gates only completion notifications and uses exactly one form:
+  - `step_context_nonempty: <step>`: notify if that step's context is non-blank.
+  - `step_context_contains: <step>` plus `marker: <literal>`: notify if that step's context
+    contains the marker (case-sensitive substring, as in loop `exit_condition`).
+
+  `<step>` must be a step or parallel branch of the effective workflow (the periodic's inline
+  `steps:`, or the workflow it references). It reads the step's own context, so it behaves the
+  same whether or not finalization ran the summarizer.
+- **"All Tasks Completed"** is skipped when the task that would trigger it had its own
+  notification silenced by an override or by `notify_if`.
+- Unknown keys inside an override block are load errors (`sakusen validate` reports them).
+
 ---
 
 ## Worktree Sync Paths

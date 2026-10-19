@@ -43,7 +43,8 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 			// on that would strand the task at a step it already finished.
 			if s.consumeEnginePaused(a.Task.ID) {
 				log.Printf("%sAgent %s paused task #%d for approval (status: %s)", prefix, a.ID, a.Task.ID, refreshedTask.Status)
-				if err := s.notifier.AgentWaitingForInput(a.ID, taskTitle); err != nil {
+				eff := s.taskNotifications(a.Task)
+				if err := s.notifier.AgentWaitingForInput(a.ID, taskTitle, eff.OnWaitingInput); err != nil {
 					log.Printf("%sWarning: notification failed: %v", prefix, err)
 				}
 				return
@@ -84,7 +85,8 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 				log.Printf("%sWarning: failed to kill tmux sessions for task %s: %v", prefix, a.ID, err)
 			}
 		}
-		if err := s.notifier.AgentFailed(a.ID, taskTitle, a.Error); err != nil {
+		eff := s.taskNotifications(a.Task)
+		if err := s.notifier.AgentFailed(a.ID, taskTitle, a.Error, eff.OnFailed); err != nil {
 			log.Printf("%sWarning: notification failed: %v", prefix, err)
 		}
 
@@ -92,7 +94,7 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 		// dependents this failure just resolved.
 		s.cascadeFailDependents(a.Task.ID)
 
-		s.checkProjectTasksDone(a.Task.ProjectID)
+		s.checkProjectTasksDone(a.Task.ProjectID, eff.OnFailedOverridden && !eff.OnFailed)
 	}
 }
 
@@ -165,19 +167,13 @@ func (s *Server) finalizeCompletedTask(t *task.Task, agentID string, taskTitle s
 			log.Printf("%sFailed to update task status: %v", prefix, err)
 		}
 		s.broadcastTaskUpdate(t.ID)
-		if err := s.notifier.AgentCompleted(agentID, taskTitle); err != nil {
-			log.Printf("%sWarning: notification failed: %v", prefix, err)
-		}
-		s.checkProjectTasksDone(t.ProjectID)
+		s.notifyCompleted(t, agentID, taskTitle)
 		return
 	}
 
 	// Fast-track: if no meaningful changes, skip finalization
 	if s.maybeFastTrackCompletion(pc, t) {
-		if err := s.notifier.AgentCompleted(agentID, taskTitle); err != nil {
-			log.Printf("%sWarning: notification failed: %v", prefix, err)
-		}
-		s.checkProjectTasksDone(t.ProjectID)
+		s.notifyCompleted(t, agentID, taskTitle)
 		return
 	}
 
@@ -191,13 +187,61 @@ func (s *Server) finalizeCompletedTask(t *task.Task, agentID string, taskTitle s
 	s.runFinalization(t, pc)
 
 	log.Printf("%sAgent %s completed task #%d", prefix, agentID, t.ID)
-	if err := s.notifier.AgentCompleted(agentID, taskTitle); err != nil {
-		log.Printf("%sWarning: notification failed: %v", prefix, err)
-	}
-	s.checkProjectTasksDone(t.ProjectID)
+	s.notifyCompleted(t, agentID, taskTitle)
 }
 
-func (s *Server) checkProjectTasksDone(projectID int64) {
+// taskNotifications resolves t's notification switches from its periodic
+// entry and workflow over the global notifier config. Any tier that cannot be
+// looked up is skipped, falling back to the global switches.
+func (s *Server) taskNotifications(t *task.Task) config.EffectiveNotifications {
+	base := s.notifier.Config()
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		return config.EffectiveNotifications{
+			OnComplete:     base.OnComplete,
+			OnFailed:       base.OnFailed,
+			OnWaitingInput: base.OnWaitingInput,
+		}
+	}
+	periodicName := ""
+	if t.PeriodicID != nil {
+		if d, err := s.database.GetPeriodicByID(*t.PeriodicID); err == nil {
+			periodicName = d.Name
+		}
+	}
+	return pc.cfg.EffectiveNotifications(t.Workflow, periodicName, base)
+}
+
+// notifyCompleted sends t's completion notification (subject to its resolved
+// switches and notify_if) and then runs the all-tasks-done check, which is
+// skipped when an override silenced this completion so quiet runs stay quiet.
+func (s *Server) notifyCompleted(t *task.Task, agentID, taskTitle string) {
+	prefix := s.projectLogPrefix(t.ProjectID)
+	eff := s.taskNotifications(t)
+	send := eff.OnComplete
+	suppressed := eff.OnCompleteOverridden && !eff.OnComplete
+	if send && eff.NotifyIf != nil {
+		stepCtx, err := s.database.GetTaskStepContext(t.ID, eff.NotifyIf.Step())
+		if err != nil {
+			log.Printf("%sWarning: failed to read step %q context for notify_if on task #%d: %v", prefix, eff.NotifyIf.Step(), t.ID, err)
+		}
+		if !eff.NotifyIf.Matches(stepCtx) {
+			send, suppressed = false, true
+		}
+	}
+	if err := s.notifier.AgentCompleted(agentID, taskTitle, send); err != nil {
+		log.Printf("%sWarning: notification failed: %v", prefix, err)
+	}
+	s.checkProjectTasksDone(t.ProjectID, suppressed)
+}
+
+// checkProjectTasksDone sends "All Tasks Completed" once every task in the
+// project is terminal. suppressed skips it when the triggering task's own
+// notification was silenced by a per-task override.
+func (s *Server) checkProjectTasksDone(projectID int64, suppressed bool) {
+	if suppressed {
+		return
+	}
 	tasks, err := s.database.GetTasksByProject(projectID)
 	if err != nil || len(tasks) == 0 {
 		return
