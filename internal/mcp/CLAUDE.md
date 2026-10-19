@@ -61,7 +61,7 @@ irrecoverably destructive operations**.
 | `tool_advance_task.go` | `advance_task` tool — mark a tmux step done (next step or finalize) |
 | `tool_stop_task.go` | `stop_task` tool — stop the task's own agent, status unchanged |
 | `tool_continue_task.go` | `continue_task` tool — re-run a terminal task under a required workflow (always `terminal_only`) |
-| `tool_update_task.go` | `update_task` envelope — input/title/priority/track/blocked_by edits |
+| `tool_update_task.go` | `update_task` envelope — input/title/priority/track/not_before/blocked_by edits |
 | `tool_update_step_context.go` | `update_step_context` tool definition + handler |
 | `tool_create_track.go` | `create_track` tool definition + handler |
 | `tool_get_track.go` | `get_track` tool — full own context, ancestor chain, rendered `{{track.context}}` |

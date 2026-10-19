@@ -42,6 +42,8 @@ type Task struct {
     CreatedAt                  time.Time
     StartedAt, CompletedAt     *time.Time
     UpdatedAt                  time.Time
+    HibernatedAt               *time.Time // tmux session hibernated
+    NotBefore                  *time.Time // earliest claim time for a pending task (UTC)
 }
 ```
 
@@ -83,7 +85,7 @@ func ValidPriorities() []Priority      // [low, medium, high, urgent]
 func IsValidPriority(s string) bool    // Checks against valid list
 ```
 
-`GetClaimableTasks()` orders by priority desc, then `created_at` asc.
+`GetClaimableTasks(now)` returns pending tasks whose blockers all completed and whose `not_before` is NULL or `<= now`, ordered by priority desc, then `created_at` asc. `not_before` is RFC3339-only on input (`ParseNotBefore`), stored in UTC so the DATETIME comparison is consistent, and editable only while pending (`SetPendingTaskNotBefore`, guarded in the UPDATE itself).
 
 ## Title Handling
 
