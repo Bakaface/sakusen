@@ -107,3 +107,27 @@ func TestValidateCmd_DefaultPath_NoConfig(t *testing.T) {
 		t.Errorf("expected 'no .sakusen.yml' error, got: %v", err)
 	}
 }
+
+func TestValidateCmd_FileOnlySkipsAgentRefResolution(t *testing.T) {
+	isolateGlobalConfig(t)
+	path := writeValidateFixture(t, `
+workflows:
+  - name: default
+    steps:
+      - name: implementing
+        prompt: "x"
+        agent: claude:fable
+`)
+	err := validateCmd.RunE(validateCmd, []string{path})
+	if err == nil || !strings.Contains(err.Error(), `unknown agent "claude:fable"`) {
+		t.Fatalf("expected unknown agent error, got: %v", err)
+	}
+
+	if err := validateCmd.Flags().Set("file-only", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = validateCmd.Flags().Set("file-only", "false") })
+	if err := validateCmd.RunE(validateCmd, []string{path}); err != nil {
+		t.Fatalf("expected --file-only to pass, got: %v", err)
+	}
+}

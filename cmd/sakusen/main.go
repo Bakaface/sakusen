@@ -71,6 +71,7 @@ func init() {
 	tasksCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 	tasksCmd.Flags().Int64("periodic-id", 0, "Only show tasks materialized by the given periodic definition")
 	listCmd.Flags().BoolP("json", "j", false, "Output as JSON")
+	validateCmd.Flags().Bool("file-only", false, "Validate the single file without merging the global tier or resolving agent references")
 
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)

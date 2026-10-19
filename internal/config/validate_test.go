@@ -63,7 +63,7 @@ func TestValidateFile_UnknownTopLevelField(t *testing.T) {
 // TestValidateFile_AgentVariantsAndAliases verifies single-file diagnosis
 // flags bad variant shape (names, nesting) and bad alias name format without
 // requiring the cross-tier merge, while a well-formed file passes even though
-// alias targets are not resolved here.
+// alias targets are not resolved in file-only mode.
 func TestValidateFile_AgentVariantsAndAliases(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -95,7 +95,7 @@ func TestValidateFile_AgentVariantsAndAliases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeTempConfig(t, tt.yaml)
-			err := ValidateFile(path)
+			_, err := DiagnoseFileOnly(path)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected file to validate, got: %v", err)
@@ -349,11 +349,10 @@ func TestValidateFile_AgentRecordShapeChecked(t *testing.T) {
 	}
 }
 
-// TestValidateFile_AgentRefsNotResolved verifies single-file diagnosis does
+// TestDiagnoseFileOnly_AgentRefsNotResolved verifies file-only diagnosis does
 // NOT resolve agent references (default_agent, workflow/step agent:) — they may
-// point at agents defined in the global tier, which only the full Load path
-// merges and validates.
-func TestValidateFile_AgentRefsNotResolved(t *testing.T) {
+// point at agents defined in the global tier.
+func TestDiagnoseFileOnly_AgentRefsNotResolved(t *testing.T) {
 	path := writeTempConfig(t, `
 default_agent: defined-elsewhere
 workflows:
@@ -364,8 +363,8 @@ workflows:
         prompt: "do"
         agent: elsewhere-too
 `)
-	if err := ValidateFile(path); err != nil {
-		t.Fatalf("agent refs must not be resolved by single-file validation, got: %v", err)
+	if _, err := DiagnoseFileOnly(path); err != nil {
+		t.Fatalf("agent refs must not be resolved by file-only validation, got: %v", err)
 	}
 }
 
@@ -480,5 +479,191 @@ func TestValidateFile_SubdirectoryInWorkflowsRejected(t *testing.T) {
 	err := ValidateFile(ymlPath)
 	if err == nil || !strings.Contains(err.Error(), "subdirector") {
 		t.Fatalf("expected subdirectory error, got %v", err)
+	}
+}
+
+// setupGlobalTier writes ~/.sakusen.yml into an isolated HOME and returns its path.
+func setupGlobalTier(t *testing.T, yml string) string {
+	t.Helper()
+	home := isolateHome(t)
+	writeGlobalSakusenYml(t, home, yml)
+	return filepath.Join(home, ".sakusen.yml")
+}
+
+const globalClaudeNoFable = `
+agents:
+  claude:
+    command: claude
+    variants:
+      opus:
+        env:
+          MODEL: opus
+      sonnet:
+        env:
+          MODEL: sonnet
+      with-plugins:
+        env:
+          PLUGINS: "1"
+`
+
+// TestDiagnose_MergedAgentRefs verifies Diagnose resolves agent references
+// against the global tier merged with the file, reporting what LoadForProject
+// would reject, while DiagnoseFileOnly keeps accepting the same files.
+func TestDiagnose_MergedAgentRefs(t *testing.T) {
+	tests := []struct {
+		name    string
+		global  string
+		project string
+		wantErr string // empty → must validate
+	}{
+		{
+			name:    "step ref to removed global variant",
+			global:  globalClaudeNoFable,
+			project: "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:fable\n",
+			wantErr: `unknown agent "claude:fable"`,
+		},
+		{
+			name:    "periodic step ref to removed global variant",
+			global:  globalClaudeNoFable,
+			project: "periodic:\n  - name: radar\n    cadence: \"0 3 * * *\"\n    steps:\n      - name: refreshing\n        prompt: x\n        agent: claude:fable\n",
+			wantErr: `workflow "periodic:radar" step "refreshing": unknown agent "claude:fable"`,
+		},
+		{
+			name:    "step ref to global variant resolves",
+			global:  globalClaudeNoFable + "      fable:\n        env:\n          MODEL: fable\n",
+			project: "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:fable\n",
+		},
+		{
+			name:    "workflow-level ref unknown",
+			global:  globalClaudeNoFable,
+			project: "workflows:\n  - name: w\n    agent: nope\n    steps:\n      - name: s\n        prompt: x\n",
+			wantErr: `unknown agent "nope"`,
+		},
+		{
+			name:    "default_agent unknown",
+			global:  globalClaudeNoFable,
+			project: "default_agent: nope\n",
+			wantErr: `default_agent: unknown agent "nope"`,
+		},
+		{
+			name:    "alias target unknown",
+			global:  globalClaudeNoFable,
+			project: "agent_aliases:\n  worker: some-global-agent\n",
+			wantErr: `agent_aliases: alias "worker" targets unknown agent "some-global-agent"`,
+		},
+		{
+			name:    "alias target defined in global tier resolves",
+			global:  globalClaudeNoFable,
+			project: "agent_aliases:\n  worker: claude:opus\n",
+		},
+		{
+			name:    "stacked variants with conflicting env",
+			global:  globalClaudeNoFable,
+			project: "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:opus:sonnet\n",
+			wantErr: "both set env MODEL to different values",
+		},
+		{
+			name:    "stacked variants with unknown modifier",
+			global:  globalClaudeNoFable,
+			project: "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:opus:bogus\n",
+			wantErr: `unknown modifier "bogus"`,
+		},
+		{
+			name:    "stacked variants compose",
+			global:  globalClaudeNoFable,
+			project: "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:with-plugins:opus\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupGlobalTier(t, tt.global)
+			path := writeTempConfig(t, tt.project)
+
+			_, err := Diagnose(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected file to validate, got: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+
+			if _, err := DiagnoseFileOnly(path); err != nil {
+				t.Fatalf("file-only diagnosis must not resolve agent refs, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestDiagnose_MalformedGlobalConfig verifies a global ~/.sakusen.yml that
+// cannot load fails merged validation with an error naming it, while
+// file-only validation still tolerates it.
+func TestDiagnose_MalformedGlobalConfig(t *testing.T) {
+	globalPath := setupGlobalTier(t, "max_workers: : :\n")
+	path := writeTempConfig(t, "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n")
+
+	_, err := Diagnose(path)
+	if err == nil || !strings.Contains(err.Error(), "global config "+globalPath) {
+		t.Fatalf("expected error naming global config %s, got: %v", globalPath, err)
+	}
+	if _, err := DiagnoseFileOnly(path); err != nil {
+		t.Fatalf("file-only diagnosis must tolerate a malformed global config, got: %v", err)
+	}
+}
+
+// TestDiagnose_MalformedGlobalDaemonConfig verifies a broken
+// ~/.config/sakusen/config.yaml is attributed to that file.
+func TestDiagnose_MalformedGlobalDaemonConfig(t *testing.T) {
+	isolateHome(t)
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	globalPath := filepath.Join(xdg, "sakusen", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globalPath, []byte("poll_interval: soon\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTempConfig(t, "max_workers: 2\n")
+
+	_, err := Diagnose(path)
+	if err == nil || !strings.Contains(err.Error(), "global config "+globalPath) {
+		t.Fatalf("expected error naming global config %s, got: %v", globalPath, err)
+	}
+}
+
+// TestDiagnose_GlobalSakusenYmlItself verifies validating ~/.sakusen.yml
+// merges it once (no duplicate-workflow errors) and still resolves its refs.
+func TestDiagnose_GlobalSakusenYmlItself(t *testing.T) {
+	valid := globalClaudeNoFable + "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:opus\n"
+	globalPath := setupGlobalTier(t, valid)
+	if _, err := Diagnose(globalPath); err != nil {
+		t.Fatalf("expected global config to validate, got: %v", err)
+	}
+
+	broken := globalClaudeNoFable + "workflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: x\n        agent: claude:fable\n"
+	if err := os.WriteFile(globalPath, []byte(broken), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Diagnose(globalPath)
+	if err == nil || !strings.Contains(err.Error(), `unknown agent "claude:fable"`) {
+		t.Fatalf("expected unknown agent error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "global config") {
+		t.Errorf("errors in the validated file itself must not be attributed as global, got: %v", err)
+	}
+}
+
+// TestDiagnose_FileLocalErrorsUnchanged verifies file-local errors surface
+// from the file-only phase with their existing text.
+func TestDiagnose_FileLocalErrorsUnchanged(t *testing.T) {
+	setupGlobalTier(t, globalClaudeNoFable)
+	for _, contents := range []string{"on_complete: yeet\n", "worktree_sync_paths:\n  copy: [.env]\n"} {
+		path := writeTempConfig(t, contents)
+		_, want := DiagnoseFileOnly(path)
+		_, got := Diagnose(path)
+		if want == nil || got == nil || got.Error() != want.Error() {
+			t.Errorf("Diagnose error %v, want file-only error %v", got, want)
+		}
 	}
 }

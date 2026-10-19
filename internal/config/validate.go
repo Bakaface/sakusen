@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,8 +44,8 @@ var validPriorities = map[string]bool{
 	"urgent": true,
 }
 
-// ValidateFile validates a Sakusen project config file (.sakusen.yml) without
-// touching the global merge hierarchy. It catches:
+// ValidateFile validates a Sakusen config file the way Diagnose does. It
+// catches:
 //   - YAML syntax errors
 //   - Unknown top-level / nested fields (typos like `worktree_sync_paths`)
 //   - Workflow loop misconfiguration (forward gotos, bad max_iterations, etc.)
@@ -52,6 +53,8 @@ var validPriorities = map[string]bool{
 //   - Invalid enum values (git.on_complete, default_priority, tmux_nested_attach_behavior)
 //   - Duplicate workflow / step names
 //   - File-based workflow errors (missing refs, inline/file collisions, bad filenames)
+//   - Agent refs, alias targets and composed variant refs that don't resolve
+//     against the merged global + project registry
 //
 // ValidateFile also surfaces non-fatal warnings (e.g. unreferenced file-based
 // workflows) — those are returned via Diagnose for callers that want to display
@@ -61,10 +64,44 @@ func ValidateFile(path string) error {
 	return err
 }
 
-// Diagnose validates a Sakusen project config file and returns any non-fatal
-// warnings collected during validation. Fatal errors are returned via the
-// error result.
+// Diagnose validates a Sakusen config file and returns any non-fatal warnings
+// collected during validation. Fatal errors are returned via the error result.
+//
+// It runs the single-file checks of DiagnoseFileOnly first, then loads the
+// file merged with the global tier (~/.config/sakusen/config.yaml,
+// ~/.sakusen.yml, ~/.sakusen/workflows/, track workflows) through the same
+// pipeline as LoadForProject, so cross-tier errors such as unknown agent refs
+// are reported. A global config that fails to load is a fatal error.
 func Diagnose(path string) ([]Diagnostic, error) {
+	diagnostics, err := DiagnoseFileOnly(path)
+	if err != nil {
+		return nil, err
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	projectFile := absPath
+	if isGlobalSakusenYml(absPath) {
+		// loadCommon already merges this file as the global tier.
+		projectFile = ""
+	}
+	if _, err := loadMerged(filepath.Dir(absPath), projectFile); err != nil {
+		var gerr *globalTierError
+		if errors.As(err, &gerr) && !isSamePath(gerr.path, absPath) {
+			return nil, fmt.Errorf("global config %s: %w", gerr.path, gerr.err)
+		}
+		return nil, err
+	}
+	return diagnostics, nil
+}
+
+// DiagnoseFileOnly validates a single config file without merging the global
+// tier. The global ~/.sakusen.yml is consulted only as a workflow pool for
+// string refs; agent refs, alias targets and role-agent slugs are not
+// resolved, since they may point at agents defined in another tier.
+func DiagnoseFileOnly(path string) ([]Diagnostic, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -136,6 +173,18 @@ func loadGlobalPoolForValidation(skipPath string) (*globalWorkflowPool, error) {
 	return snapshotGlobalPool(tmpCfg), nil
 }
 
+// isGlobalSakusenYml reports whether absPath is the global ~/.sakusen.yml.
+func isGlobalSakusenYml(absPath string) bool {
+	globalYml := getGlobalSakusenYmlPath()
+	return globalYml != "" && isSamePath(globalYml, absPath)
+}
+
+func isSamePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && absA == absB
+}
+
 // validateProject runs structural validation on a parsed ProjectConfig.
 // Returns any non-fatal warnings (e.g. unreferenced file-based workflows).
 //
@@ -165,20 +214,19 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	}
 
 	// Agent record shapes are checkable from the file alone. Refs (step/
-	// workflow `agent:`, default_agent) are NOT resolved here — they may point
-	// at agents defined in the global tier, which single-file diagnosis
-	// deliberately doesn't merge; the full Load path validates them.
+	// workflow `agent:`, default_agent) may point at agents defined in the
+	// global tier, so they are resolved by Diagnose's merged phase instead.
 	if err := validateAgentRecords(proj.Agents); err != nil {
 		return nil, err
 	}
-	// Alias names are checkable from the file alone; targets are not resolved
-	// here for the same cross-tier reason as agent refs.
+	// Alias names are checkable from the file alone; targets are resolved in
+	// the merged phase for the same cross-tier reason as agent refs.
 	if err := validateAgentAliasNames(proj.AgentAliases); err != nil {
 		return nil, err
 	}
 	// System-role blocks: only the file-local rules (agent/command exclusivity,
 	// timeout syntax). Whether a referenced slug exists and is headless is
-	// cross-tier, so it stays in the full load path.
+	// cross-tier, so it is checked in the merged phase.
 	var mergeConflicts MergeConflictsConfig
 	if proj.MergeConflicts != nil {
 		mergeConflicts = *proj.MergeConflicts

@@ -102,7 +102,7 @@ func loadCommon(cfg *Config) error {
 	globalPath := getGlobalConfigPath()
 	if globalPath != "" {
 		if err := loadGlobalConfig(globalPath, cfg); err != nil && !os.IsNotExist(err) {
-			return err
+			return &globalTierError{path: globalPath, err: err}
 		}
 	}
 
@@ -112,7 +112,7 @@ func loadCommon(cfg *Config) error {
 	globalSakusenYml := getGlobalSakusenYmlPath()
 	if globalSakusenYml != "" {
 		if err := loadProjectConfig(globalSakusenYml, cfg); err != nil && !os.IsNotExist(err) {
-			return err
+			return &globalTierError{path: globalSakusenYml, err: err}
 		}
 	}
 
@@ -123,6 +123,17 @@ func loadCommon(cfg *Config) error {
 
 	return nil
 }
+
+// globalTierError marks a loadCommon failure as coming from a global config
+// file. Its message is the underlying error's, so Load callers see the same
+// text; Diagnose uses path to attribute the failure.
+type globalTierError struct {
+	path string
+	err  error
+}
+
+func (e *globalTierError) Error() string { return e.err.Error() }
+func (e *globalTierError) Unwrap() error { return e.err }
 
 // Load loads config from global config, global .sakusen.yml, and project .sakusen.yml,
 // returning a merged Config. Loading order (later overrides earlier):
@@ -191,18 +202,33 @@ func Load() (*Config, error) {
 
 // LoadForProject loads config for a specific project directory.
 func LoadForProject(projectDir string) (*Config, error) {
+	cfg, err := loadMerged(projectDir, filepath.Join(projectDir, ".sakusen.yml"))
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.Project.AutoDetect = true
+	cfg.ApplyDetectedProject(cfg.ProjectDir)
+
+	return cfg, nil
+}
+
+// loadMerged runs the LoadForProject pipeline with projectFilePath as the
+// project tier (skipped when empty or absent), stopping short of project
+// detection. Diagnose shares it so validation matches what the daemon loads.
+func loadMerged(projectDir, projectFilePath string) (*Config, error) {
 	cfg := defaultConfig()
 	if err := loadCommon(cfg); err != nil {
 		return nil, err
 	}
 
-	// Load project config (.sakusen.yml)
-	projectPath := filepath.Join(projectDir, ".sakusen.yml")
-	if _, err := os.Stat(projectPath); err == nil {
-		if err := loadProjectConfig(projectPath, cfg); err != nil {
-			return nil, err
+	if projectFilePath != "" {
+		if _, err := os.Stat(projectFilePath); err == nil {
+			if err := loadProjectConfig(projectFilePath, cfg); err != nil {
+				return nil, err
+			}
+			cfg.ProjectConfigFound = true
 		}
-		cfg.ProjectConfigFound = true
 	}
 
 	cfg.ProjectDir = projectDir
@@ -223,9 +249,6 @@ func LoadForProject(projectDir string) (*Config, error) {
 	if err := validatePromptIncludes(cfg, PromptDirs(cfg.ProjectDir)); err != nil {
 		return nil, err
 	}
-
-	cfg.Project.AutoDetect = true
-	cfg.ApplyDetectedProject(cfg.ProjectDir)
 
 	return cfg, nil
 }

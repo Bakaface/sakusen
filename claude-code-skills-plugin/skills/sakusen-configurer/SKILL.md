@@ -418,7 +418,7 @@ sakusen validate path/to/.sakusen.yml   # validates an explicit file
 - YAML syntax errors
 - **Unknown top-level fields** (catches typos like `worktree_sync_paths` for `worktree-sync-paths`)
 - **Removed keys** (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`, and `tmux:`/`print:` on a workflow or step) — migration errors pointing at the `agents:`/`summarizer:` replacements
-- **Agent record shapes** (invalid slug, missing `command`, invalid `mode`, `resume_command`/`chat_log_command` on a headless agent). Note: `agent:`/`default_agent:` *references* are only checked by the full daemon load, not single-file validation — they may resolve against the global tier.
+- **Agent record shapes** (invalid slug, missing `command`, invalid `mode`, `resume_command`/`chat_log_command` on a headless agent). By default the file is merged with the global tier (`~/.sakusen.yml`, `~/.sakusen/workflows/`, track workflows) like the daemon does, so unknown `agent:`/`default_agent:` refs, alias targets and stacked variant compositions are reported; `sakusen validate --file-only` checks the single file without resolving them.
 - Workflow loop validity (forward `goto`, self-reference, missing target step, `max_iterations < 1`, overlapping ranges, `human: true` on a loop step)
 - Invalid `summarization_strategy` values
 - Invalid `on_complete` — top-level or per-workflow (must be `commit`, `merge`, or `none`); the removed `git.on_complete` location produces a migration error
