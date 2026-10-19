@@ -48,5 +48,5 @@ run = "claude --dangerously-skip-permissions 'Run the /e2e-test command'"
 
 [tasks.claude]
 alias = "c"
-description = "Launch Claude Code with the local sakusen plugin live-loaded from source"
-run = "claude --dangerously-skip-permissions --plugin-dir ./claude-code-plugin"
+description = "Launch Claude Code with the local sakusen plugins (MCP server + skills) live-loaded from source"
+run = "claude --dangerously-skip-permissions --plugin-dir ./claude-code-plugin --plugin-dir ./claude-code-skills-plugin"
