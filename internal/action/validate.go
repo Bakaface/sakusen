@@ -10,7 +10,8 @@ import (
 )
 
 type ValidateArgs struct {
-	Path string // empty == cwd/.sakusen.yml
+	Path     string // empty == cwd/.sakusen.yml
+	FileOnly bool   // skip merging the global tier (config.DiagnoseFileOnly)
 }
 
 func (a ValidateArgs) Validate() error {
@@ -18,15 +19,20 @@ func (a ValidateArgs) Validate() error {
 	return nil
 }
 
-// RunValidate resolves the .sakusen.yml path and runs config.Diagnose. Unlike
-// every other action this verb does no client call — it goes straight at the
-// local filesystem so it works without a running daemon.
+// RunValidate resolves the .sakusen.yml path and runs config.Diagnose (or
+// config.DiagnoseFileOnly when FileOnly is set). Unlike every other action
+// this verb does no client call — it goes straight at the local filesystem so
+// it works without a running daemon.
 func RunValidate(ctx Ctx, args ValidateArgs) (Result, error) {
 	path, err := resolveConfigPath(args.Path)
 	if err != nil {
 		return Result{}, err
 	}
-	diagnostics, err := config.Diagnose(path)
+	diagnose := config.Diagnose
+	if args.FileOnly {
+		diagnose = config.DiagnoseFileOnly
+	}
+	diagnostics, err := diagnose(path)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}

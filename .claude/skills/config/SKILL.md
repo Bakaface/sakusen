@@ -358,7 +358,7 @@ SanitizeProjectName(name string) string             // Replaces dots with unders
 | `prompts.go` | `{{prompt.<name>}}` includes — `PromptDirs()`, `ExpandPromptIncludes()`, `validatePromptIncludes()` |
 | `projectroot.go` | `FindProjectRoot()` — nearest ancestor `.sakusen.yml`, bounded by the git toplevel; shared by `Load()`, the TUI and the MCP server |
 | `detect.go` | Project type detection (`DetectProject()`) |
-| `validate.go` | Single-file validation for `sakusen validate` (`ValidateFile()`/`Diagnose()`) — enums, agent record shapes, loop/step rules, workflow file pool |
+| `validate.go` | `sakusen validate`: `DiagnoseFileOnly()` (single file — enums, agent record shapes, loop/step rules, workflow file pool) and `Diagnose()`/`ValidateFile()` (file-only checks, then the merged `loadMerged` pipeline resolving agent refs across tiers) |
 
 ## Project Detection (detect.go)
 
