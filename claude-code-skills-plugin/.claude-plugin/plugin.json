@@ -1,0 +1,12 @@
+{
+  "name": "sakusen-skills",
+  "version": "0.1.0",
+  "description": "Skills for configuring and working with Sakusen (sakusen-configurer, worktree-parity-audit, wayfinder-sakusen). The Sakusen MCP server ships in the sakusen plugin",
+  "author": {
+    "name": "Bakaface"
+  },
+  "homepage": "https://github.com/Bakaface/sakusen",
+  "repository": "https://github.com/Bakaface/sakusen",
+  "license": "MIT",
+  "keywords": ["sakusen", "claude-code", "orchestration", "worktree", "workflows"]
+}

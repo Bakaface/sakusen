@@ -45,6 +45,23 @@ git clone https://github.com/Bakaface/sakusen && cd sakusen
 go build -o sakusen ./cmd/sakusen
 ```
 
+### Claude Code plugins
+
+The repo ships two Claude Code plugins:
+
+- **`sakusen`** (`claude-code-plugin/`) — the Sakusen MCP server (`sakusen mcp`). Load it wherever agents route tasks to Sakusen.
+- **`sakusen-skills`** (`claude-code-skills-plugin/`) — the sakusen-configurer, worktree-parity-audit and wayfinder-sakusen skills. Optional.
+
+Load them from a checkout with `--plugin-dir`:
+
+```bash
+claude --plugin-dir <repo>/claude-code-plugin --plugin-dir <repo>/claude-code-skills-plugin
+```
+
+or add the repo's `sakusen-local` marketplace with `/plugin marketplace add <repo>` and install them with `/plugin install sakusen@sakusen-local` and `/plugin install sakusen-skills@sakusen-local`.
+
+**Migrating from the single plugin.** Earlier versions bundled the skills inside `sakusen`. Existing installs keep the MCP server and its tool names (`mcp__plugin_sakusen_sakusen__*`) unchanged. To keep the skills, also load `sakusen-skills`. Namespaced skill references change from `sakusen:<skill>` to `sakusen-skills:<skill>`; bare skill names are unaffected. A session can now drop only the skills by disabling `sakusen-skills` (e.g. `"sakusen-skills@inline": false` in `.claude/settings.json` for `--plugin-dir` loads) while the MCP server stays on.
+
 ## Quick Start
 
 ```bash
@@ -232,7 +249,9 @@ internal/
   tmux/             Tmux session lifecycle, capture, monitoring
   client/           IPC client (RPC + event subscription) for tui/cli
   notify/           Desktop notifications
-claude-code-plugin/ Companion Claude Code plugin (skills: sakusen-configurer,
+claude-code-plugin/ Claude Code plugin `sakusen` (the Sakusen MCP server only)
+claude-code-skills-plugin/
+                    Claude Code plugin `sakusen-skills` (skills: sakusen-configurer,
                     worktree-parity-audit, wayfinder-sakusen)
 ```
 

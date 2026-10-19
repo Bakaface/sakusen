@@ -1,6 +1,6 @@
 {
   "name": "sakusen-local",
-  "description": "Local marketplace for the Sakusen Claude Code plugin",
+  "description": "Local marketplace for the Sakusen Claude Code plugins",
   "owner": {
     "name": "Bakaface"
   },
@@ -8,6 +8,10 @@
     {
       "name": "sakusen",
       "source": "./claude-code-plugin"
+    },
+    {
+      "name": "sakusen-skills",
+      "source": "./claude-code-skills-plugin"
     }
   ]
 }

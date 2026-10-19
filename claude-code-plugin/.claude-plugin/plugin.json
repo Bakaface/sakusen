@@ -1,12 +1,12 @@
 {
   "name": "sakusen",
-  "version": "0.1.0",
-  "description": "Skills for configuring and working with Sakusen — a daemon that orchestrates Claude Code agents on parallel tasks using git worktrees",
+  "version": "0.2.0",
+  "description": "Sakusen MCP server (task routing tools) for Sakusen — a daemon that orchestrates Claude Code agents on parallel tasks using git worktrees. Skills ship separately in the sakusen-skills plugin",
   "author": {
     "name": "Bakaface"
   },
   "homepage": "https://github.com/Bakaface/sakusen",
   "repository": "https://github.com/Bakaface/sakusen",
   "license": "MIT",
-  "keywords": ["sakusen", "claude-code", "orchestration", "worktree", "workflows"]
+  "keywords": ["sakusen", "claude-code", "orchestration", "mcp"]
 }

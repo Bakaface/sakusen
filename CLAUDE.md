@@ -30,8 +30,10 @@ internal/
   notify/            Notification support
   client/            Client for daemon communication
 tests/e2e/           End-to-end tests (build tag `e2e`; see tests/e2e/README.md)
-claude-code-plugin/  Claude Code plugin with sakusen-configurer, worktree-parity-audit
-                     and wayfinder-sakusen skills
+claude-code-plugin/  Claude Code plugin `sakusen`: the Sakusen MCP server only
+claude-code-skills-plugin/
+                     Claude Code plugin `sakusen-skills`: sakusen-configurer,
+                     worktree-parity-audit and wayfinder-sakusen skills
 ```
 
 ## Key Concepts
