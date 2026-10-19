@@ -25,6 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,7 +55,27 @@ type Config struct {
 	// BlockedPollInterval is how often to re-check whether the target branch is
 	// clean while waiting in merge-blocked state. Defaults to 10s when zero.
 	BlockedPollInterval time.Duration
+
+	// CleanTargetTimeout fails the merge when the target checkout is still
+	// dirty this long after the task entered merge-blocked. Zero waits forever.
+	CleanTargetTimeout time.Duration
+
+	// IgnorePaths are git glob pathspecs, relative to the repo root, whose
+	// changes do not count as a dirty target checkout.
+	IgnorePaths []string
 }
+
+// ErrTargetDirtyTimeout is returned (wrapped) when the target checkout stays
+// dirty past Config.CleanTargetTimeout.
+var ErrTargetDirtyTimeout = errors.New("target checkout still dirty")
+
+// errCleanTargetWait marks an error from the clean-target wait, which runs
+// before anything touches the base repo and so must not trigger cleanup: the
+// dirty state belongs to whoever is editing the main checkout.
+var errCleanTargetWait = errors.New("waiting for clean target branch")
+
+// maxBlockingPathsShown caps how many blocking paths a status detail lists.
+const maxBlockingPathsShown = 10
 
 // LogFunc is the per-call log sink used by Finalize. nil is treated as discard.
 type LogFunc func(format string, args ...any)
@@ -69,6 +91,14 @@ type ConflictResolver func(ctx context.Context, t *task.Task, conflictFiles []st
 // StatusSetter records a status change for a task. It is invoked outside the
 // per-repo lock so it can safely take its own database mutexes.
 type StatusSetter func(taskID int64, status task.Status) error
+
+// StatusDetailSetter records a status change together with a human-readable
+// detail (persisted as the task's error message; "" clears it).
+type StatusDetailSetter func(taskID int64, status task.Status, detail string) error
+
+// BlockedNotifier is invoked once each time a task enters merge-blocked, with
+// the paths that block it.
+type BlockedNotifier func(t *task.Task, paths []string)
 
 // CommitRecorder appends a commit hash to a task's history.
 type CommitRecorder func(taskID int64, commitHash string) error
@@ -89,6 +119,7 @@ type gitRepo interface {
 	GetConflictedFiles(worktreePath string) ([]string, error)
 	ContinueRebase(worktreePath string) error
 	HasChanges() (bool, error)
+	ChangedPaths(ignore []string) ([]string, error)
 	GetLastCommitHash(dir string) (string, error)
 	Root() string
 }
@@ -108,13 +139,15 @@ type Coordinator struct {
 	resolveConflicts ConflictResolver
 	setStatus        StatusSetter
 	recordCommit     CommitRecorder
+	setStatusDetail  StatusDetailSetter
+	onBlocked        BlockedNotifier
 }
 
 // NewCoordinator wires a Lock plus its engine-local callbacks into a
 // Coordinator backed by a real *git.Repo rooted at repoRoot. Any callback may
 // be nil — a nil ConflictResolver means conflicts abort the merge instead of
-// triggering resolution; nil StatusSetter / CommitRecorder mean those side
-// effects are skipped.
+// triggering resolution; nil StatusSetter / CommitRecorder /
+// StatusDetailSetter / BlockedNotifier mean those side effects are skipped.
 func NewCoordinator(
 	repoRoot string,
 	lock *Lock,
@@ -122,8 +155,10 @@ func NewCoordinator(
 	resolveConflicts ConflictResolver,
 	setStatus StatusSetter,
 	recordCommit CommitRecorder,
+	setStatusDetail StatusDetailSetter,
+	onBlocked BlockedNotifier,
 ) *Coordinator {
-	return newCoordinator(gitpkg.NewRepo(repoRoot), lock, cfg, resolveConflicts, setStatus, recordCommit)
+	return newCoordinator(gitpkg.NewRepo(repoRoot), lock, cfg, resolveConflicts, setStatus, recordCommit, setStatusDetail, onBlocked)
 }
 
 // newCoordinator wires an arbitrary gitRepo implementation into a
@@ -137,6 +172,8 @@ func newCoordinator(
 	resolveConflicts ConflictResolver,
 	setStatus StatusSetter,
 	recordCommit CommitRecorder,
+	setStatusDetail StatusDetailSetter,
+	onBlocked BlockedNotifier,
 ) *Coordinator {
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = 3
@@ -154,6 +191,8 @@ func newCoordinator(
 		resolveConflicts: resolveConflicts,
 		setStatus:        setStatus,
 		recordCommit:     recordCommit,
+		setStatusDetail:  setStatusDetail,
+		onBlocked:        onBlocked,
 	}
 }
 
@@ -245,9 +284,10 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 	// single owner of the cleanup invariant — internal/git's MergeBranch keeps
 	// its own deferred CleanRepoState as defence-in-depth, but the
 	// authoritative cleanup lives here so failures *outside* MergeBranch
-	// (conflict resolution, target-clean wait, etc.) are covered too.
+	// (conflict resolution, etc.) are covered too. The clean-target wait is
+	// the exception: it fails before the base repo is touched.
 	defer func() {
-		if retErr == nil {
+		if retErr == nil || errors.Is(retErr, errCleanTargetWait) {
 			return
 		}
 		if err := c.repo.CleanRepoState(); err != nil {
@@ -266,8 +306,8 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 	// Wait for the target branch to be clean. Done outside the lock so other
 	// tasks can finish their own merges (which is what clears the dirty state).
 	logf("Checking target branch %s for pending changes...", baseBranch)
-	if err := c.waitForCleanTarget(ctx, t); err != nil {
-		return fmt.Errorf("waiting for clean target branch: %w", err)
+	if err := c.waitForCleanTarget(ctx, t, logf); err != nil {
+		return fmt.Errorf("%w: %w", errCleanTargetWait, err)
 	}
 
 	logf("Fast-forwarding %s to branch %s...", baseBranch, t.Branch)
@@ -402,24 +442,28 @@ func (c *Coordinator) markResolvingConflicts(t *task.Task) func() {
 	}
 }
 
-// waitForCleanTarget polls the repo root until it has no pending changes.
-// While waiting it transitions the task into the merge-blocked state via the
-// injected StatusSetter so the UI can show why work is stalled. Runs outside
-// any lock — the goal is to let other tasks finish their merges.
-func (c *Coordinator) waitForCleanTarget(ctx context.Context, t *task.Task) error {
-	dirty, err := c.repo.HasChanges()
+// waitForCleanTarget polls the repo root until it has no pending changes
+// outside Config.IgnorePaths. While waiting the task sits in merge-blocked
+// with the blocking paths as its status detail; once the target is clean the
+// prior status is restored and the detail cleared. Runs outside any lock —
+// the goal is to let other tasks finish their merges.
+func (c *Coordinator) waitForCleanTarget(ctx context.Context, t *task.Task, logf LogFunc) error {
+	paths, err := c.repo.ChangedPaths(c.cfg.IgnorePaths)
 	if err != nil {
 		return fmt.Errorf("failed to check target branch: %w", err)
 	}
-	if !dirty {
+	if len(paths) == 0 {
 		return nil
 	}
 
-	log.Printf("Task #%d: target branch has pending changes, entering merge-blocked state", t.ID)
-	if c.setStatus != nil {
-		if err := c.setStatus(t.ID, task.StatusMergeBlocked); err != nil {
-			log.Printf("Warning: failed to set merge-blocked status for task #%d: %v", t.ID, err)
-		}
+	prev := t.Status
+	blockedAt := time.Now()
+	detail := blockedDetail(paths)
+	log.Printf("Task #%d: %s, entering merge-blocked state", t.ID, detail)
+	logf("Merge blocked: %s", detail)
+	c.writeStatusDetail(t, task.StatusMergeBlocked, detail)
+	if c.onBlocked != nil {
+		c.onBlocked(t, paths)
 	}
 
 	ticker := time.NewTicker(c.cfg.BlockedPollInterval)
@@ -430,18 +474,54 @@ func (c *Coordinator) waitForCleanTarget(ctx context.Context, t *task.Task) erro
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			dirty, err := c.repo.HasChanges()
+			latest, err := c.repo.ChangedPaths(c.cfg.IgnorePaths)
 			if err != nil {
 				log.Printf("Task #%d: failed to check target branch: %v", t.ID, err)
 				continue
 			}
-			if !dirty {
+			if len(latest) == 0 {
 				log.Printf("Task #%d: target branch is clean, proceeding with merge", t.ID)
+				c.writeStatusDetail(t, prev, "")
 				return nil
+			}
+			if c.cfg.CleanTargetTimeout > 0 && time.Since(blockedAt) >= c.cfg.CleanTargetTimeout {
+				return fmt.Errorf("%w after %s: %s", ErrTargetDirtyTimeout, c.cfg.CleanTargetTimeout, joinBlockingPaths(latest))
+			}
+			if !slices.Equal(latest, paths) {
+				paths = latest
+				detail = blockedDetail(paths)
+				logf("Merge blocked: %s", detail)
+				c.writeStatusDetail(t, task.StatusMergeBlocked, detail)
 			}
 			log.Printf("Task #%d: target branch still has pending changes, retrying", t.ID)
 		}
 	}
+}
+
+// writeStatusDetail persists status+detail and mirrors the status onto t.
+// Best-effort: a DB failure is logged and never interrupts the wait.
+func (c *Coordinator) writeStatusDetail(t *task.Task, status task.Status, detail string) {
+	if c.setStatusDetail == nil {
+		return
+	}
+	if err := c.setStatusDetail(t.ID, status, detail); err != nil {
+		log.Printf("Warning: failed to set %s status for task #%d: %v", status, t.ID, err)
+		return
+	}
+	t.Status = status
+}
+
+func blockedDetail(paths []string) string {
+	return "target checkout has uncommitted changes: " + joinBlockingPaths(paths)
+}
+
+// joinBlockingPaths renders at most maxBlockingPathsShown paths, summarizing
+// the rest as ", and N more".
+func joinBlockingPaths(paths []string) string {
+	if len(paths) <= maxBlockingPathsShown {
+		return strings.Join(paths, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(paths[:maxBlockingPathsShown], ", "), len(paths)-maxBlockingPathsShown)
 }
 
 // recordBaseCommit appends the new HEAD of the base repo (the fast-forward

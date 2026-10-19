@@ -163,6 +163,9 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	if err := applyTmuxConfig(defaultConfig(), proj.Tmux); err != nil {
 		return nil, err
 	}
+	if err := applyMergeConfig(defaultConfig(), proj.Merge); err != nil {
+		return nil, err
+	}
 
 	// Agent record shapes are checkable from the file alone. Refs (step/
 	// workflow `agent:`, default_agent) are NOT resolved here — they may point

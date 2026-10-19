@@ -139,3 +139,28 @@ func (n *Notifier) AgentWaitingForInput(taskID, description string) error {
 		UrgencyCritical,
 	)
 }
+
+// maxNotifiedPaths caps how many blocking paths a merge-blocked notification
+// lists.
+const maxNotifiedPaths = 3
+
+func (n *Notifier) MergeBlocked(taskID int64, title string, paths []string) error {
+	if !n.cfg.OnMergeBlocked {
+		return nil
+	}
+
+	body := fmt.Sprintf("#%d: %s\nTarget checkout has uncommitted changes:", taskID, title)
+	for i, p := range paths {
+		if i == maxNotifiedPaths {
+			body += fmt.Sprintf("\n…and %d more", len(paths)-maxNotifiedPaths)
+			break
+		}
+		body += "\n" + p
+	}
+
+	return n.Send(
+		"Merge Blocked",
+		body,
+		UrgencyNormal,
+	)
+}

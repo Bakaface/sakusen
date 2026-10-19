@@ -74,6 +74,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `verification` | object | — | Summarizer verification settings (`max_retries`, `verify_summarizer`) |
 | `git` | object | — | Branch naming, base branch |
 | `on_complete` | string | `"commit"` | Finalization action (`commit`/`merge`/`none`); per-workflow overridable |
+| `merge` | object | — | Clean-target wait before a merge: `clean_target_timeout` (duration; empty/`0` waits forever), `ignore_paths` (git glob pathspecs that do not count as dirty). See [Merge Section](references/config-reference.md#merge-section-clean-target-wait). |
 | `workflows` | list | — | **Primary config block** — flat list of workflow pipelines |
 | `notifications` | object | — | Desktop notification toggles |
 | `options` | object | — | TUI display toggles: `number`, `branch`, `target`, `branchview` (bools), `animation` (`enabled` bool, `duration` ms). |
@@ -105,7 +106,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 Top-level field names mix two casing styles — **don't guess, copy exactly**:
 
 - **kebab-case:** `worktree-sync-paths`, `worktree-setup-command`, `worktree-setup-commands`, `tmux-setup-command`
-- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `hibernate_after`, `max_live_sessions`, `base_branch`, `branch_template`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`, `resume_command`, `chat_log_command`
+- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `hibernate_after`, `max_live_sessions`, `clean_target_timeout`, `ignore_paths`, `base_branch`, `branch_template`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`, `resume_command`, `chat_log_command`
 
 If you author an unrecognized variant (`worktree_sync_paths`, `tmux_setup_command`, etc.), Sakusen will silently ignore it.
 

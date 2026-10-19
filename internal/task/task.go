@@ -67,10 +67,12 @@ func (s Status) IsActive() bool {
 // statuses (StatusAwaitingApproval, StatusAwaitingChildren, StatusTmux)
 // where no process was actively touching the repo when the daemon died, and
 // excludes StatusSummarizing, whose work happens after the merge has
-// already completed cleanly.
+// already completed cleanly. StatusMergeBlocked is excluded too: the task is
+// only waiting for someone else's uncommitted changes on the main checkout,
+// which a cleanup sweep would destroy.
 func (s Status) MayHaveDirtyRepoState() bool {
 	switch s {
-	case StatusRunning, StatusSummarizingStep, StatusFinalizing, StatusMergeBlocked, StatusResolvingConflicts:
+	case StatusRunning, StatusSummarizingStep, StatusFinalizing, StatusResolvingConflicts:
 		return true
 	default:
 		return false

@@ -930,3 +930,50 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 	}
 	return string(out)
 }
+
+func TestChangedPaths(t *testing.T) {
+	dir := initTestRepo(t)
+	r := NewRepo(dir)
+
+	if paths, err := r.ChangedPaths(nil); err != nil || len(paths) != 0 {
+		t.Fatalf("clean repo: ChangedPaths = %v, %v; want empty", paths, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("edited"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.tmp"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "scratch"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scratch", "a.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	paths, err := r.ChangedPaths(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"M README.md", "?? notes.tmp", "?? scratch/"}
+	if strings.Join(paths, "|") != strings.Join(want, "|") {
+		t.Errorf("ChangedPaths(nil) = %q, want %q", paths, want)
+	}
+
+	paths, err = r.ChangedPaths([]string{"scratch/**", "*.tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, "|") != "M README.md" {
+		t.Errorf("ChangedPaths(ignore) = %q, want only README.md", paths)
+	}
+
+	paths, err = r.ChangedPaths([]string{"scratch/**", "*.tmp", "README.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("fully ignored dirty tree: ChangedPaths = %q, want empty", paths)
+	}
+}

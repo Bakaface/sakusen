@@ -7,6 +7,7 @@
 - [Merge Conflicts Section](#merge-conflicts-section)
 - [Git Section](#git-section)
 - [Finalization (`on_complete`)](#finalization-on_complete)
+- [Merge Section (clean-target wait)](#merge-section-clean-target-wait)
 - [Verification Section](#verification-section)
 - [Poll Interval](#poll-interval)
 - [Options (TUI Display)](#options-tui-display)
@@ -181,6 +182,32 @@ the project and set `on_complete` there.
 
 ---
 
+## Merge Section (clean-target wait)
+
+Before an `on_complete: merge` lands, Sakusen waits until the target repo's main checkout has no
+uncommitted changes (`git status --porcelain`, so untracked files count). While it waits the task
+is `merge-blocked` and its `error_message` (get_task / list_tasks, the TUI `Error:` line) lists the
+blocking paths; it is cleared when the wait ends. The wait never resets or cleans the main
+checkout. The top-level `merge:` block tunes it:
+
+```yaml
+merge:
+  clean_target_timeout: 30m  # fail the merge after this long blocked; empty/"0" waits forever (default)
+  ignore_paths:              # git glob pathspecs, relative to the repo root, that do not count as dirty
+    - "scratch/**"
+    - "**/*.tmp"               # `*` does not cross `/`; "*.tmp" matches only top-level files
+```
+
+When `clean_target_timeout` elapses with the target still dirty, the task becomes `merge-failed`
+with the worktree and branch kept and an error naming the blocking paths. The timeout is checked
+at each 10s poll, so it may fire up to one poll late. Both keys merge per field across tiers: an
+empty `clean_target_timeout` inherits, a non-empty `ignore_paths` replaces the inherited list. An
+unparseable or negative duration, or an empty ignore pattern, is a hard load error.
+`ignore_paths` affects only this wait. Set `notifications.on_merge_blocked` for a desktop
+notification each time a merge becomes blocked.
+
+---
+
 ## Verification Section
 
 ```yaml
@@ -228,6 +255,7 @@ notifications:
   on_complete: true          # Notify when task completes
   on_failed: true            # Notify when task fails
   on_waiting_input: true     # Notify when task awaits human input
+  on_merge_blocked: true     # Notify once when a merge starts waiting on a dirty target checkout
 ```
 
 ---
@@ -439,7 +467,7 @@ task orchestration (`{{children.*}}`).
 | `finalizing` | Running post-completion steps |
 | `summarizing` | Generating task context summary (also used for the step summary of single-step workflows) |
 | `summarizing_step` | Summarizing a completed step's transcript (multi-step workflows) |
-| `merge-blocked` | Merge conflicts or merge failure |
+| `merge-blocked` | Merge waiting for the target checkout to be clean; `error_message` lists the blocking paths |
 | `resolving-conflicts` | Agent resolving merge conflicts |
 | `completed` | Successfully finished |
 | `failed` | Execution failed |

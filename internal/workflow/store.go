@@ -23,6 +23,7 @@ type taskStore interface {
 	// Task reads and field updates.
 	GetTask(id int64) (*task.Task, error)
 	UpdateTaskStatus(id int64, status task.Status) error
+	UpdateTaskStatusError(id int64, status task.Status, errMsg string) error
 	UpdateTaskBranch(id int64, branch string) error
 	UpdateTaskWorktreePath(id int64, worktreePath string) error
 	ClearWorktreePath(id int64) error

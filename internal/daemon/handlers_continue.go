@@ -414,6 +414,10 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 	// Set finalizing status while we run summarizer + on_complete
 	if err := s.database.UpdateTaskStatus(t.ID, task.StatusFinalizing); err != nil {
 		log.Printf("%sWarning: failed to set finalizing status for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+	} else {
+		// The merge coordinator restores t.Status after transient phases
+		// (merge-blocked, resolving-conflicts), so it must not be stale.
+		t.Status = task.StatusFinalizing
 	}
 	s.broadcastTaskUpdate(t.ID)
 

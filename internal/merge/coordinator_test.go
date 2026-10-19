@@ -3,9 +3,11 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,7 +72,7 @@ func TestFinalizeNoneIsNoOp(t *testing.T) {
 	dir := initRepoWithBranch(t, "feature-1", "feature.txt", "feature\n")
 	wt := makeWorktree(t, dir, "feature-1")
 
-	coord := NewCoordinator(dir, &Lock{}, Config{}, nil, nil, nil)
+	coord := NewCoordinator(dir, &Lock{}, Config{}, nil, nil, nil, nil, nil)
 
 	tk := &task.Task{ID: 1, Title: "test", Branch: "feature-1", Worktree: true, WorktreePath: wt}
 	if err := coord.Finalize(context.Background(), tk, "main", ActionNone, nil); err != nil {
@@ -102,7 +104,7 @@ func TestFinalizeMergeHappyPath(t *testing.T) {
 	coord := NewCoordinator(
 		dir, &Lock{},
 		Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond},
-		nil, nil, recordCommit,
+		nil, nil, recordCommit, nil, nil,
 	)
 
 	tk := &task.Task{ID: 2, Title: "add feature", Branch: "feature-2", Worktree: true, WorktreePath: wt}
@@ -129,7 +131,7 @@ func TestFinalizeMergeHappyPath(t *testing.T) {
 // directly, so the daemon must never auto-commit or auto-merge.
 func TestFinalizeNonWorktreeIsNoOp(t *testing.T) {
 	dir := initRepoWithBranch(t, "feature-nw", "f.txt", "x\n")
-	coord := NewCoordinator(dir, &Lock{}, Config{}, nil, nil, nil)
+	coord := NewCoordinator(dir, &Lock{}, Config{}, nil, nil, nil, nil, nil)
 
 	tk := &task.Task{ID: 7, Title: "nw", Branch: "feature-nw", Worktree: false, WorktreePath: dir}
 	if err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil); err != nil {
@@ -181,7 +183,7 @@ func TestConcurrentFinalizesSerialize(t *testing.T) {
 			// MaxAttempts=2 so the second branch can rebase onto the
 			// fast-forwarded base before retrying its --ff-only merge.
 			Config{MaxAttempts: 2, BlockedPollInterval: 10 * time.Millisecond},
-			nil, nil, nil,
+			nil, nil, nil, nil, nil,
 		)
 	}
 
@@ -249,7 +251,7 @@ func TestConcurrentFinalizesActuallyTakeLock(t *testing.T) {
 	coord := NewCoordinator(
 		dir, lock,
 		Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond},
-		nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 
 	// Hold the lock from the test side.
@@ -316,7 +318,7 @@ func TestCleanupOnConflictResolverFailure(t *testing.T) {
 	coord := NewCoordinator(
 		dir, &Lock{},
 		Config{MaxAttempts: 2, BlockedPollInterval: 10 * time.Millisecond},
-		resolver, nil, nil,
+		resolver, nil, nil, nil, nil,
 	)
 
 	tk := &task.Task{ID: 30, Title: "conflicting feature", Branch: "feat", Worktree: true, WorktreePath: wt}
@@ -407,7 +409,7 @@ func TestResolvingConflictsStatusReportedDuringResolver(t *testing.T) {
 	coord := NewCoordinator(
 		dir, &Lock{},
 		Config{MaxAttempts: 2, BlockedPollInterval: 10 * time.Millisecond},
-		resolver, setStatus, nil,
+		resolver, setStatus, nil, nil, nil,
 	)
 
 	tk := &task.Task{
@@ -455,7 +457,7 @@ func TestCleanupOnTargetBranchWaitCancellation(t *testing.T) {
 	wt := makeWorktree(t, dir, "feat-cancel")
 
 	statusUpdates := make(chan task.Status, 4)
-	setStatus := func(taskID int64, status task.Status) error {
+	setStatusDetail := func(taskID int64, status task.Status, detail string) error {
 		statusUpdates <- status
 		return nil
 	}
@@ -463,7 +465,7 @@ func TestCleanupOnTargetBranchWaitCancellation(t *testing.T) {
 	coord := NewCoordinator(
 		dir, &Lock{},
 		Config{MaxAttempts: 1, BlockedPollInterval: 20 * time.Millisecond},
-		nil, setStatus, nil,
+		nil, nil, nil, setStatusDetail, nil,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -498,6 +500,231 @@ func TestCleanupOnTargetBranchWaitCancellation(t *testing.T) {
 	// no MERGE_HEAD was left behind.
 	if _, err := os.Stat(filepath.Join(dir, ".git", "MERGE_HEAD")); !os.IsNotExist(err) {
 		t.Fatal("MERGE_HEAD left behind after cancelled target-clean wait")
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "dirty.txt")); err != nil || string(got) != "dirt\n" {
+		t.Fatalf("dirty.txt not preserved after cancelled wait: %q, %v", got, err)
+	}
+}
+
+// TestCleanTargetTimeoutKeepsDirtyFiles verifies that a timed-out clean-target
+// wait fails with ErrTargetDirtyTimeout naming the blocking paths and leaves
+// the user's uncommitted changes (untracked and modified-tracked) intact.
+func TestCleanTargetTimeoutKeepsDirtyFiles(t *testing.T) {
+	dir := initRepoWithBranch(t, "feat-timeout", "x.txt", "x\n")
+	if err := os.WriteFile(filepath.Join(dir, "scratch.txt"), []byte("scratch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("edited\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	wt := makeWorktree(t, dir, "feat-timeout")
+
+	coord := NewCoordinator(
+		dir, &Lock{},
+		Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond, CleanTargetTimeout: 50 * time.Millisecond},
+		nil, nil, nil, nil, nil,
+	)
+
+	tk := &task.Task{ID: 41, Title: "timeout", Branch: "feat-timeout", Worktree: true, WorktreePath: wt}
+	err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil)
+	if !errors.Is(err, ErrTargetDirtyTimeout) {
+		t.Fatalf("expected ErrTargetDirtyTimeout, got: %v", err)
+	}
+	for _, want := range []string{"waiting for clean target branch", "?? scratch.txt", "M README.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+
+	if got, _ := os.ReadFile(filepath.Join(dir, "scratch.txt")); string(got) != "scratch\n" {
+		t.Errorf("untracked scratch.txt not preserved: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(got) != "edited\n" {
+		t.Errorf("modified README.md not preserved: %q", got)
+	}
+}
+
+// TestCleanTargetIgnorePathsDoNotBlock verifies that changes matching
+// Config.IgnorePaths do not block the merge and are left in place.
+func TestCleanTargetIgnorePathsDoNotBlock(t *testing.T) {
+	dir := initRepoWithBranch(t, "feat-ignore", "x.txt", "x\n")
+	if err := os.MkdirAll(filepath.Join(dir, "scratch"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scratch", "notes.md"), []byte("notes\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	wt := makeWorktree(t, dir, "feat-ignore")
+
+	var writes []task.Status
+	coord := NewCoordinator(
+		dir, &Lock{},
+		Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond, CleanTargetTimeout: 50 * time.Millisecond, IgnorePaths: []string{"scratch/**"}},
+		nil, nil, nil,
+		func(id int64, status task.Status, detail string) error {
+			writes = append(writes, status)
+			return nil
+		},
+		nil,
+	)
+
+	tk := &task.Task{ID: 42, Title: "ignore", Branch: "feat-ignore", Worktree: true, WorktreePath: wt}
+	if err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if len(writes) != 0 {
+		t.Errorf("ignored changes produced status writes %v", writes)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "x.txt")); err != nil {
+		t.Errorf("task branch was not merged: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "scratch", "notes.md")); string(got) != "notes\n" {
+		t.Errorf("ignored scratch/notes.md not preserved: %q", got)
+	}
+}
+
+// statusWrite is one recorded StatusDetailSetter call.
+type statusWrite struct {
+	status task.Status
+	detail string
+}
+
+// newDirtyCoordinator builds a fake-backed Coordinator whose ChangedPaths
+// returns the scripted results in order (the last one repeats), recording
+// every status-detail write and onBlocked call.
+func newDirtyCoordinator(cfg Config, script ...[]string) (*Coordinator, *fakeGitRepo, *[]statusWrite, *[][]string) {
+	fake := &fakeGitRepo{root: "/fake/repo", changedScript: script}
+	var writes []statusWrite
+	var blocked [][]string
+	coord := newCoordinator(
+		fake, &Lock{}, cfg, nil, nil, nil,
+		func(id int64, status task.Status, detail string) error {
+			writes = append(writes, statusWrite{status, detail})
+			return nil
+		},
+		func(tk *task.Task, paths []string) {
+			blocked = append(blocked, paths)
+		},
+	)
+	return coord, fake, &writes, &blocked
+}
+
+func TestWaitForCleanTargetBlockedThenClean(t *testing.T) {
+	coord, fake, writes, blocked := newDirtyCoordinator(
+		Config{MaxAttempts: 1, BlockedPollInterval: time.Millisecond},
+		[]string{"?? scratch.txt"}, []string{"?? scratch.txt"}, []string{"?? scratch.txt"}, nil,
+	)
+
+	tk := &task.Task{ID: 1, Title: "t", Branch: "b", Worktree: true, WorktreePath: "/fake/wt", Status: task.StatusFinalizing}
+	if err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	want := []statusWrite{
+		{task.StatusMergeBlocked, "target checkout has uncommitted changes: ?? scratch.txt"},
+		{task.StatusFinalizing, ""},
+	}
+	if !slices.Equal(*writes, want) {
+		t.Errorf("status writes = %v, want %v", *writes, want)
+	}
+	if len(*blocked) != 1 {
+		t.Errorf("onBlocked called %d times, want 1", len(*blocked))
+	}
+	if tk.Status != task.StatusFinalizing {
+		t.Errorf("task status = %s, want restored finalizing", tk.Status)
+	}
+	if fake.mergeCalls != 1 {
+		t.Errorf("merge did not proceed after the target became clean")
+	}
+}
+
+func TestWaitForCleanTargetRewritesDetailOnChange(t *testing.T) {
+	coord, _, writes, blocked := newDirtyCoordinator(
+		Config{MaxAttempts: 1, BlockedPollInterval: time.Millisecond},
+		[]string{"?? a.txt"}, []string{"?? a.txt"}, []string{"?? a.txt", "M b.md"}, nil,
+	)
+
+	tk := &task.Task{ID: 1, Branch: "b", Worktree: true, WorktreePath: "/fake/wt", Status: task.StatusFinalizing}
+	if err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	want := []statusWrite{
+		{task.StatusMergeBlocked, "target checkout has uncommitted changes: ?? a.txt"},
+		{task.StatusMergeBlocked, "target checkout has uncommitted changes: ?? a.txt, M b.md"},
+		{task.StatusFinalizing, ""},
+	}
+	if !slices.Equal(*writes, want) {
+		t.Errorf("status writes = %v, want %v", *writes, want)
+	}
+	if len(*blocked) != 1 {
+		t.Errorf("onBlocked called %d times, want 1", len(*blocked))
+	}
+}
+
+func TestWaitForCleanTargetCleanFromStart(t *testing.T) {
+	coord, fake, writes, blocked := newDirtyCoordinator(Config{MaxAttempts: 1}, nil)
+
+	tk := &task.Task{ID: 1, Branch: "b", Worktree: true, WorktreePath: "/fake/wt", Status: task.StatusFinalizing}
+	if err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if len(*writes) != 0 || len(*blocked) != 0 {
+		t.Errorf("clean target produced status writes %v / onBlocked %v", *writes, *blocked)
+	}
+	if fake.mergeCalls != 1 {
+		t.Errorf("merge did not run")
+	}
+}
+
+func TestWaitForCleanTargetTimeoutSkipsCleanup(t *testing.T) {
+	coord, fake, _, blocked := newDirtyCoordinator(
+		Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond, CleanTargetTimeout: 50 * time.Millisecond},
+		[]string{"?? scratch.txt"},
+	)
+
+	tk := &task.Task{ID: 1, Branch: "b", Worktree: true, WorktreePath: "/fake/wt"}
+	err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil)
+	if !errors.Is(err, ErrTargetDirtyTimeout) || !strings.Contains(err.Error(), "?? scratch.txt") {
+		t.Fatalf("expected ErrTargetDirtyTimeout naming the path, got: %v", err)
+	}
+	if fake.cleanCalls != 0 {
+		t.Errorf("CleanRepoState ran %d times after a clean-target timeout", fake.cleanCalls)
+	}
+	if fake.mergeCalls != 0 {
+		t.Errorf("merge ran despite timeout")
+	}
+	if len(*blocked) != 1 {
+		t.Errorf("onBlocked called %d times, want 1", len(*blocked))
+	}
+}
+
+func TestWaitForCleanTargetZeroTimeoutWaitsForCancel(t *testing.T) {
+	coord, fake, _, _ := newDirtyCoordinator(
+		Config{MaxAttempts: 1, BlockedPollInterval: time.Millisecond},
+		[]string{"?? scratch.txt"},
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	tk := &task.Task{ID: 1, Branch: "b", Worktree: true, WorktreePath: "/fake/wt"}
+	err := coord.Finalize(ctx, tk, "main", ActionMerge, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected ctx error, got: %v", err)
+	}
+	if fake.cleanCalls != 0 {
+		t.Errorf("CleanRepoState ran %d times after a cancelled wait", fake.cleanCalls)
+	}
+}
+
+func TestBlockedDetailTruncatesPaths(t *testing.T) {
+	var paths []string
+	for i := 0; i < 13; i++ {
+		paths = append(paths, fmt.Sprintf("?? f%d", i))
+	}
+	got := blockedDetail(paths)
+	if !strings.HasSuffix(got, "?? f9, and 3 more") || strings.Contains(got, "f10") {
+		t.Errorf("unexpected truncated detail: %q", got)
 	}
 }
 
@@ -555,7 +782,7 @@ func TestCommitActionSkipsMergeMutex(t *testing.T) {
 	coord := NewCoordinator(
 		dir, lock,
 		Config{},
-		nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 
 	done := make(chan error, 1)
@@ -600,13 +827,23 @@ type fakeGitRepo struct {
 	continueRebaseCalls int
 
 	lastCommitHash string
+
+	// changedScript is returned by successive ChangedPaths calls; the last
+	// entry repeats. Empty means always clean.
+	changedScript [][]string
+	changedCalls  int
+
+	cleanCalls int
 }
 
 func (f *fakeGitRepo) Root() string { return f.root }
 
 func (f *fakeGitRepo) Commit(worktreePath, message string) error { return nil }
 
-func (f *fakeGitRepo) CleanRepoState() error { return nil }
+func (f *fakeGitRepo) CleanRepoState() error {
+	f.cleanCalls++
+	return nil
+}
 
 func (f *fakeGitRepo) MergeBranch(branch, baseBranch string) error {
 	f.mergeCalls++
@@ -638,6 +875,15 @@ func (f *fakeGitRepo) ContinueRebase(worktreePath string) error {
 }
 
 func (f *fakeGitRepo) HasChanges() (bool, error) { return false, nil }
+
+func (f *fakeGitRepo) ChangedPaths(ignore []string) ([]string, error) {
+	if len(f.changedScript) == 0 {
+		return nil, nil
+	}
+	i := min(f.changedCalls, len(f.changedScript)-1)
+	f.changedCalls++
+	return f.changedScript[i], nil
+}
 
 func (f *fakeGitRepo) GetLastCommitHash(dir string) (string, error) {
 	return f.lastCommitHash, nil
@@ -675,7 +921,7 @@ func TestFinalizeMergeWithFakeConflictThenSuccess(t *testing.T) {
 	coord := newCoordinator(
 		fake, &Lock{},
 		Config{MaxAttempts: 2, BlockedPollInterval: 10 * time.Millisecond},
-		resolver, nil, recordCommit,
+		resolver, nil, recordCommit, nil, nil,
 	)
 
 	tk := &task.Task{ID: 99, Title: "fake test", Branch: "feature-x", Worktree: true, WorktreePath: "/fake/worktree"}

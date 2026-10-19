@@ -36,6 +36,7 @@ func defaultConfig() *Config {
 			OnComplete:     false,
 			OnFailed:       false,
 			OnWaitingInput: false,
+			OnMergeBlocked: false,
 		},
 		Options: OptionsConfig{
 			Animation: &AnimationConfig{
@@ -76,6 +77,34 @@ func applyTmuxConfig(cfg *Config, t *TmuxConfig) error {
 			return fmt.Errorf("invalid tmux.max_live_sessions %d: must not be negative", *t.MaxLiveSessions)
 		}
 		cfg.TmuxMaxLiveSessions = *t.MaxLiveSessions
+	}
+	return nil
+}
+
+// applyMergeConfig merges one tier's merge: block into the resolved config,
+// per field like applyTmuxConfig: a non-empty clean_target_timeout overrides
+// and a non-empty ignore_paths replaces the inherited list.
+func applyMergeConfig(cfg *Config, m *MergeConfig) error {
+	if m == nil {
+		return nil
+	}
+	if m.CleanTargetTimeout != "" {
+		d, err := time.ParseDuration(m.CleanTargetTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid merge.clean_target_timeout %q: %w", m.CleanTargetTimeout, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("invalid merge.clean_target_timeout %q: must not be negative", m.CleanTargetTimeout)
+		}
+		cfg.MergeCleanTargetTimeout = d
+	}
+	for i, p := range m.IgnorePaths {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("invalid merge.ignore_paths[%d]: pattern must not be empty", i)
+		}
+	}
+	if len(m.IgnorePaths) > 0 {
+		cfg.MergeIgnorePaths = m.IgnorePaths
 	}
 	return nil
 }
@@ -264,6 +293,9 @@ func loadGlobalConfig(path string, cfg *Config) error {
 	if err := applyTmuxConfig(cfg, global.Tmux); err != nil {
 		return err
 	}
+	if err := applyMergeConfig(cfg, global.Merge); err != nil {
+		return err
+	}
 	if global.Options != nil {
 		override(&cfg.Options.Number, global.Options.Number)
 		override(&cfg.Options.Branch, global.Options.Branch)
@@ -333,6 +365,9 @@ func loadProjectConfig(path string, cfg *Config) error {
 	overrideFromPtr(&cfg.MergeConflicts, proj.MergeConflicts)
 	overrideFromPtr(&cfg.Summarizer, proj.Summarizer)
 	if err := applyTmuxConfig(cfg, proj.Tmux); err != nil {
+		return err
+	}
+	if err := applyMergeConfig(cfg, proj.Merge); err != nil {
 		return err
 	}
 	if proj.Options != nil {

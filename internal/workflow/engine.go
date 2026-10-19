@@ -80,12 +80,28 @@ func NewEngine(cfg *config.Config, database taskStore, notifier *notify.Notifier
 	e.coord = merge.NewCoordinator(
 		repoRoot,
 		lk,
-		merge.Config{},
+		merge.Config{
+			CleanTargetTimeout: cfg.MergeCleanTargetTimeout,
+			IgnorePaths:        cfg.MergeIgnorePaths,
+		},
 		e.bindConflictResolver(),
 		database.UpdateTaskStatus,
 		database.AppendTaskCommit,
+		database.UpdateTaskStatusError,
+		e.notifyMergeBlocked,
 	)
 	return e
+}
+
+// notifyMergeBlocked posts the desktop notification for a task entering
+// merge-blocked.
+func (e *Engine) notifyMergeBlocked(t *task.Task, paths []string) {
+	if e.notifier == nil {
+		return
+	}
+	if err := e.notifier.MergeBlocked(t.ID, t.Title, paths); err != nil {
+		log.Printf("Warning: merge-blocked notification for task #%d failed: %v", t.ID, err)
+	}
 }
 
 // Coord returns the engine's merge coordinator. The daemon uses it to take the

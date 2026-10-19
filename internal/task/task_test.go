@@ -77,6 +77,14 @@ func TestStatusMergeFailed_DistinctFromCompletedAndFailed(t *testing.T) {
 	}
 }
 
+// A merge-blocked task has not touched the base repo; its dirty state is
+// someone else's uncommitted work, which the startup sweep must not reset.
+func TestStatusMergeBlocked_NotDirtyRepoState(t *testing.T) {
+	if StatusMergeBlocked.MayHaveDirtyRepoState() {
+		t.Error("StatusMergeBlocked.MayHaveDirtyRepoState() = true, want false")
+	}
+}
+
 func TestStatus_IsAwaitingChildren(t *testing.T) {
 	tests := []struct {
 		status Status

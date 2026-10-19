@@ -165,8 +165,10 @@ func (s *Server) recoverOrphanedTasks() error {
 
 	// Clean repo state for any projects whose tasks may have been mid-mutation
 	// when the daemon was killed. Running tasks could have been in any step;
-	// finalizing / merge-blocked tasks were specifically inside the on_complete
-	// pipeline and may have left staged conflict markers on the base branch.
+	// finalizing tasks were specifically inside the on_complete pipeline and
+	// may have left staged conflict markers on the base branch. Merge-blocked
+	// tasks are skipped: they never touched the base repo, and its dirty state
+	// is someone else's uncommitted work.
 	// The deferred CleanRepoState in merge.Coordinator only fires on Go-return,
 	// so killed processes need this top-level sweep before any recovery agent
 	// restarts touch the repo.

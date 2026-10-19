@@ -111,6 +111,23 @@ type ProjectConfig struct {
 	Periodic []PeriodicEntry `yaml:"periodic,omitempty"`
 	// Tmux configures tmux session hibernation. See TmuxConfig.
 	Tmux *TmuxConfig `yaml:"tmux,omitempty"`
+	// Merge configures the clean-target wait of the merge pipeline. See
+	// MergeConfig.
+	Merge *MergeConfig `yaml:"merge,omitempty"`
+}
+
+// MergeConfig is the top-level merge: block governing how a merge waits for
+// the target repo's main checkout to be clean. Merged per field across tiers.
+type MergeConfig struct {
+	// CleanTargetTimeout fails the merge (merge-failed, worktree kept) when
+	// the target checkout is still dirty this long after the task entered
+	// merge-blocked. Parsed with time.ParseDuration. Empty inherits the lower
+	// tier; "0" waits forever.
+	CleanTargetTimeout string `yaml:"clean_target_timeout,omitempty"`
+	// IgnorePaths are git glob pathspecs, relative to the repo root, whose
+	// changes do not count as a dirty target checkout. A non-empty list
+	// replaces the lower tier's.
+	IgnorePaths []string `yaml:"ignore_paths,omitempty"`
 }
 
 // TmuxConfig is the top-level tmux: block governing hibernation of idle
@@ -1021,6 +1038,7 @@ type GlobalConfig struct {
 	MergeConflicts           *MergeConflictsConfig  `yaml:"merge_conflicts,omitempty"`
 	Summarizer               *SummarizerConfig      `yaml:"summarizer,omitempty"`
 	Tmux                     *TmuxConfig            `yaml:"tmux,omitempty"`
+	Merge                    *MergeConfig           `yaml:"merge,omitempty"`
 }
 
 type NotificationsConfig struct {
@@ -1028,6 +1046,7 @@ type NotificationsConfig struct {
 	OnComplete     bool `yaml:"on_complete"`
 	OnFailed       bool `yaml:"on_failed"`
 	OnWaitingInput bool `yaml:"on_waiting_input"`
+	OnMergeBlocked bool `yaml:"on_merge_blocked"`
 }
 
 // CommandsConfig is used during init for project detection
@@ -1094,6 +1113,13 @@ type Config struct {
 	// TmuxMaxLiveSessions is the resolved tmux.max_live_sessions soft cap
 	// (0 = cap disabled).
 	TmuxMaxLiveSessions int
+
+	// MergeCleanTargetTimeout is the resolved merge.clean_target_timeout
+	// (0 = wait forever).
+	MergeCleanTargetTimeout time.Duration
+
+	// MergeIgnorePaths is the resolved merge.ignore_paths.
+	MergeIgnorePaths []string
 
 	// From global config
 	Notifications            NotificationsConfig

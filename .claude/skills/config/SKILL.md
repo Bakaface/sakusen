@@ -47,6 +47,7 @@ type ProjectConfig struct {
     Notifications            *NotificationsConfig
     TmuxNestedAttachBehavior string                  // "switch" (default) or "nest"
     Options                  *OptionsConfig          // TUI display options
+    Merge                    *MergeConfig            // clean_target_timeout, ignore_paths (per-field merge, applyMergeConfig)
 }
 ```
 
