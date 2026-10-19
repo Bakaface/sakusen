@@ -46,10 +46,25 @@ func (s *Server) checkPendingTasks() {
 		return
 	}
 
+	claimable := make(map[int64]bool, len(tasks))
 	for _, t := range tasks {
+		claimable[t.ID] = true
 		if s.manager.IsTaskKnown(t.ID) {
 			continue
 		}
+
+		// Evaluated per candidate against fresh DB state, so a task claimed
+		// earlier in this loop already counts as a holder.
+		holder, err := s.workdirHolder(t)
+		if err != nil {
+			log.Printf("%sFailed to check working tree for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+			continue
+		}
+		if holder != nil {
+			s.noteWorkdirWait(t, holder)
+			continue
+		}
+		s.clearWorkdirWait(t)
 
 		title := t.Title
 		if title == "" {
@@ -60,6 +75,75 @@ func (s *Server) checkPendingTasks() {
 			log.Printf("%sFailed to start agent for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 		}
 	}
+
+	s.workdirMu.Lock()
+	for id := range s.workdirWaits {
+		if !claimable[id] {
+			delete(s.workdirWaits, id)
+		}
+	}
+	s.workdirMu.Unlock()
+}
+
+// workdirHolder returns the task occupying t's working tree when t must wait
+// for it, or nil. Only worktree:false tasks whose workflow sets
+// exclusive_workdir wait; any other active worktree:false task of the same
+// project holds the project root, whether or not it opted in.
+func (s *Server) workdirHolder(t *task.Task) (*task.Task, error) {
+	if t.Worktree {
+		return nil, nil
+	}
+	// A project that fails to load is left to startTaskAgent to report, so
+	// tasks that never opted in are not held back by the gate.
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		return nil, nil
+	}
+	if wf := pc.cfg.GetWorkflow(t.Workflow); wf == nil || !wf.ExclusiveWorkdir {
+		return nil, nil
+	}
+	active, err := s.database.GetActiveNonWorktreeTasks(t.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, other := range active {
+		if other.ID != t.ID {
+			return other, nil
+		}
+	}
+	return nil, nil
+}
+
+// noteWorkdirWait records that t is waiting on holder, logging and
+// broadcasting only when the wait starts or the holder changes.
+func (s *Server) noteWorkdirWait(t, holder *task.Task) {
+	s.workdirMu.Lock()
+	prev, waiting := s.workdirWaits[t.ID]
+	s.workdirWaits[t.ID] = holder.ID
+	s.workdirMu.Unlock()
+	if waiting && prev == holder.ID {
+		return
+	}
+	log.Printf("%sTask #%d: waiting for working tree, held by task #%d (%s)", s.projectLogPrefix(t.ProjectID), t.ID, holder.ID, holder.Status)
+	s.broadcastTaskUpdate(t.ID)
+}
+
+// clearWorkdirWait drops t's wait entry, logging if it had been waiting.
+func (s *Server) clearWorkdirWait(t *task.Task) {
+	s.workdirMu.Lock()
+	_, waiting := s.workdirWaits[t.ID]
+	delete(s.workdirWaits, t.ID)
+	s.workdirMu.Unlock()
+	if waiting {
+		log.Printf("%sTask #%d: working tree free, starting", s.projectLogPrefix(t.ProjectID), t.ID)
+	}
+}
+
+// workdirHeldBy returns the holder ID recorded for a waiting task, or 0.
+func (s *Server) workdirHeldBy(taskID int64) int64 {
+	s.workdirMu.Lock()
+	defer s.workdirMu.Unlock()
+	return s.workdirWaits[taskID]
 }
 
 // checkSuspendedParents promotes tasks in StatusAwaitingChildren back to

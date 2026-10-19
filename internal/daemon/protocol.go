@@ -611,6 +611,9 @@ type TaskInfo struct {
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	TmuxActivity string     `json:"tmux_activity,omitempty"`
+	// WorkdirHeldBy is the ID of the task occupying the project root while
+	// this pending exclusive_workdir task waits for it; 0 when not waiting.
+	WorkdirHeldBy int64 `json:"workdir_held_by,omitempty"`
 	// StepHuman reflects the Human flag on the workflow step that the task is
 	// currently paused at (when Status is "tmux" or "awaiting-approval").
 	// Used by the TUI to surface the "real" underlying state of a tmux task —

@@ -87,6 +87,14 @@ shortcuts: when `worktree: false` is pinned, `input` alone suffices (the git fie
 workflows whose **first step resolves to a tmux-mode agent** may be created without an input
 at all — the user drives the session interactively.
 
+**Working-tree lock.** `exclusive_workdir: true` (not a pin) makes a `worktree: false` task of
+this workflow stay `pending` while any other active `worktree: false` task of the same project
+(running, paused for approval, a live or hibernated tmux session, ...) is using the project
+root. It starts on the next poll after the holder finishes; the TUI shows
+`pending (workdir busy #N)`. The lock is one-sided — holders need not set the flag — and it is
+a no-op for tasks running in their own worktree. Inline `periodic:` entries accept the same
+key; in ref mode the referenced workflow's own setting applies.
+
 `description` is separate human-readable metadata (workflow picker, MCP `list_workflows`) and
 is **never** a pin.
 

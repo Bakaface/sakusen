@@ -196,6 +196,10 @@ type PeriodicEntry struct {
 	Checkout string `yaml:"checkout,omitempty"`
 	Target   string `yaml:"target,omitempty"`
 
+	// ExclusiveWorkdir is the inline-workflow working-tree lock (see
+	// WorkflowConfig.ExclusiveWorkdir). Ignored in ref mode.
+	ExclusiveWorkdir bool `yaml:"exclusive_workdir,omitempty"`
+
 	// Input becomes the task input ({{task.input}}) for each fire. Optional —
 	// when empty, no step prompt of the effective workflow may reference
 	// {{task.input}} (enforced in validation).
@@ -398,6 +402,13 @@ type WorkflowConfig struct {
 	Branch   string `yaml:"branch,omitempty"`
 	Checkout string `yaml:"checkout,omitempty"`
 	Target   string `yaml:"target,omitempty"`
+
+	// ExclusiveWorkdir opts worktree:false tasks of this workflow into the
+	// working-tree lock: such a task stays pending while any other active
+	// worktree:false task of the same project occupies the project root. The
+	// lock is one-sided (holders need not opt in) and a no-op for tasks that
+	// run in their own worktree.
+	ExclusiveWorkdir bool `yaml:"exclusive_workdir,omitempty"`
 
 	// Agent, when non-empty, is the agent slug every step of this workflow
 	// runs with unless the step sets its own `agent:`. Resolution cascade:

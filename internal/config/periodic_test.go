@@ -458,3 +458,63 @@ periodic:
 		t.Fatalf("expected branch/checkout conflict error, got: %v", err)
 	}
 }
+
+func TestExclusiveWorkdir_ParsesOnWorkflowAndInlinePeriodic(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := writeTempConfig(t, `
+workflows:
+  - name: default
+    worktree: false
+    exclusive_workdir: true
+    steps:
+      - name: implementing
+        prompt: "do the thing"
+periodic:
+  - name: sync
+    cadence: "0 3 * * *"
+    worktree: false
+    exclusive_workdir: true
+    steps:
+      - name: run
+        prompt: "sync"
+`)
+	if err := ValidateFile(path); err != nil {
+		t.Fatalf("ValidateFile rejected exclusive_workdir: %v", err)
+	}
+	cfg, err := LoadForProject(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if !cfg.GetWorkflow("default").ExclusiveWorkdir {
+		t.Error("exclusive_workdir not parsed on workflow")
+	}
+	wf := cfg.GetWorkflow("periodic:sync")
+	if wf == nil || !wf.ExclusiveWorkdir {
+		t.Fatalf("exclusive_workdir not copied onto periodic:sync: %+v", wf)
+	}
+}
+
+func TestExclusiveWorkdir_RefModeIgnoresEntryFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := writeTempConfig(t, `
+workflows:
+  - name: default
+    steps:
+      - name: implementing
+        prompt: "do the thing"
+periodic:
+  - name: nightly
+    cadence: "0 3 * * *"
+    workflow: default
+    exclusive_workdir: true
+`)
+	cfg, err := LoadForProject(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if cfg.GetWorkflow("default").ExclusiveWorkdir {
+		t.Error("ref-mode entry flag must not leak onto the referenced workflow")
+	}
+}

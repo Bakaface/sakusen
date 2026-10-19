@@ -104,6 +104,12 @@ type Server struct {
 	taskFlowMu    sync.Mutex
 	taskFlowLocks map[int64]*sync.Mutex
 
+	// workdirWaits maps a pending exclusive_workdir task → the task ID holding
+	// its working tree (see workdirHolder). Guarded by workdirMu. Transient:
+	// it only dedupes the wait log and feeds TaskInfo.WorkdirHeldBy.
+	workdirMu    sync.Mutex
+	workdirWaits map[int64]int64
+
 	// periodicMu guards periodicReconciled.
 	periodicMu sync.Mutex
 	// periodicReconciled maps projectID → the .sakusen.yml mod-time at the last
@@ -180,6 +186,7 @@ func NewServer(cfg *config.Config, database taskStore) *Server {
 		enginePaused:       make(map[int64]bool),
 		taskFlowLocks:      make(map[int64]*sync.Mutex),
 		periodicReconciled: make(map[int64]time.Time),
+		workdirWaits:       make(map[int64]int64),
 		ctx:                ctx,
 		cancel:             cancel,
 		shutdownDone:       make(chan struct{}),

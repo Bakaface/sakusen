@@ -41,6 +41,7 @@ type taskStore interface {
 	GetRunningTasks() ([]*task.Task, error)
 	GetClaimableTasks() ([]*task.Task, error)
 	GetTasksByProject(projectID int64) ([]*task.Task, error)
+	GetActiveNonWorktreeTasks(projectID int64) ([]*task.Task, error)
 	GetTasksByProjectName(name string) ([]*task.Task, error)
 	ClaimTask(id int64) (bool, error)
 	DeleteTask(id int64) error

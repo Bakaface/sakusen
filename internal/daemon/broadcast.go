@@ -442,6 +442,10 @@ func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 		}
 	}
 
+	if t.Status == task.StatusPending {
+		info.WorkdirHeldBy = s.workdirHeldBy(t.ID)
+	}
+
 	if proj, err := s.database.GetProject(t.ProjectID); err == nil {
 		info.ProjectName = proj.Name
 		info.ProjectPath = proj.Path

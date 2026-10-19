@@ -190,6 +190,35 @@ func (db *DB) GetTasksByProjectName(name string) ([]*task.Task, error) {
 	return tasks, nil
 }
 
+// GetActiveNonWorktreeTasks returns the project's worktree:false tasks that
+// have been claimed and are not yet terminal (task.Status.IsActive()), oldest
+// first. These are the tasks occupying the project root.
+func (db *DB) GetActiveNonWorktreeTasks(projectID int64) ([]*task.Task, error) {
+	rows, err := db.sqlDB.Query(fmt.Sprintf(`
+		SELECT %s FROM tasks
+		WHERE project_id = ? AND worktree = 0
+		AND status NOT IN (?, ?, ?, ?, ?)
+		ORDER BY id ASC
+	`, taskColumns), projectID,
+		task.StatusPending, task.StatusInit, task.StatusCompleted, task.StatusFailed, task.StatusMergeFailed)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tasks, err := scanTasks(rows)
+	if err != nil {
+		return nil, err
+	}
+	active := tasks[:0]
+	for _, t := range tasks {
+		if t.Status.IsActive() {
+			active = append(active, t)
+		}
+	}
+	return active, nil
+}
+
 func (db *DB) getTasksByStatus(status task.Status) ([]*task.Task, error) {
 	rows, err := db.sqlDB.Query(fmt.Sprintf(`
 		SELECT %s FROM tasks WHERE status = ? ORDER BY id ASC
