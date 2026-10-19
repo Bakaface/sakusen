@@ -924,23 +924,10 @@ func (s *Server) shutdown() {
 	if s.database != nil {
 		runningTasks, err := s.database.GetRunningTasks()
 		if err == nil {
-			// Collect repo roots that may have in-progress merges
-			dirtyRepoRoots := make(map[string]bool)
 			for _, t := range runningTasks {
 				log.Printf("%sMarking task #%d as failed (daemon shutdown)", s.projectLogPrefix(t.ProjectID), t.ID)
 				if err := s.database.UpdateTaskError(t.ID, "daemon shutdown"); err != nil {
 					log.Printf("%sFailed to mark task #%d as failed: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-				}
-				if repoRoot := s.getProjectRepoRoot(t); repoRoot != "" {
-					dirtyRepoRoots[repoRoot] = true
-				}
-			}
-			// Clean up any staged changes left by interrupted merges
-			for repoRoot := range dirtyRepoRoots {
-				if err := gitpkg.NewRepo(repoRoot).CleanRepoState(); err != nil {
-					log.Printf("Warning: failed to clean repo state for %s on shutdown: %v", repoRoot, err)
-				} else {
-					log.Printf("Cleaned repo state for %s on shutdown", repoRoot)
 				}
 			}
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/Bakaface/sakusen/internal/tmux"
 )
 
@@ -134,5 +135,52 @@ func TestKillTaskSessionsSparesForeignSessions(t *testing.T) {
 	}
 	if !foreignSession.Exists() {
 		t.Errorf("session %s is not a sakusen task session and must survive shutdown", foreignSession.Name)
+	}
+}
+
+// TestShutdownPreservesMainCheckoutEdits verifies that shutting down with a
+// running task marks it failed but leaves uncommitted user edits in its
+// project's main checkout untouched.
+func TestShutdownPreservesMainCheckoutEdits(t *testing.T) {
+	repoDir := initRecoveryTestRepo(t)
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	// No defer database.Close() — shutdown() owns closing it.
+
+	s := NewServer(&config.Config{}, database)
+
+	proj, err := database.GetOrCreateProject(repoDir)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	tk, err := database.CreateTaskWithPriority(
+		proj.ID, "Running task", "desc", "slug", "default", "", "branch", "", "",
+		task.StatusRunning, task.PriorityMedium, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	writeUserEdits(t, repoDir)
+
+	s.Shutdown()
+
+	assertUserEditsIntact(t, repoDir)
+
+	reopened, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer reopened.Close()
+	got, err := reopened.GetTask(tk.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Status != task.StatusFailed {
+		t.Errorf("status = %s, want %s", got.Status, task.StatusFailed)
 	}
 }

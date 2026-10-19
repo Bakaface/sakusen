@@ -10,7 +10,6 @@ import (
 	"github.com/Bakaface/sakusen/internal/agent"
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
-	gitpkg "github.com/Bakaface/sakusen/internal/git"
 	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/Bakaface/sakusen/internal/tmux"
 	"github.com/Bakaface/sakusen/internal/workflow"
@@ -161,32 +160,6 @@ func (s *Server) recoverOrphanedTasks() error {
 	allTasks, err := s.database.GetAllTasks()
 	if err != nil {
 		return err
-	}
-
-	// Clean repo state for any projects whose tasks may have been mid-mutation
-	// when the daemon was killed. Running tasks could have been in any step;
-	// finalizing / merge-blocked tasks were specifically inside the on_complete
-	// pipeline and may have left staged conflict markers on the base branch.
-	// The deferred CleanRepoState in merge.Coordinator only fires on Go-return,
-	// so killed processes need this top-level sweep before any recovery agent
-	// restarts touch the repo.
-	cleanedRepos := make(map[string]bool)
-	for _, t := range allTasks {
-		if !t.Status.MayHaveDirtyRepoState() {
-			continue
-		}
-		repoRoot := s.getProjectRepoRoot(t)
-		if repoRoot == "" || cleanedRepos[repoRoot] {
-			continue
-		}
-		cleanedRepos[repoRoot] = true
-		repo := gitpkg.NewRepo(repoRoot)
-		if dirty, err := repo.HasChanges(); err == nil && dirty {
-			log.Printf("Cleaning up dirty repo state at %s from previous run", repoRoot)
-			if err := repo.CleanRepoState(); err != nil {
-				log.Printf("Warning: failed to clean repo state at %s: %v", repoRoot, err)
-			}
-		}
 	}
 
 	var tmuxTasksToRestore []*task.Task

@@ -30,7 +30,7 @@ type Engine struct {
 	repoRoot string
 	repo     *gitpkg.Repo // git operations scoped to repoRoot / task worktrees
 	dataDir  string
-	coord    *merge.Coordinator // owns merge serialization, retry, and cleanup-on-failure
+	coord    *merge.Coordinator // owns merge serialization and retry
 
 	// runner is the AGENT-RUNNER seam: runStep calls it (instead of calling
 	// runHeadlessAgent directly) to execute a headless step's agent command,

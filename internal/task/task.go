@@ -57,26 +57,6 @@ func (s Status) IsActive() bool {
 	return s == StatusRunning || s == StatusAwaitingApproval || s == StatusAwaitingChildren || s == StatusTmux || s == StatusFinalizing || s == StatusSummarizing || s == StatusSummarizingStep || s == StatusMergeBlocked || s == StatusResolvingConflicts
 }
 
-// MayHaveDirtyRepoState reports whether an interrupted agent for a task in
-// this status could have left the git worktree/repo mid-mutation (e.g.
-// staged conflict markers on the base branch) — used by the daemon's
-// startup recovery sweep (recoverOrphanedTasks) to decide which repos need
-// a CleanRepoState() pass before any recovery agent restarts touch them.
-//
-// This is deliberately narrower than IsActive(): it excludes the pause
-// statuses (StatusAwaitingApproval, StatusAwaitingChildren, StatusTmux)
-// where no process was actively touching the repo when the daemon died, and
-// excludes StatusSummarizing, whose work happens after the merge has
-// already completed cleanly.
-func (s Status) MayHaveDirtyRepoState() bool {
-	switch s {
-	case StatusRunning, StatusSummarizingStep, StatusFinalizing, StatusMergeBlocked, StatusResolvingConflicts:
-		return true
-	default:
-		return false
-	}
-}
-
 type Priority string
 
 const (

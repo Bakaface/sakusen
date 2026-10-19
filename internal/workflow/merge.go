@@ -13,10 +13,10 @@ import (
 
 // executeOnComplete runs the configured on_complete action after all steps
 // finish. All the locality of the merge invariant — serialization, retry on
-// conflict, cleanup-on-failure, waiting for a clean target branch — lives in
-// internal/merge. This wrapper exists only because the engine still needs to
-// resolve the effective base branch and forward a log function; both are
-// engine-level concerns.
+// conflict, waiting for the main checkout to be clean and on the base branch
+// — lives in internal/merge. This wrapper exists only because the engine
+// still needs to resolve the effective base branch and forward a log
+// function; both are engine-level concerns.
 func (e *Engine) executeOnComplete(ctx context.Context, t *task.Task, _ func([]string), logFn func(string, ...any)) error {
 	return e.coord.Finalize(ctx, t, e.effectiveBaseBranch(t), e.effectiveOnComplete(t), logFn)
 }

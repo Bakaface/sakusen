@@ -283,15 +283,11 @@ func TestConcurrentFinalizesActuallyTakeLock(t *testing.T) {
 	}
 }
 
-// TestCleanupOnConflictResolverFailure verifies the "cleanup on failure"
-// invariant: when the merge pipeline fails *after* an attempted merge — here,
-// because the injected ConflictResolver fails — the base repo must end up in a
-// clean state (no staged conflict markers, no half-merged index).
-//
-// This is the regression that motivated this module. The previous code path
-// relied on internal/git's deferred CleanRepoState inside MergeBranch; a
-// failure outside MergeBranch (e.g. in the conflict resolver) could leave the
-// base repo dirty until the next daemon shutdown.
+// TestCleanupOnConflictResolverFailure verifies that when the merge pipeline
+// fails *after* an attempted merge — here, because the injected
+// ConflictResolver fails — the base repo is left clean (no staged conflict
+// markers, no half-merged index) without any reset: conflicts are resolved in
+// the task worktree and the fast-forward into base never half-applies.
 func TestCleanupOnConflictResolverFailure(t *testing.T) {
 	dir := initRepoWithBranch(t, "feat", "shared.txt", "from-feature\n")
 
@@ -338,12 +334,12 @@ func TestCleanupOnConflictResolverFailure(t *testing.T) {
 		t.Fatalf("HasChanges: %v", err)
 	} else if dirty {
 		out, _ := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput()
-		t.Fatalf("base repo dirty after merge failure — cleanup invariant broken:\n%s", out)
+		t.Fatalf("base repo dirty after merge failure:\n%s", out)
 	}
 
 	// And no in-progress merge marker on disk.
 	if _, err := os.Stat(filepath.Join(dir, ".git", "MERGE_HEAD")); !os.IsNotExist(err) {
-		t.Fatal("MERGE_HEAD still present after cleanup — merge was not aborted")
+		t.Fatal("MERGE_HEAD present after merge failure")
 	}
 }
 
@@ -441,12 +437,12 @@ func TestResolvingConflictsStatusReportedDuringResolver(t *testing.T) {
 }
 
 // TestCleanupOnTargetBranchWaitCancellation verifies that cancelling the
-// context while waiting for a clean target branch leaves the base repo clean
-// (no half-applied state).
+// context while merge-blocked on a dirty main checkout leaves the user's
+// changes there untouched and no half-applied merge behind.
 func TestCleanupOnTargetBranchWaitCancellation(t *testing.T) {
 	dir := initRepoWithBranch(t, "feat-cancel", "x.txt", "x\n")
 
-	// Dirty the base repo so waitForCleanTarget enters its polling loop.
+	// Dirty the base repo so waitForReadyTarget enters its polling loop.
 	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirt\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -492,13 +488,134 @@ func TestCleanupOnTargetBranchWaitCancellation(t *testing.T) {
 		t.Error("merge-blocked status never reported")
 	}
 
-	// `git add` left `dirty.txt` staged, so HasChanges *should* still report
-	// dirty — that's user state, not our state. What we care about is that
-	// the *feature* file (x.txt) and the staged dirty.txt are untouched, and
-	// no MERGE_HEAD was left behind.
+	if data, err := os.ReadFile(filepath.Join(dir, "dirty.txt")); err != nil || string(data) != "dirt\n" {
+		t.Errorf("user's dirty.txt lost after cancelled wait: %q, %v", data, err)
+	}
+	if out := gitOutput(t, dir, "status", "--porcelain"); out != "A  dirty.txt\n" {
+		t.Errorf("expected dirty.txt still staged and nothing else changed, got %q", out)
+	}
 	if _, err := os.Stat(filepath.Join(dir, ".git", "MERGE_HEAD")); !os.IsNotExist(err) {
 		t.Fatal("MERGE_HEAD left behind after cancelled target-clean wait")
 	}
+}
+
+// TestFinalizeWaitsWhileMainOnOtherBranch verifies that when the main checkout
+// is on another branch (or a detached HEAD) the merge waits in merge-blocked
+// without switching branches, and completes once the user returns to base.
+func TestFinalizeWaitsWhileMainOnOtherBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		checkout []string
+		want     string
+	}{
+		{"other branch", []string{"checkout", "-b", "other"}, "other"},
+		{"detached HEAD", []string{"checkout", "--detach", "main"}, "HEAD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := initRepoWithBranch(t, "feat-branch", "x.txt", "x\n")
+			wt := makeWorktree(t, dir, "feat-branch")
+			mainBefore := gitOutput(t, dir, "rev-parse", "main")
+			runIn(t, dir, append([]string{"git"}, tc.checkout...)...)
+
+			statusUpdates := make(chan task.Status, 4)
+			setStatus := func(taskID int64, status task.Status) error {
+				statusUpdates <- status
+				return nil
+			}
+			coord := NewCoordinator(
+				dir, &Lock{},
+				Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond},
+				nil, setStatus, nil,
+			)
+
+			done := make(chan error, 1)
+			go func() {
+				tk := &task.Task{ID: 41, Title: "wrong branch", Branch: "feat-branch", Worktree: true, WorktreePath: wt}
+				done <- coord.Finalize(context.Background(), tk, "main", ActionMerge, nil)
+			}()
+
+			select {
+			case s := <-statusUpdates:
+				if s != task.StatusMergeBlocked {
+					t.Fatalf("expected merge-blocked status, got %s", s)
+				}
+			case err := <-done:
+				t.Fatalf("Finalize returned before blocking: %v", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("merge-blocked status never reported")
+			}
+
+			// Give the poll loop a few ticks to (wrongly) act.
+			time.Sleep(50 * time.Millisecond)
+			if got := gitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD"); got != tc.want+"\n" {
+				t.Errorf("main checkout switched to %q while blocked, want %q", got, tc.want)
+			}
+			if got := gitOutput(t, dir, "rev-parse", "main"); got != mainBefore {
+				t.Errorf("main advanced while blocked")
+			}
+
+			runIn(t, dir, "git", "checkout", "main")
+
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("Finalize after returning to main: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("Finalize did not complete after returning to main")
+			}
+			if got := gitOutput(t, dir, "rev-parse", "main"); got != gitOutput(t, dir, "rev-parse", "feat-branch") {
+				t.Errorf("main not fast-forwarded to feat-branch")
+			}
+		})
+	}
+}
+
+// TestFinalizeRechecksTargetUnderLock covers the race where the main checkout
+// is clean at the wait but dirty by the time the lock is held: the merge must
+// go back to merge-blocked without consuming an attempt, then succeed once
+// clean.
+func TestFinalizeRechecksTargetUnderLock(t *testing.T) {
+	fake := &fakeGitRepo{
+		root: "/fake/repo",
+		// Clean at the initial wait, dirty under the lock and at the
+		// re-wait's first check, then clean again.
+		dirtySeq: []bool{false, true, true, false, false},
+	}
+
+	var statuses []task.Status
+	setStatus := func(taskID int64, status task.Status) error {
+		statuses = append(statuses, status)
+		return nil
+	}
+
+	coord := newCoordinator(
+		fake, &Lock{},
+		Config{MaxAttempts: 1, BlockedPollInterval: 10 * time.Millisecond},
+		nil, setStatus, nil,
+	)
+
+	tk := &task.Task{ID: 42, Title: "race", Branch: "feature-x", Worktree: true, WorktreePath: "/fake/worktree"}
+	if err := coord.Finalize(context.Background(), tk, "main", ActionMerge, nil); err != nil {
+		t.Fatalf("Finalize returned error: %v", err)
+	}
+
+	if fake.mergeCalls != 1 {
+		t.Errorf("expected exactly 1 MergeBranch call (none while dirty), got %d", fake.mergeCalls)
+	}
+	if len(statuses) != 1 || statuses[0] != task.StatusMergeBlocked {
+		t.Errorf("expected one merge-blocked status update, got %v", statuses)
+	}
+}
+
+// gitOutput runs git in dir and returns its stdout, failing the test on error.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(out)
 }
 
 // TestLocksRegistryReturnsSamePtr verifies the daemon-level invariant: two
@@ -600,15 +717,18 @@ type fakeGitRepo struct {
 	continueRebaseCalls int
 
 	lastCommitHash string
+
+	// dirtySeq is the sequence of HasChanges results; once exhausted,
+	// HasChanges reports clean.
+	dirtySeq      []bool
+	hasChangesIdx int
 }
 
 func (f *fakeGitRepo) Root() string { return f.root }
 
 func (f *fakeGitRepo) Commit(worktreePath, message string) error { return nil }
 
-func (f *fakeGitRepo) CleanRepoState() error { return nil }
-
-func (f *fakeGitRepo) MergeBranch(branch, baseBranch string) error {
+func (f *fakeGitRepo) MergeBranch(branch string) error {
 	f.mergeCalls++
 	if f.mergeCalls <= f.mergeFailCount {
 		return errors.New("simulated non-fast-forward merge failure")
@@ -637,7 +757,16 @@ func (f *fakeGitRepo) ContinueRebase(worktreePath string) error {
 	return nil
 }
 
-func (f *fakeGitRepo) HasChanges() (bool, error) { return false, nil }
+func (f *fakeGitRepo) HasChanges() (bool, error) {
+	if f.hasChangesIdx >= len(f.dirtySeq) {
+		return false, nil
+	}
+	dirty := f.dirtySeq[f.hasChangesIdx]
+	f.hasChangesIdx++
+	return dirty, nil
+}
+
+func (f *fakeGitRepo) GetCurrentBranch(dir string) (string, error) { return "main", nil }
 
 func (f *fakeGitRepo) GetLastCommitHash(dir string) (string, error) {
 	return f.lastCommitHash, nil

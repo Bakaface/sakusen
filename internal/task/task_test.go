@@ -70,11 +70,6 @@ func TestStatusMergeFailed_DistinctFromCompletedAndFailed(t *testing.T) {
 	if StatusMergeFailed == StatusCompleted || StatusMergeFailed == StatusFailed {
 		t.Fatalf("StatusMergeFailed must be distinct, got %q", StatusMergeFailed)
 	}
-	// The worktree is preserved for recovery and the coordinator already
-	// cleaned the base repo — nothing for the startup sweep to reset.
-	if StatusMergeFailed.MayHaveDirtyRepoState() {
-		t.Error("StatusMergeFailed.MayHaveDirtyRepoState() = true, want false")
-	}
 }
 
 func TestStatus_IsAwaitingChildren(t *testing.T) {
