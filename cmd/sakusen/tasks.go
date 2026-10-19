@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"text/tabwriter"
 	"time"
@@ -479,10 +480,25 @@ var attachCmd = &cobra.Command{
 			}
 		}
 
-		attach := tmux.AttachCommand(session.Name)
+		insideTmux := tmux.IsInsideTmux()
+		attach := attachCommandFor(session.Name, insideTmux)
 		attach.Stdin = os.Stdin
 		attach.Stdout = os.Stdout
 		attach.Stderr = os.Stderr
-		return attach.Run()
+		err = attach.Run()
+		if err != nil && insideTmux {
+			return fmt.Errorf("failed to switch to tmux session for task #%s: %w", taskID, err)
+		}
+		return err
 	},
+}
+
+// attachCommandFor picks how to reach a task's session. tmux refuses to nest
+// attach-session inside a client, so a caller already in tmux switches its
+// client instead.
+func attachCommandFor(sessionName string, insideTmux bool) *exec.Cmd {
+	if insideTmux {
+		return tmux.SwitchClientCommand(sessionName)
+	}
+	return tmux.AttachCommand(sessionName)
 }

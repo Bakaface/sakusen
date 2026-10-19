@@ -376,8 +376,10 @@ func IsInsideTmux() bool {
 
 // SwitchClientCommand returns a command that switches the current tmux client
 // to the given session. Use this instead of AttachCommand when already inside tmux.
+// The "=" prefix forces an exact match so tmux never falls back to a prefix
+// match (task 5 landing in task 57's session).
 func SwitchClientCommand(sessionName string) *exec.Cmd {
-	return exec.Command("tmux", "switch-client", "-t", sessionName)
+	return exec.Command("tmux", "switch-client", "-t", "="+sessionName)
 }
 
 // NestedAttachCommand returns an attach-session command with $TMUX unset,

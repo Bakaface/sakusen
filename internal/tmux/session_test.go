@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -237,5 +238,13 @@ func TestSessionAttached(t *testing.T) {
 	missing := &Session{Name: base + "1"}
 	if _, err := missing.Attached(); err == nil {
 		t.Error("expected Attached to fail for a name that only matches by prefix")
+	}
+}
+
+func TestSwitchClientCommandExactTarget(t *testing.T) {
+	got := SwitchClientCommand("sakusen-proj-5").Args
+	want := []string{"tmux", "switch-client", "-t", "=sakusen-proj-5"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Args = %v, want %v", got, want)
 	}
 }
