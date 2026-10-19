@@ -27,6 +27,18 @@ func SessionPrefix(projectName string) string {
 	return SanitizeName(projectName) + "-"
 }
 
+// exactSession returns a session target matching name exactly. A bare name
+// lets tmux fall back to prefix matching, so "proj-1" could hit "proj-10".
+func exactSession(name string) string {
+	return "=" + name
+}
+
+// exactPane is exactSession for commands taking a pane or window target; the
+// trailing ":" scopes "=name" to the session instead of a window name.
+func exactPane(name string) string {
+	return "=" + name + ":"
+}
+
 type Session struct {
 	Name    string
 	WorkDir string
@@ -119,12 +131,12 @@ func (s *Session) RunSetupCommand(command string, vars *SetupVars) error {
 }
 
 func (s *Session) Exists() bool {
-	cmd := exec.Command("tmux", "has-session", "-t", s.Name)
+	cmd := exec.Command("tmux", "has-session", "-t", exactSession(s.Name))
 	return cmd.Run() == nil
 }
 
 func (s *Session) Kill() error {
-	cmd := exec.Command("tmux", "kill-session", "-t", s.Name)
+	cmd := exec.Command("tmux", "kill-session", "-t", exactSession(s.Name))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -138,7 +150,7 @@ func (s *Session) Kill() error {
 func (s *Session) CapturePane(scrollbackLines int) ([]string, error) {
 	args := []string{
 		"capture-pane",
-		"-t", s.Name,
+		"-t", exactPane(s.Name),
 		"-p",
 		"-S", fmt.Sprintf("-%d", scrollbackLines),
 	}
@@ -163,7 +175,7 @@ func (s *Session) CapturePane(scrollbackLines int) ([]string, error) {
 
 func (s *Session) SendKeys(keys string) error {
 	// Use -l for literal text (handles special characters correctly)
-	cmd := exec.Command("tmux", "send-keys", "-t", s.Name, "-l", keys)
+	cmd := exec.Command("tmux", "send-keys", "-t", exactPane(s.Name), "-l", keys)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -172,7 +184,7 @@ func (s *Session) SendKeys(keys string) error {
 	}
 
 	// Send Enter separately to submit
-	enterCmd := exec.Command("tmux", "send-keys", "-t", s.Name, "Enter")
+	enterCmd := exec.Command("tmux", "send-keys", "-t", exactPane(s.Name), "Enter")
 	enterCmd.Stderr = &stderr
 
 	if err := enterCmd.Run(); err != nil {
@@ -196,7 +208,7 @@ func (s *Session) Attached() (bool, error) {
 	// zero exit status), which this reports as an error — and since callers
 	// read an error as "attached", a session whose exact name is gone is
 	// never acted on.
-	cmd := exec.Command("tmux", "display-message", "-p", "-t", "="+s.Name+":", "#{session_attached}")
+	cmd := exec.Command("tmux", "display-message", "-p", "-t", exactPane(s.Name), "#{session_attached}")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -215,7 +227,7 @@ func (s *Session) Attached() (bool, error) {
 }
 
 func (s *Session) IsAlive() bool {
-	cmd := exec.Command("tmux", "list-panes", "-t", s.Name, "-F", "#{pane_dead}")
+	cmd := exec.Command("tmux", "list-panes", "-t", exactPane(s.Name), "-F", "#{pane_dead}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -337,7 +349,7 @@ func ExtractTaskID(projectName, sessionName string) string {
 
 // PipePane tees the pane output to a log file using tmux pipe-pane.
 func (s *Session) PipePane(logFile string) error {
-	cmd := exec.Command("tmux", "pipe-pane", "-t", s.Name, fmt.Sprintf("cat >> %s", logFile))
+	cmd := exec.Command("tmux", "pipe-pane", "-t", exactPane(s.Name), fmt.Sprintf("cat >> %s", logFile))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -348,25 +360,19 @@ func (s *Session) PipePane(logFile string) error {
 	return nil
 }
 
-// KillSessionsForTask kills the tmux session matching <projectName>-<taskID>.
+// KillSessionsForTask kills the task's session, named exactly
+// <projectName>-<taskID>; sessions of tasks sharing the ID as a prefix
+// (e.g. 560 for 56) are never touched. A missing session is not an error.
 func KillSessionsForTask(projectName, taskID string) error {
-	prefix := SessionPrefix(projectName) + taskID
-	sessions, err := ListSessions(prefix)
-	if err != nil {
-		return err
+	s := NewSession(projectName, taskID, "")
+	if !s.Exists() {
+		return nil
 	}
-
-	var lastErr error
-	for _, s := range sessions {
-		if err := s.Kill(); err != nil {
-			lastErr = err
-		}
-	}
-	return lastErr
+	return s.Kill()
 }
 
 func AttachCommand(sessionName string) *exec.Cmd {
-	return exec.Command("tmux", "attach-session", "-t", sessionName)
+	return exec.Command("tmux", "attach-session", "-t", exactSession(sessionName))
 }
 
 // IsInsideTmux returns true if the current process is running inside a tmux session.
@@ -377,13 +383,13 @@ func IsInsideTmux() bool {
 // SwitchClientCommand returns a command that switches the current tmux client
 // to the given session. Use this instead of AttachCommand when already inside tmux.
 func SwitchClientCommand(sessionName string) *exec.Cmd {
-	return exec.Command("tmux", "switch-client", "-t", sessionName)
+	return exec.Command("tmux", "switch-client", "-t", exactSession(sessionName))
 }
 
 // NestedAttachCommand returns an attach-session command with $TMUX unset,
 // allowing it to run inside an existing tmux session (nested tmux).
 func NestedAttachCommand(sessionName string) *exec.Cmd {
-	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	cmd := exec.Command("tmux", "attach-session", "-t", exactSession(sessionName))
 	// Copy current environment but strip TMUX to allow nesting
 	var filtered []string
 	for _, e := range os.Environ() {

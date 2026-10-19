@@ -144,10 +144,8 @@ func (f *hibernationFixture) session(taskID int64) *tmux.Session {
 }
 
 // sessionExistsExactly reports whether a session with exactly this name is
-// live. Session.Exists uses `tmux has-session`, whose target resolution falls
-// back to prefix matching — so with a "proj-10" session around it answers yes
-// for "proj-1" too, which is precisely what the exact-kill test must not rely
-// on.
+// live, by scanning session names rather than going through tmux target
+// resolution — the code under test.
 func sessionExistsExactly(t *testing.T, name string) bool {
 	t.Helper()
 	sessions, err := tmux.ListSessions("")

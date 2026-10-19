@@ -17,6 +17,6 @@ Session creation, lifecycle, pane capture, activity monitoring for interactive t
 
 ## Conventions
 
-- Session names are `<sanitizedProject>-<taskID>`; `SessionPrefix(project)` gives the project-scoped prefix for listing and cleanup.
+- Session names are `<sanitizedProject>-<taskID>`; `SessionPrefix(project)` gives the project-scoped prefix for listing. Every tmux `-t` target uses the exact form (`=name`, or `=name:` for pane/window targets) so `proj-1` never resolves to `proj-10`; `KillSessionsForTask` kills only the exact session.
 - Attaching: `SwitchClientCommand` when `IsInsideTmux()`, otherwise `AttachCommand`; `NestedAttachCommand` when the config's nested-attach behavior is `nest`.
 - Prefer `{{run_agent}}` over `{{agent_command}}` in setup commands: it is the wrapper script that exports the `SAKUSEN_*` env before running the agent.
