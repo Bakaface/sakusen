@@ -303,6 +303,7 @@ A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor s
 - Step names and branch names share ONE namespace and must be unique across the whole workflow — `{{steps.<name>.context}}` addresses both. Also enforced in `validateUniqueNames` and `resolveWorkflowSteps`.
 - `ValidateLoops`: a `goto` naming a branch is an error (target the group); exit conditions may name a branch or a group.
 - `validateAgentRefs` (production load only): every branch's EFFECTIVE agent must be headless — the join is synchronous, so a tmux branch could never complete. `collectAgentRefs`, `validatePromptIncludes` and `validatePeriodic` all walk branches too.
+- `validatePeriodic`: each `periodic:` entry declares exactly one of `cadence:` (cron) or `after: <periodic-name>` (event trigger: fires when that same-project periodic's latest run reaches `completed`); `validatePeriodicAfter` rejects unknown names, self-references and cycles.
 
 **Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 

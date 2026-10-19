@@ -35,4 +35,4 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 
 - `PersistentPreRunE` loads config into the package-level `cfg`, then requires `.sakusen.yml` (in cwd or an ancestor below the git toplevel) unless the command is in `noProjectRequired`.
 - Most commands talk to the daemon through `client.Client`; `cleanup` and `tui` open the DB directly, and `tasks` falls back to the DB when the daemon is down.
-- `create`: `--target` overrides `git.base_branch`; `--checkout` reuses an existing branch and is mutually exclusive with `--branch`.
+- `create`: `--target` overrides `git.base_branch`; `--checkout` reuses an existing branch and is mutually exclusive with `--branch`; `--not-before <RFC3339>` keeps the task pending until that time (parsed by `task.ParseNotBefore`, stored UTC).

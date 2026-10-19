@@ -17,6 +17,7 @@
 - [Tmux Setup Command](#tmux-setup-command)
 - [Tmux Session Hibernation](#tmux-session-hibernation)
 - [Prompt Includes (`.sakusen/prompts/`)](#prompt-includes-sakusenprompts)
+- [Periodic Triggers (`cadence` / `after`)](#periodic-triggers-cadence--after)
 - [Step Configuration, Loops, Cross-Task and Child References](#step-configuration-loops-cross-task-and-child-references) — moved to [workflow-building.md](workflow-building.md)
 - [Task States](#task-states)
 - [Task Priorities](#task-priorities)
@@ -483,6 +484,27 @@ There is no top-level `prompts:` map and no agent-level prompt — files only. S
 
 ---
 
+## Periodic Triggers (`cadence` / `after`)
+
+Each entry under the top-level `periodic:` list declares exactly one trigger:
+
+```yaml
+periodic:
+  - name: intrum-sync
+    cadence: "0 0 * * *"        # cron schedule (or "@every 1h")
+    workflow: default
+  - name: intrum-log-backfill
+    after: intrum-sync          # fire each time an intrum-sync run completes
+    workflow: default
+```
+
+- `after:` names another periodic in the **same** `.sakusen.yml`. The entry fires when that periodic's latest run reaches `completed`; a run that ends `failed`/`merge-failed` is skipped (the next completed run fires). A manual run-now of the upstream counts as a run.
+- Setting both `cadence:` and `after:`, or neither, is a load error, as are unknown names, self-references and cycles.
+- Detection happens on the daemon's 30s scheduler tick. A new `after:` entry does not fire for an upstream run that finished before it existed, and completions that happen while it is paused are not replayed on resume.
+- Skip-overlap still applies: if the entry's own previous run is still active, that trigger is skipped.
+
+---
+
 ## Step Configuration, Loops, Cross-Task and Child References
 
 Moved to [workflow-building.md](workflow-building.md) — the single workflow-authoring
@@ -501,7 +523,7 @@ task orchestration (`{{children.*}}`).
 
 | Status | Description |
 |---|---|
-| `pending` | Waiting to be picked up by a worker |
+| `pending` | Waiting to be picked up by a worker (and, if set, until its not-before time: `sakusen create --not-before <RFC3339>` / `create_task` `not_before`) |
 | `init` | Initializing worktree and environment |
 | `running` | Agent is executing |
 | `awaiting-approval` | Paused at a `human: true` step |
