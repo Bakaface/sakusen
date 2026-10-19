@@ -52,13 +52,25 @@ func (s *Server) handleListPeriodics(conn net.Conn, req ListPeriodicsRequest) {
 	// Reconcile from the project's current .sakusen.yml before listing so the
 	// view reflects the on-disk config immediately, even for projects the
 	// scheduler hasn't ticked yet (e.g. a freshly-registered periodic-only
-	// project). Record the mod-time on success so the scheduler loop doesn't
-	// redundantly re-reconcile this project on its next tick.
-	if pc, err := s.getProjectContext(projectID); err == nil {
-		if err := s.reconcilePeriodicsForProject(proj, pc.cfg); err == nil {
-			s.markPeriodicReconciled(projectID, pc.configModTime)
-		}
+	// project). A config that fails to load or reconcile is reported rather
+	// than listing possibly stale rows. Record the mod-time on success so the
+	// scheduler loop doesn't redundantly re-reconcile this project on its next
+	// tick.
+	pc, err := s.getProjectContext(projectID)
+	if err == nil && pc.loadErr != nil {
+		// pc.cfg is the daemon fallback; reconciling against it would
+		// soft-delete the project's periodics.
+		err = pc.loadErr
 	}
+	if err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to load project config: %v", err))
+		return
+	}
+	if err := s.reconcilePeriodicsForProject(proj, pc.cfg); err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to reconcile periodics: %v", err))
+		return
+	}
+	s.markPeriodicReconciled(projectID, pc.configModTime)
 
 	defs, err := s.database.ListPeriodicsForProject(projectID)
 	if err != nil {
