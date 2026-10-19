@@ -123,6 +123,68 @@ func assertUserEditsIntact(t *testing.T, repoDir string) {
 	}
 }
 
+// TestRecoverOrphanedTasks_MergeBlockedKeepsDirtyRepo verifies that the
+// startup sweep does not hard-reset a repo whose only flagged task was
+// merge-blocked: that task never touched the base repo, and the dirty state is
+// someone else's uncommitted work on the main checkout.
+func TestRecoverOrphanedTasks_MergeBlockedKeepsDirtyRepo(t *testing.T) {
+	repoDir := initRecoveryTestRepo(t)
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	defer database.Close()
+
+	cfg := &config.Config{
+		OnComplete: "none",
+		Workflows: []config.WorkflowConfig{
+			{Name: "default", Steps: []config.StepConfig{{Name: "implement", Prompt: "do something"}}},
+		},
+	}
+	s := NewServer(cfg, database)
+	defer s.manager.Shutdown(2 * time.Second)
+	defer s.cancel()
+
+	proj, err := database.GetOrCreateProject(repoDir)
+	if err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+	if _, err := s.getProjectContext(proj.ID); err != nil {
+		t.Fatalf("failed to pre-load project context: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("user edit"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "scratch.txt"), []byte("scratch"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tk, err := database.CreateTaskWithPriority(
+		proj.ID, "Test task", "desc", "slug", "default", "", "branch", "", "",
+		task.StatusMergeBlocked, task.PriorityMedium, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	if err := database.UpdateTaskStep(tk.ID, 1, ""); err != nil {
+		t.Fatalf("failed to set step index past last step: %v", err)
+	}
+
+	if err := s.recoverOrphanedTasks(); err != nil {
+		t.Fatalf("recoverOrphanedTasks failed: %v", err)
+	}
+
+	if got, _ := os.ReadFile(filepath.Join(repoDir, "README.md")); string(got) != "user edit" {
+		t.Errorf("modified README.md was reset by the startup sweep: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(repoDir, "scratch.txt")); string(got) != "scratch" {
+		t.Errorf("untracked scratch.txt was removed by the startup sweep: %q", got)
+	}
+}
+
 // TestRecoverOrphanedTasks_SummarizingRestartsAgent verifies that a task killed
 // during summarization (which happens AFTER the merge completed) is also
 // recovered via startTaskAgent rather than ResetTaskForRetry. The old

@@ -184,6 +184,10 @@ func (s *Server) finalizeCompletedTask(t *task.Task, agentID string, taskTitle s
 	// Set finalizing status
 	if err := s.database.UpdateTaskStatus(t.ID, task.StatusFinalizing); err != nil {
 		log.Printf("%sWarning: failed to set finalizing status for task #%d: %v", prefix, t.ID, err)
+	} else {
+		// The merge coordinator restores t.Status after transient phases
+		// (merge-blocked, resolving-conflicts), so it must not be stale.
+		t.Status = task.StatusFinalizing
 	}
 	s.broadcastTaskUpdate(t.ID)
 

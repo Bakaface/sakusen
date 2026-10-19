@@ -88,6 +88,39 @@ func (r *Repo) HasChanges() (bool, error) {
 	return strings.TrimSpace(stdout.String()) != "", nil
 }
 
+// ChangedPaths lists the repo root's uncommitted changes (staged, unstaged
+// and untracked), one "<status> <path>" entry per `git status --porcelain`
+// line, e.g. "?? scratch.txt" or "M docs/a.md". Paths matching any of the
+// ignore glob pathspecs (relative to the repo root) are left out.
+func (r *Repo) ChangedPaths(ignore []string) ([]string, error) {
+	args := []string{"status", "--porcelain"}
+	if len(ignore) > 0 {
+		args = append(args, "--", ".")
+		for _, pattern := range ignore {
+			args = append(args, ":(exclude,glob)"+pattern)
+		}
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git status failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	var paths []string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		paths = append(paths, strings.TrimSpace(line[:2])+" "+line[3:])
+	}
+	return paths, nil
+}
+
 // MergeBranch fast-forwards the repo root's checked-out branch to the tip of
 // branch. Fails if a fast-forward isn't possible — callers are expected to
 // rebase the task branch onto the base first (via RebaseInto) and retry.
