@@ -296,6 +296,14 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		}
 	}
 
+	if req.NotBefore != nil {
+		if err := s.database.SetTaskNotBefore(t.ID, req.NotBefore); err != nil {
+			log.Printf("%sFailed to set not_before for task #%d: %v", s.projectLogPrefix(proj.ID), t.ID, err)
+		} else if updated, err := s.database.GetTask(t.ID); err == nil {
+			t = updated
+		}
+	}
+
 	// Merge auto-blockers (from {{tasks.<id>.<field>}} refs) into req.BlockedBy,
 	// deduplicating so an explicit --blocked-by overlap doesn't double-insert.
 	blockedBy := mergeBlockedBy(req.BlockedBy, autoBlockedBy)
@@ -529,6 +537,30 @@ func (s *Server) handleUpdatePriority(conn net.Conn, req UpdatePriorityRequest) 
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
 	s.sendMessage(conn, MsgUpdatePriority, UpdatePriorityResponse{Task: s.taskToInfo(t)})
+}
+
+func (s *Server) handleUpdateNotBefore(conn net.Conn, req UpdateNotBeforeRequest) {
+	ok, err := s.database.SetPendingTaskNotBefore(req.TaskID, req.NotBefore)
+	if err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to update not_before: %v", err))
+		return
+	}
+	if !ok {
+		status := "not found"
+		if t, err := s.database.GetTask(req.TaskID); err == nil {
+			status = string(t.Status)
+		}
+		s.sendError(conn, fmt.Sprintf("not_before can only be changed on a pending task (task #%d is %s)", req.TaskID, status))
+		return
+	}
+
+	t, err := s.database.GetTask(req.TaskID)
+	if err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to load task after not_before update: %v", err))
+		return
+	}
+	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
+	s.sendMessage(conn, MsgUpdateNotBefore, UpdateNotBeforeResponse{Task: s.taskToInfo(t)})
 }
 
 func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {

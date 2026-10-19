@@ -40,7 +40,7 @@ func (s *Server) taskPollerLoop() {
 }
 
 func (s *Server) checkPendingTasks() {
-	tasks, err := s.database.GetClaimableTasks()
+	tasks, err := s.database.GetClaimableTasks(time.Now())
 	if err != nil {
 		log.Printf("Failed to get claimable tasks: %v", err)
 		return

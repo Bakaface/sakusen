@@ -1285,7 +1285,7 @@ func TestMCP_UpdateTask_RejectsInvalidArgs(t *testing.T) {
 		{
 			name:      "no fields",
 			arguments: map[string]any{"task_id": 1},
-			wantErr:   "at least one of input, title, priority, track, add_blocked_by or remove_blocked_by",
+			wantErr:   "at least one of input, title, priority, track, not_before, clear_not_before, add_blocked_by or remove_blocked_by",
 		},
 		{
 			name:      "blank input",

@@ -91,6 +91,7 @@ func init() {
 	createCmd.Flags().String("target", "", "Target branch to branch from and merge into (overrides git.base_branch)")
 	createCmd.Flags().String("checkout", "", "Check out an existing branch instead of creating a new one")
 	createCmd.Flags().String("track", "", "Attach the task to a track (slug or numeric ID)")
+	createCmd.Flags().String("not-before", "", "Keep the task pending until this time (RFC3339, e.g. 2026-01-02T15:04:05+02:00)")
 	editCmd.Flags().StringP("title", "t", "", "New title")
 	editCmd.Flags().StringP("input", "i", "", "New task input")
 	editCmd.Flags().StringP("context", "c", "", "New context")

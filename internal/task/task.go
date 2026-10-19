@@ -1,6 +1,7 @@
 package task
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -137,6 +138,18 @@ type Task struct {
 	// session cap). The task stays in StatusTmux — attach wakes it via the
 	// agent's resume_command. Cleared on any status change.
 	HibernatedAt *time.Time
+	// NotBefore is the earliest time a pending task may be claimed (UTC).
+	NotBefore *time.Time
+}
+
+// ParseNotBefore parses a not-before time. Only RFC3339 (with an explicit
+// offset) is accepted; the result is normalized to UTC.
+func ParseNotBefore(s string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid not-before time %q: expected RFC3339, e.g. 2026-01-02T15:04:05Z or 2026-01-02T15:04:05+02:00", s)
+	}
+	return t.UTC(), nil
 }
 
 // MaxTitleLength is the maximum allowed length for a task title.

@@ -32,6 +32,7 @@ func (s *Server) periodicSchedulerLoop() {
 		case <-ticker.C:
 			s.reconcileAllPeriodics()
 			s.fireDuePeriodics()
+			s.fireAfterPeriodics()
 		}
 	}
 }
@@ -43,6 +44,7 @@ func (s *Server) periodicSchedulerLoop() {
 func (s *Server) checkPeriodicCatchup() {
 	s.reconcileAllPeriodics()
 	s.fireDuePeriodics()
+	s.fireAfterPeriodics()
 }
 
 // reconcileAllPeriodics walks every registered project, loading its config
@@ -123,13 +125,19 @@ func (s *Server) reconcilePeriodicsForProject(proj *db.Project, cfg *config.Conf
 		p := &cfg.Periodic[i]
 		current[p.Name] = true
 
-		next, err := config.NextPeriodicFire(p.Cadence, now)
-		if err != nil {
-			log.Printf("%speriodic %q: invalid cadence %q: %v", s.projectLogPrefix(proj.ID), p.Name, p.Cadence, err)
-			continue
+		// after: entries are excluded from the due query, so next_fire_at
+		// only needs a non-null placeholder.
+		next := now
+		if p.After == "" {
+			var err error
+			next, err = config.NextPeriodicFire(p.Cadence, now)
+			if err != nil {
+				log.Printf("%speriodic %q: invalid cadence %q: %v", s.projectLogPrefix(proj.ID), p.Name, p.Cadence, err)
+				continue
+			}
 		}
 
-		if _, err := s.database.UpsertPeriodicDef(proj.ID, p.Name, p.Cadence, p.Workflow, p.Input, p.Priority, p.Paused, next); err != nil {
+		if _, err := s.database.UpsertPeriodicDef(proj.ID, p.Name, p.Cadence, p.After, p.Workflow, p.Input, p.Priority, p.Paused, next); err != nil {
 			log.Printf("%speriodic %q: failed to upsert: %v", s.projectLogPrefix(proj.ID), p.Name, err)
 		}
 	}
@@ -196,6 +204,67 @@ func (s *Server) scheduledFire(d *db.PeriodicDef, now time.Time) {
 
 	if _, err := s.materializePeriodicTask(d, now); err != nil {
 		log.Printf("%speriodic %q: failed to materialize task: %v", s.projectLogPrefix(d.ProjectID), d.Name, err)
+	}
+}
+
+// fireAfterPeriodics fires each event-triggered (after:) definition whose
+// upstream periodic has a new run that reached completed. Every new upstream
+// run is consumed exactly once via ClaimAfterFire — runs that end in any other
+// terminal status are consumed without firing.
+func (s *Server) fireAfterPeriodics() {
+	now := time.Now()
+	defs, err := s.database.ListAfterPeriodics()
+	if err != nil {
+		log.Printf("periodic: failed to list after: definitions: %v", err)
+		return
+	}
+	for _, d := range defs {
+		s.afterFire(d, now)
+	}
+}
+
+func (s *Server) afterFire(d *db.PeriodicDef, now time.Time) {
+	prefix := s.projectLogPrefix(d.ProjectID)
+	up, err := s.database.GetPeriodicByName(d.ProjectID, d.AfterName)
+	if err != nil || up.DeletedAt != nil {
+		log.Printf("%speriodic %q: upstream periodic %q not found, skipping", prefix, d.Name, d.AfterName)
+		return
+	}
+	if up.LastTaskID == nil || (d.AfterLastTaskID != nil && *d.AfterLastTaskID == *up.LastTaskID) {
+		return
+	}
+	run, err := s.database.GetTask(*up.LastTaskID)
+	if err != nil {
+		log.Printf("%speriodic %q: failed to load upstream run #%d: %v", prefix, d.Name, *up.LastTaskID, err)
+		return
+	}
+	if !run.Status.IsTerminal() {
+		return
+	}
+
+	fire := run.Status == task.StatusCompleted
+	claimed, err := s.database.ClaimAfterFire(d.ID, d.AfterLastTaskID, run.ID, fire, now)
+	if err != nil {
+		log.Printf("%speriodic %q: claim failed: %v", prefix, d.Name, err)
+		return
+	}
+	if !claimed {
+		return
+	}
+	if !fire {
+		log.Printf("%speriodic %q: upstream run #%d ended %s, not firing", prefix, d.Name, run.ID, run.Status)
+		return
+	}
+
+	if d.LastTaskID != nil {
+		if last, err := s.database.GetTask(*d.LastTaskID); err == nil && !last.Status.IsTerminal() {
+			log.Printf("%speriodic %q: skip-overlap, last task #%d still active (%s)", prefix, d.Name, last.ID, last.Status)
+			return
+		}
+	}
+
+	if _, err := s.materializePeriodicTask(d, now); err != nil {
+		log.Printf("%speriodic %q: failed to materialize task: %v", prefix, d.Name, err)
 	}
 }
 

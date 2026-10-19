@@ -87,6 +87,7 @@ var migrations = []func(db *DB) error{
 	migrateV23,
 	migrateV24,
 	migrateV25,
+	migrateV26,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -502,31 +503,44 @@ func migrateV25(db *DB) error {
 	return nil
 }
 
+// migrateV26 adds tasks.not_before (earliest claim time for a pending task)
+// and the after:-trigger columns on periodic_definitions.
+func migrateV26(db *DB) error {
+	hasNotBefore, err := db.tasksHasColumn("not_before")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tasks columns: %w", err)
+	}
+	if !hasNotBefore {
+		if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN not_before DATETIME`); err != nil {
+			return fmt.Errorf("failed to add not_before column: %w", err)
+		}
+	}
+	hasAfterName, err := db.tableHasColumn("periodic_definitions", "after_name")
+	if err != nil {
+		return fmt.Errorf("failed to inspect periodic_definitions columns: %w", err)
+	}
+	if !hasAfterName {
+		if _, err := db.sqlDB.Exec(`ALTER TABLE periodic_definitions ADD COLUMN after_name TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("failed to add after_name column: %w", err)
+		}
+		if _, err := db.sqlDB.Exec(`ALTER TABLE periodic_definitions ADD COLUMN after_last_task_id INTEGER`); err != nil {
+			return fmt.Errorf("failed to add after_last_task_id column: %w", err)
+		}
+	}
+	return nil
+}
+
 // tasksHasColumn reports whether the tasks table has a column with the given
 // name, via PRAGMA table_info.
 func (db *DB) tasksHasColumn(name string) (bool, error) {
-	rows, err := db.sqlDB.Query(`PRAGMA table_info(tasks)`)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			cid        int
-			colName    string
-			colType    string
-			notNull    int
-			dfltValue  sql.NullString
-			primaryKey int
-		)
-		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &primaryKey); err != nil {
-			return false, err
-		}
-		if colName == name {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
+	return db.tableHasColumn("tasks", name)
+}
+
+// tableHasColumn reports whether table has a column with the given name.
+func (db *DB) tableHasColumn(table, name string) (bool, error) {
+	var n int
+	err := db.sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, name).Scan(&n)
+	return n > 0, err
 }
 
 func (db *DB) Path() string {

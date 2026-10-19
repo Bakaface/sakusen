@@ -3,6 +3,7 @@ package task
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStatus_IsActive(t *testing.T) {
@@ -346,5 +347,20 @@ func TestSlugify(t *testing.T) {
 				t.Errorf("Slugify(%q) = %q, want no leading/trailing dash", tt.input, got)
 			}
 		})
+	}
+}
+
+func TestParseNotBefore(t *testing.T) {
+	got, err := ParseNotBefore("2026-03-01T10:00:00+02:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 3, 1, 8, 0, 0, 0, time.UTC); !got.Equal(want) || got.Location() != time.UTC {
+		t.Errorf("got %v, want %v in UTC", got, want)
+	}
+	for _, bad := range []string{"", "tomorrow", "+1h", "2026-03-01", "2026-03-01T10:00:00"} {
+		if _, err := ParseNotBefore(bad); err == nil || !strings.Contains(err.Error(), "RFC3339") {
+			t.Errorf("ParseNotBefore(%q) err = %v, want RFC3339 error", bad, err)
+		}
 	}
 }

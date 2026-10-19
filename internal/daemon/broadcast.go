@@ -430,6 +430,7 @@ func TaskInfoFromTask(t *task.Task) TaskInfo {
 		CreatedAt:        t.CreatedAt,
 		StartedAt:        t.StartedAt,
 		CompletedAt:      t.CompletedAt,
+		NotBefore:        t.NotBefore,
 		HibernatedAt:     t.HibernatedAt,
 	}
 }

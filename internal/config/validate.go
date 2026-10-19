@@ -316,7 +316,8 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 }
 
 // validatePeriodic checks the resolved periodic definitions for correctness:
-//  1. cadence parses with the periodic cron parser
+//  1. exactly one of cadence / after is set; cadence parses with the periodic
+//     cron parser; after names another entry, with no cycles
 //  2. exactly one of workflow / steps is set
 //  3. ref-mode: the referenced workflow exists
 //  4. when input is empty, no step prompt of the effective workflow may
@@ -336,11 +337,15 @@ func validatePeriodic(cfg *Config) error {
 		}
 		seen[p.Name] = true
 
-		if p.Cadence == "" {
-			return fmt.Errorf("periodic %q: cadence is required", p.Name)
-		}
-		if _, err := ParsePeriodicCadence(p.Cadence); err != nil {
-			return fmt.Errorf("periodic %q: invalid cadence %q: %w", p.Name, p.Cadence, err)
+		switch {
+		case p.Cadence == "" && p.After == "":
+			return fmt.Errorf("periodic %q: cadence or after is required", p.Name)
+		case p.Cadence != "" && p.After != "":
+			return fmt.Errorf("periodic %q: cadence and after are mutually exclusive", p.Name)
+		case p.Cadence != "":
+			if _, err := ParsePeriodicCadence(p.Cadence); err != nil {
+				return fmt.Errorf("periodic %q: invalid cadence %q: %w", p.Name, p.Cadence, err)
+			}
 		}
 
 		hasWorkflow := p.Workflow != ""
@@ -394,6 +399,35 @@ func validatePeriodic(cfg *Config) error {
 					}
 				}
 			}
+		}
+	}
+	return validatePeriodicAfter(cfg)
+}
+
+// validatePeriodicAfter checks that every after: names another periodic entry
+// and that after: chains do not loop back on themselves.
+func validatePeriodicAfter(cfg *Config) error {
+	after := make(map[string]string, len(cfg.Periodic))
+	for i := range cfg.Periodic {
+		after[cfg.Periodic[i].Name] = cfg.Periodic[i].After
+	}
+	for i := range cfg.Periodic {
+		p := &cfg.Periodic[i]
+		if p.After == "" {
+			continue
+		}
+		if p.After == p.Name {
+			return fmt.Errorf("periodic %q: after must name another periodic, not itself", p.Name)
+		}
+		if _, ok := after[p.After]; !ok {
+			return fmt.Errorf("periodic %q: after references unknown periodic %q", p.Name, p.After)
+		}
+		visited := map[string]bool{p.Name: true}
+		for cur := p.After; cur != ""; cur = after[cur] {
+			if visited[cur] {
+				return fmt.Errorf("periodic %q: after chain forms a cycle through %q", p.Name, cur)
+			}
+			visited[cur] = true
 		}
 	}
 	return nil

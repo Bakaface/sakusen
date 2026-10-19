@@ -215,6 +215,9 @@ func printTaskDetail(t *daemon.TaskInfo) {
 	if len(t.BlockedBy) > 0 {
 		fmt.Printf("  Blocked by:  %v\n", t.BlockedBy)
 	}
+	if t.NotBefore != nil {
+		fmt.Printf("  Not before:  %s\n", t.NotBefore.Local().Format(time.RFC3339))
+	}
 	if len(t.Commits) > 0 {
 		fmt.Printf("  Commits:     %v\n", t.Commits)
 	}
