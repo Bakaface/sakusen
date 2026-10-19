@@ -23,6 +23,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 | `tasks.go` | `tasks`, `start`, `stop`, `agents`/`list`, `retry`, `revert`, `continue`, `logs`, `cleanup`, `attach`, `detach`, `attach-branch` |
 | `tasks_step_context.go` | `tasks step-context` — raw stored text with `--step` (pipe-safe, byte-exact), JSON map with `--all` |
 | `wait_for_tasks.go` | `wait-for-tasks` — CLI/test-only surface for the `MsgWaitForTasks` RPC; agents use the MCP tools instead |
+| `wait.go` | `wait <task_id>...` — blocks until any task reaches a target status (`--status`, `--timeout`), prints `client.WaitResult` JSON; exit 0 matched / 2 timed out / 1 error; project-independent |
 | `depends_on.go` | `depends-on add/rm/list` |
 | `tracks.go` | `tracks create/list/show/set-context` |
 | `periodics.go` | `periodics list/show/pause/resume/runs/run` |

@@ -23,6 +23,7 @@ var noProjectRequired = map[string]bool{
 	"mcp":              true,
 	"backfill-context": true,
 	"version":          true,
+	"wait":             true,
 }
 
 var rootCmd = &cobra.Command{
