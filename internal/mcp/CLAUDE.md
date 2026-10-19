@@ -6,13 +6,13 @@ irrecoverably destructive operations**.
 
 ## Critical Invariants
 
-- **No irrecoverable operations**: the 16-tool surface is `create_task`,
-  `create_tasks_and_wait`, `wait_for_tasks`, `get_task`, `list_tasks`, `list_workflows`,
-  `retry_task`, `advance_task`, `stop_task`, `continue_task`, `update_task`,
-  `update_step_context`, `create_track`, `get_track`, `update_track`, `list_tracks`. Do not
-  add `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision —
-  every exposed mutation must be recoverable (re-editable DB state or a re-queued task;
-  `retry_task` stops only the task's own agent and preserves worktree/branch).
+- **No irrecoverable operations**: the 17-tool surface is `create_task`,
+  `create_tasks_and_wait`, `wait_for_tasks`, `wait_for_task_status`, `get_task`,
+  `list_tasks`, `list_workflows`, `retry_task`, `advance_task`, `stop_task`, `continue_task`,
+  `update_task`, `update_step_context`, `create_track`, `get_track`, `update_track`,
+  `list_tracks`. Do not add `delete_task`, `revert_task`, or `cleanup` here without an
+  explicit design decision — every exposed mutation must be recoverable (re-editable DB
+  state or a re-queued task; `retry_task` stops only the task's own agent and preserves worktree/branch).
   `update_step_context` is admitted because the daemon enforces that it can only write to
   the calling task's currently-active step (see `handleUpdateActiveStepContext`).
   `advance_task` is admitted because the daemon only accepts it for tasks in tmux state and
@@ -43,7 +43,10 @@ irrecoverably destructive operations**.
   go through the same helper, so tasks land on the same project row. A `.sakusen.yml` in a
   subdirectory of a repo therefore owns its own project without an explicit `project_path`.
 - **Daemon connection held for the MCP process lifetime**: `Serve()` connects once at start
-  (fails fast if the daemon isn't running) and reuses that `*client.Client`.
+  (fails fast if the daemon isn't running) and reuses that `*client.Client`. The one
+  exception is `wait_for_task_status`, which opens a dedicated connection per call: the
+  waiter consumes every broadcast on its client, so it must not share the subscription
+  `create_task`'s `wait_for_ready` relies on.
 
 ## File Map
 
@@ -54,6 +57,7 @@ irrecoverably destructive operations**.
 | `env.go` | `resolveParentTaskID` / `resolveTaskID` / `resolveStepName` — explicit arg → engine env var |
 | `tool_create_task.go` | `create_task` tool definition + handler; `jsonResult` helper |
 | `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |
+| `tool_wait_for_task_status.go` | `wait_for_task_status` tool — read-only any-of status wait for non-task callers (no `$SAKUSEN_TASK_ID`), over `client.WaitForTaskStatus` |
 | `tool_get_task.go` | `get_task` tool definition + handler |
 | `tool_list_tasks.go` | `list_tasks` tool — project-scoped or global compact summaries, status/track filters, newest-first limit |
 | `tool_list_workflows.go` | `list_workflows` tool definition + handler |

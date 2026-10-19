@@ -1,6 +1,6 @@
 # internal/client — Daemon Client
 
-Unix socket IPC client with RPC and event streaming. Single file, `client.go`; the sole interface between the TUI, CLI, MCP server and the daemon.
+Unix socket IPC client with RPC and event streaming. `client.go` holds the transport and RPC methods; `wait.go` holds `WaitForTaskStatus`, the any-of task-status waiter (broadcasts plus a periodic `GetTask` poll, since some status transitions are never broadcast) shared by the `wait_for_task_status` MCP tool and `sakusen wait`. It is the sole interface between the TUI, CLI, MCP server and the daemon.
 
 ## Critical Invariants
 

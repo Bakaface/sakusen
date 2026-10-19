@@ -137,7 +137,7 @@ func startMCPServer(t *testing.T, fake *fakeDaemon) *mcppkg.Client {
 	t.Cleanup(func() { c.Close() })
 
 	s := server.NewMCPServer("sakusen-test", "0.0.0", server.WithToolCapabilities(false))
-	registerTools(s, c)
+	registerTools(s, c, cfg)
 
 	mcpClient, err := mcppkg.NewInProcessClient(s)
 	if err != nil {
@@ -181,6 +181,7 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 		"get_task", "list_tasks", "retry_task", "advance_task", "stop_task",
 		"continue_task", "update_task", "update_step_context",
 		"create_track", "get_track", "update_track", "list_tracks",
+		"wait_for_task_status",
 	} {
 		if !got[want] {
 			t.Errorf("tool %q not advertised; got %v", want, got)
@@ -195,8 +196,8 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 			t.Errorf("removed tool %q is still advertised", gone)
 		}
 	}
-	if len(resp.Tools) != 16 {
-		t.Errorf("tool count: got %d, want 16 — %v", len(resp.Tools), got)
+	if len(resp.Tools) != 17 {
+		t.Errorf("tool count: got %d, want 17 — %v", len(resp.Tools), got)
 	}
 }
 
@@ -1956,5 +1957,83 @@ func TestMCP_EnvDefaulting_RejectsNegativeExplicitID(t *testing.T) {
 
 	if len(fake.requestTypes()) != 0 {
 		t.Errorf("negative-id call leaked to daemon: %v", fake.requestTypes())
+	}
+}
+
+func TestMCP_WaitForTaskStatus_RejectsInvalidArgs(t *testing.T) {
+	fake := newFakeDaemon(t)
+	c := startMCPServer(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for name, args := range map[string]map[string]any{
+		"empty task_ids":   {"task_ids": []any{}},
+		"non-positive id":  {"task_ids": []any{1, 0}},
+		"unknown status":   {"task_ids": []any{1}, "statuses": []any{"merged"}},
+		"zero timeout":     {"task_ids": []any{1}, "timeout_seconds": 0},
+		"negative timeout": {"task_ids": []any{1}, "timeout_seconds": -5},
+		"timeout too big":  {"task_ids": []any{1}, "timeout_seconds": 3601},
+	} {
+		res, err := c.CallTool(ctx, mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Name: "wait_for_task_status", Arguments: args},
+		})
+		if err != nil {
+			t.Fatalf("%s: CallTool: %v", name, err)
+		}
+		if !res.IsError {
+			t.Errorf("%s: expected tool error, got %s", name, textOf(res))
+		}
+	}
+	if len(fake.requestTypes()) != 0 {
+		t.Errorf("daemon should not be contacted for invalid args; got %v", fake.requestTypes())
+	}
+}
+
+func TestMCP_WaitForTaskStatus_ReturnsResultShape(t *testing.T) {
+	fake := newFakeDaemon(t)
+	ok := func(*daemon.Message) *daemon.Message {
+		resp, _ := daemon.NewMessage(daemon.MsgOK, nil)
+		return resp
+	}
+	fake.handle(daemon.MsgSubscribe, ok)
+	fake.handle(daemon.MsgUnsubscribe, ok)
+	fake.handle(daemon.MsgGetTask, func(msg *daemon.Message) *daemon.Message {
+		var req daemon.GetTaskRequest
+		_ = msg.DecodePayload(&req)
+		status := "running"
+		if req.TaskID == 8 {
+			status = "completed"
+		}
+		resp, _ := daemon.NewMessage(daemon.MsgGetTask, daemon.GetTaskResponse{Task: daemon.TaskInfo{ID: req.TaskID, Status: status}})
+		return resp
+	})
+
+	c := startMCPServer(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "wait_for_task_status",
+			Arguments: map[string]any{"task_ids": []any{7, 8}, "timeout_seconds": 5},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %s", textOf(res))
+	}
+	var out client.WaitResult
+	if err := json.Unmarshal([]byte(textOf(res)), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.TimedOut || len(out.Matched) != 1 || out.Matched[0].ID != 8 || len(out.Tasks) != 2 {
+		t.Fatalf("unexpected result: %+v", out)
+	}
+	for _, key := range []string{`"matched"`, `"tasks"`, `"timed_out"`} {
+		if !strings.Contains(textOf(res), key) {
+			t.Errorf("result JSON missing %s: %s", key, textOf(res))
+		}
 	}
 }

@@ -45,7 +45,7 @@ func Serve(cfg *config.Config) error {
 		server.WithToolCapabilities(false),
 	)
 
-	registerTools(s, c)
+	registerTools(s, c, cfg)
 
 	return server.ServeStdio(s)
 }
@@ -109,7 +109,11 @@ func Serve(cfg *config.Config) error {
 // accumulation across a sprint), but it widens the blast radius of a
 // misbehaving agent from "its own step context" to "future prompts on its
 // track"; the tool descriptions call this out explicitly.
-func registerTools(s *server.MCPServer, c *client.Client) {
+//
+// wait_for_task_status is read-only: it only subscribes and reads task state.
+// It opens its own daemon connection per call (hence cfg) so a long wait never
+// shares the subscription of the client used by the other tools.
+func registerTools(s *server.MCPServer, c *client.Client, cfg *config.Config) {
 	registerCreateTask(s, c)
 	registerCreateTasksAndWait(s, c)
 	registerWaitForTasks(s, c)
@@ -126,6 +130,7 @@ func registerTools(s *server.MCPServer, c *client.Client) {
 	registerGetTrack(s, c)
 	registerUpdateTrack(s, c)
 	registerListTracks(s, c)
+	registerWaitForTaskStatus(s, cfg)
 }
 
 // resultErr builds an MCP error result without losing the underlying error

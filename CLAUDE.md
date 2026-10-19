@@ -23,8 +23,9 @@ internal/
   task/              Task lifecycle and state transitions
   tmux/              Tmux session management for interactive tasks
   mcp/               MCP server exposing sakusen tools (create_task, create_tasks_and_wait,
-                     wait_for_tasks, get_task, list_tasks, list_workflows, retry_task,
-                     advance_task, stop_task, continue_task, update_task,
+                     wait_for_tasks, wait_for_task_status, get_task, list_tasks,
+                     list_workflows, retry_task, advance_task, stop_task,
+                     continue_task, update_task,
                      update_step_context, create_track, get_track, update_track,
                      list_tracks)
   notify/            Notification support
