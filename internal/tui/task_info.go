@@ -184,6 +184,12 @@ func (v *taskInfoView) renderMetadata() string {
 		b.WriteString("\n")
 	}
 
+	if t.WorkdirHeldBy != 0 {
+		b.WriteString(labelStyle.Render("Workdir held by: "))
+		b.WriteString(valueStyle.Render(fmt.Sprintf("#%d", t.WorkdirHeldBy)))
+		b.WriteString("\n")
+	}
+
 	// Waiting on (child tasks this step is suspended for)
 	if len(t.WaitsOn) > 0 {
 		ids := make([]string, len(t.WaitsOn))

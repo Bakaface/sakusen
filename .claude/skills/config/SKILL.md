@@ -90,6 +90,7 @@ type WorkflowConfig struct {
     Branch                string                  // pins a new-branch template (forces branch-mode "new")
     Checkout              string                  // pins an existing branch to check out (forces branch-mode "existing")
     Target                string                  // pins the target/base branch
+    ExclusiveWorkdir      bool                    // worktree:false tasks wait while another active worktree:false task of the project runs (inline periodics copy it; ref mode ignores the entry's)
     Agent                 string                  // workflow-level agent slug; steps inherit unless they set their own
     OnComplete            string                  // per-workflow override of the finalization action
     Steps                 []StepConfig

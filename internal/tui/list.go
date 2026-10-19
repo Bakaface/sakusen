@@ -632,6 +632,8 @@ func (l *listView) statusText(task daemon.TaskInfo) string {
 			} else {
 				statusLabel = "pending (blocked)"
 			}
+		} else if task.WorkdirHeldBy != 0 {
+			statusLabel = fmt.Sprintf("pending (workdir busy #%d)", task.WorkdirHeldBy)
 		}
 	case taskpkg.StatusAwaitingChildren:
 		switch n := len(task.WaitsOn); {

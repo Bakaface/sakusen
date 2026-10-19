@@ -740,6 +740,7 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 				Branch:           p.Branch,
 				Checkout:         p.Checkout,
 				Target:           p.Target,
+				ExclusiveWorkdir: p.ExclusiveWorkdir,
 				Hidden:           true,
 				Source:           "periodic",
 			}
