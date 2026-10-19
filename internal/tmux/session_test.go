@@ -248,3 +248,149 @@ func TestSwitchClientCommandExactTarget(t *testing.T) {
 		t.Errorf("Args = %v, want %v", got, want)
 	}
 }
+
+// createTaskSessions starts a detached session for each task ID under project
+// and kills them all when the test ends.
+func createTaskSessions(t *testing.T, project string, taskIDs ...string) {
+	t.Helper()
+	for _, id := range taskIDs {
+		s := NewSession(project, id, t.TempDir())
+		if err := s.Create("sleep", "600"); err != nil {
+			t.Fatalf("failed to create session %s: %v", s.Name, err)
+		}
+		t.Cleanup(func() { s.Kill() })
+	}
+}
+
+// liveSessionNames scans every session by name, independent of tmux's
+// target resolution.
+func liveSessionNames(t *testing.T) map[string]bool {
+	t.Helper()
+	sessions, err := ListSessions("")
+	if err != nil {
+		t.Fatalf("failed to list sessions: %v", err)
+	}
+	names := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		names[s.Name] = true
+	}
+	return names
+}
+
+func TestSessionExistsIsExact(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	project := "sakusen-exists-test"
+	createTaskSessions(t, project, "560")
+
+	if NewSession(project, "56", "").Exists() {
+		t.Error("Exists must not match a session that only shares the name as a prefix")
+	}
+
+	createTaskSessions(t, project, "56")
+	if !NewSession(project, "56", "").Exists() {
+		t.Error("Exists must report a session with the exact name")
+	}
+}
+
+func TestSessionKillIsExact(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	project := "sakusen-kill-test"
+	createTaskSessions(t, project, "560")
+
+	if err := NewSession(project, "56", "").Kill(); err == nil {
+		t.Error("expected Kill to fail for a name that only matches by prefix")
+	}
+	if !liveSessionNames(t)[project+"-560"] {
+		t.Error("Kill of a missing session must not kill a prefix-matching one")
+	}
+}
+
+func TestPaneTargetsAreExact(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	project := "sakusen-pane-test"
+	createTaskSessions(t, project, "560")
+
+	missing := NewSession(project, "56", "")
+	if missing.IsAlive() {
+		t.Error("IsAlive must not report on a session that only matches by prefix")
+	}
+	if _, err := missing.CapturePane(10); err == nil {
+		t.Error("expected CapturePane to fail for a name that only matches by prefix")
+	}
+	if err := missing.SendKeys("echo hi"); err == nil {
+		t.Error("expected SendKeys to fail for a name that only matches by prefix")
+	}
+	if err := missing.PipePane(filepath.Join(t.TempDir(), "pane.log")); err == nil {
+		t.Error("expected PipePane to fail for a name that only matches by prefix")
+	}
+
+	// The exact form must still resolve a session that does exist.
+	live := NewSession(project, "560", "")
+	if !live.IsAlive() {
+		t.Error("IsAlive must report a live session with the exact name")
+	}
+	if _, err := live.CapturePane(10); err != nil {
+		t.Errorf("CapturePane on the exact session: %v", err)
+	}
+}
+
+func TestKillSessionsForTaskIsExact(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	project := "sakusen-killtask-test"
+	createTaskSessions(t, project, "56", "560", "569")
+
+	if err := KillSessionsForTask(project, "56"); err != nil {
+		t.Fatalf("KillSessionsForTask: %v", err)
+	}
+
+	names := liveSessionNames(t)
+	if names[project+"-56"] {
+		t.Error("the task's own session must be killed")
+	}
+	for _, id := range []string{"560", "569"} {
+		if !names[project+"-"+id] {
+			t.Errorf("session for task %s must survive killing task 56", id)
+		}
+	}
+}
+
+func TestKillSessionsForTaskMissingSession(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	project := "sakusen-killtask-missing-test"
+	createTaskSessions(t, project, "560")
+
+	if err := KillSessionsForTask(project, "56"); err != nil {
+		t.Errorf("a missing session must not be an error, got %v", err)
+	}
+	if !liveSessionNames(t)[project+"-560"] {
+		t.Error("session for task 560 must survive killing task 56")
+	}
+}
+
+func TestAttachCommandsTargetExactSession(t *testing.T) {
+	cmds := map[string]*exec.Cmd{
+		"AttachCommand":       AttachCommand("proj-56"),
+		"SwitchClientCommand": SwitchClientCommand("proj-56"),
+		"NestedAttachCommand": NestedAttachCommand("proj-56"),
+	}
+	for name, cmd := range cmds {
+		if got := cmd.Args[len(cmd.Args)-1]; got != "=proj-56" {
+			t.Errorf("%s target = %q, want %q", name, got, "=proj-56")
+		}
+	}
+}

@@ -313,8 +313,8 @@ func (s *Server) hibernateTmuxTask(t *task.Task, reason string) bool {
 		return false
 	}
 
-	// Kill the task's EXACT session. tmux.KillSessionsForTask matches by
-	// prefix, so hibernating task #1 would also kill #10-#19.
+	// Kill directly rather than via tmux.KillSessionsForTask: a failed kill
+	// must be told apart from a session that is already gone.
 	session := tmux.NewSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.WorktreePath)
 	if err := session.Kill(); err != nil {
 		log.Printf("%sWarning: failed to kill tmux session for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
