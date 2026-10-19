@@ -36,6 +36,23 @@ workflows:
         human: true
 `
 
+// hibernateYMLExplicitAdvance is hibernateYML with the step advancing only on
+// an explicit advance instead of behind an approval gate.
+const hibernateYMLExplicitAdvance = `on_complete: none
+default_agent: interactive
+agents:
+  interactive:
+    mode: tmux
+    command: 'true'
+    resume_command: 'true'
+workflows:
+  - name: default
+    steps:
+      - name: implement
+        prompt: do it
+        advance: explicit
+`
+
 // hibernateYMLNoResume is the same agent with no resume_command: its sessions
 // can never be hibernated, because restoring one would start a fresh
 // conversation rather than bring the old one back.
@@ -382,6 +399,43 @@ func TestMaybeAutoAdvance_HumanStepMarksAtPrompt(t *testing.T) {
 	}
 	if refreshed.Status != task.StatusTmux {
 		t.Errorf("a human-gated step must not auto-advance, got %s", refreshed.Status)
+	}
+}
+
+// An explicit-advance step's sentinel records the session AND marks the agent
+// at its prompt, without advancing the task.
+func TestMaybeAutoAdvance_ExplicitAdvanceStepCapturesSessionAndMarksAtPrompt(t *testing.T) {
+	f := setupHibernationFixture(t, hibernateYMLExplicitAdvance)
+	tk := f.newTask(t, 1)
+	sentinel := writeSentinelWithSession(t, f.projectDir, "implement", "sess-explicit")
+
+	f.server.maybeAutoAdvance(tk)
+
+	chat, err := f.database.GetChatByStep(tk.ID, "implement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat == nil || chat.SessionID != "sess-explicit" {
+		t.Fatalf("expected an implement chat row carrying the sentinel session, got %+v", chat)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("expected the sentinel to be consumed (stat: %v)", err)
+	}
+	f.server.mu.RLock()
+	entry := f.server.tmuxAutoState[tk.ID]
+	f.server.mu.RUnlock()
+	if entry == nil || !entry.atPrompt {
+		t.Fatal("expected the step sentinel to park the task at its prompt")
+	}
+	if entry.advancing {
+		t.Error("an explicit-advance step must not be marked advancing")
+	}
+	refreshed, err := f.database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Status != task.StatusTmux {
+		t.Errorf("an explicit-advance step must not auto-advance, got %s", refreshed.Status)
 	}
 }
 

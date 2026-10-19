@@ -17,7 +17,8 @@ import (
 // sentinel file is the SOLE auto-advance signal for tasks paused in tmux
 // state — no sentinel means no advance (generic tmux agents that never write
 // one are manual-advance), a sentinel scoped to a different step must not
-// trigger, and `human: true` steps consume the sentinel without advancing.
+// trigger, and `human: true` / `advance: explicit` steps consume the sentinel
+// without advancing.
 
 // tmuxStepConfigYML pins a one-step workflow to a tmux-mode agent, matching
 // the paused-in-tmux state maybeAutoAdvance operates on.
@@ -48,6 +49,22 @@ workflows:
       - name: implement
         prompt: implement
         human: true
+`
+
+// tmuxExplicitAdvanceStepConfigYML is the same workflow with the step set to
+// advance only on an explicit advance_task / user action.
+const tmuxExplicitAdvanceStepConfigYML = `on_complete: none
+default_agent: pane
+agents:
+  pane:
+    mode: tmux
+    command: 'true'
+workflows:
+  - name: default
+    steps:
+      - name: implement
+        prompt: implement
+        advance: explicit
 `
 
 // newTmuxPausedTask creates a StatusTmux task paused on the workflow's single
@@ -177,4 +194,63 @@ func TestMaybeAutoAdvance_HumanStepConsumesSentinelWithoutAdvancing(t *testing.T
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Errorf("expected the human step's sentinel to be consumed (stat: %v)", err)
 	}
+}
+
+// TestMaybeAutoAdvance_ExplicitAdvanceStepNeverAutoAdvances verifies that an
+// `advance: explicit` step ignores turn-end sentinels across repeated ticks —
+// each is consumed without advancing — while still reading as a running,
+// non-human step rather than an approval gate.
+func TestMaybeAutoAdvance_ExplicitAdvanceStepNeverAutoAdvances(t *testing.T) {
+	s, database, projID := newAdvanceTestServer(t, tmuxExplicitAdvanceStepConfigYML)
+	tk := newTmuxPausedTask(t, database, projID)
+
+	for i := 0; i < 3; i++ {
+		sentinel := writeStepSentinel(t, tk.WorktreePath, "implement")
+
+		s.maybeAutoAdvance(tk)
+
+		refreshed, err := database.GetTask(tk.ID)
+		if err != nil {
+			t.Fatalf("failed to get task: %v", err)
+		}
+		if refreshed.Status != task.StatusTmux {
+			t.Fatalf("tick %d: an explicit-advance step must not auto-advance, got status %s", i, refreshed.Status)
+		}
+		if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+			t.Errorf("tick %d: expected the sentinel to be consumed (stat: %v)", i, err)
+		}
+		s.mu.RLock()
+		entry := s.tmuxAutoState[tk.ID]
+		s.mu.RUnlock()
+		if entry != nil && entry.advancing {
+			t.Fatalf("tick %d: an explicit-advance step must never be marked advancing", i)
+		}
+	}
+
+	info := s.taskToInfo(tk)
+	if info.StepHuman {
+		t.Error("an explicit-advance step must not report StepHuman")
+	}
+	if info.EffectiveStatus != string(task.StatusRunning) {
+		t.Errorf("EffectiveStatus = %q, want %q (not an approval gate)", info.EffectiveStatus, task.StatusRunning)
+	}
+}
+
+// TestAdvanceTmuxTask_ExplicitAdvanceStepAdvances verifies the explicit path
+// still moves an explicit-advance step on (here the final step, so the clean
+// repo fast-tracks to completed).
+func TestAdvanceTmuxTask_ExplicitAdvanceStepAdvances(t *testing.T) {
+	if !tmux.IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+	s, database, projID := newAdvanceTestServer(t, tmuxExplicitAdvanceStepConfigYML)
+	tk := newTmuxPausedTask(t, database, projID)
+
+	writeStepSentinel(t, tk.WorktreePath, "implement")
+	s.maybeAutoAdvance(tk)
+
+	if _, err := s.advanceTmuxTask(tk); err != nil {
+		t.Fatalf("advanceTmuxTask: %v", err)
+	}
+	waitForTaskStatus(t, database, tk.ID, task.StatusCompleted, 5*time.Second)
 }

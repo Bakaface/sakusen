@@ -219,6 +219,48 @@ func TestValidateAgentsLoopTmuxCascade(t *testing.T) {
 	}
 }
 
+// TestValidateStepAdvance covers the advance: field: the enum, the
+// human-gate conflict, and the tmux-only rule through the agent cascade.
+func TestValidateStepAdvance(t *testing.T) {
+	agents := "agents:\n  tm:\n    mode: tmux\n    command: x\n  hl:\n    command: x\n"
+	step := func(agent, extra string) string {
+		return agents + "workflows:\n  - name: w\n    agent: " + agent + "\n    steps:\n" +
+			"      - name: s\n        prompt: p\n" + extra
+	}
+
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string // empty → load must succeed
+	}{
+		{"explicit on tmux agent", step("tm", "        advance: explicit\n"), ""},
+		{"explicit via tmux default_agent",
+			agents + "default_agent: tm\nworkflows:\n  - name: w\n    steps:\n      - name: s\n        prompt: p\n        advance: explicit\n", ""},
+		{"auto on headless agent", step("hl", "        advance: auto\n"), ""},
+		{"unset on headless agent", step("hl", ""), ""},
+		{"invalid value", step("tm", "        advance: bogus\n"), `invalid advance "bogus"`},
+		{"explicit with human", step("tm", "        advance: explicit\n        human: true\n"), "cannot be combined with human: true"},
+		{"explicit on headless agent", step("hl", "        advance: explicit\n"), "advance: explicit requires a tmux-mode agent"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			dir, _ := setupProject(t, tt.yaml, nil)
+			_, err := LoadForProject(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected config to load, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 // TestValidateAgentRecordEdges covers agent-record validation edge cases at
 // load time: explicit headless mode, whitespace-only command, slug boundary
 // shapes for the kebab-case regex, and an empty registry.

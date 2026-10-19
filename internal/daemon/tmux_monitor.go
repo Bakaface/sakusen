@@ -362,9 +362,11 @@ func (s *Server) hibernateTmuxTask(t *task.Task, reason string) bool {
 // (e.g. a Claude Code Stop hook, or the agent itself as its final action).
 //
 // Tasks whose just-finished step is marked `human: true` are never
-// auto-advanced — they pause at the approval gate until the user acts. The
-// sentinel is still consumed (and discarded) so it doesn't leak across the
-// next attach/continue.
+// auto-advanced — they pause at the approval gate until the user acts.
+// `advance: explicit` steps are never auto-advanced either; they wait for
+// advance_task / the user, but unlike human steps they are not an approval
+// gate. In both cases the sentinel is still consumed (and discarded) so it
+// doesn't leak across the next attach/continue.
 func (s *Server) maybeAutoAdvance(t *task.Task) {
 	// Don't double-advance if a prior tick already kicked off the engine.
 	s.mu.RLock()
@@ -406,10 +408,10 @@ func (s *Server) maybeAutoAdvance(t *task.Task) {
 		s.markTmuxAtPrompt(t.ID)
 	}
 
-	// Steps that the user explicitly wants to approve are out of scope for
+	// Human (approval-gate) and explicit-advance steps are out of scope for
 	// auto-advance. Consume any stray sentinel so it doesn't trigger advance
 	// the next time the user attaches an interactive session.
-	if justFinished.Human {
+	if justFinished.Human || justFinished.ExplicitAdvance() {
 		workflow.ClearStepSentinels(t.WorktreePath, justFinished.Name)
 		return
 	}

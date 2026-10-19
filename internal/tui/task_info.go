@@ -256,6 +256,9 @@ func (v *taskInfoView) renderMetadata() string {
 			if step.Human {
 				suffix = " [human]"
 			}
+			if step.ExplicitAdvance() {
+				suffix += " [advance:explicit]"
+			}
 			// Explicit agent assignments only — the default cascade is
 			// surfaced via the daemon's list_workflows, not re-resolved here.
 			if step.Agent != "" {

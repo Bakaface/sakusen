@@ -77,6 +77,9 @@ func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) [
 				Human:       step.Human,
 				Loop:        step.Loop != nil,
 			}
+			if step.ExplicitAdvance() {
+				entry.Advance = config.AdvanceExplicit
+			}
 			if step.IsParallel() {
 				// A group runs no agent itself; its branches carry the agents.
 				entry.Agent = ""

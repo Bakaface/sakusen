@@ -8,6 +8,7 @@ import (
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/daemon"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestHandleTaskInfoKey_QReturnsToList(t *testing.T) {
@@ -101,7 +102,7 @@ func TestTaskInfoView_ShowsMetadata(t *testing.T) {
 		Steps: []config.StepConfig{
 			{Name: "implement"},
 			{Name: "review", Human: true},
-			{Name: "test"},
+			{Name: "test", Advance: config.AdvanceExplicit},
 		},
 	})
 	v.SetSize(80, 40)
@@ -140,6 +141,17 @@ func TestTaskInfoView_ShowsMetadata(t *testing.T) {
 	}
 	if !strings.Contains(output, "[human]") {
 		t.Error("expected output to contain '[human]' indicator")
+	}
+	if !strings.Contains(output, "test [advance:explicit]") {
+		t.Error("expected output to contain the '[advance:explicit]' indicator on the explicit-advance step")
+	}
+	if strings.Count(output, "[advance:explicit]") != 1 {
+		t.Error("expected '[advance:explicit]' only on the explicit-advance step")
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "[advance:explicit]") && lipgloss.Width(line) > 80 {
+			t.Errorf("step row width %d exceeds 80: %q", lipgloss.Width(line), line)
+		}
 	}
 }
 

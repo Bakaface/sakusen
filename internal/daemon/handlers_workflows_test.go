@@ -148,3 +148,32 @@ func TestSummarizeWorkflows_ResolvesAgents(t *testing.T) {
 		t.Errorf("plain.Steps[0]: got agent=%q tmux=%v, want default_agent worker/headless", got.Agent, got.Tmux)
 	}
 }
+
+// TestSummarizeWorkflows_Advance verifies the advance projection: reported
+// only for explicit-advance steps so existing workflows' output is unchanged.
+func TestSummarizeWorkflows_Advance(t *testing.T) {
+	cfg := &config.Config{
+		Agents: map[string]config.AgentConfig{
+			"pair": {Mode: config.AgentModeTmux, Command: "run-pair"},
+		},
+	}
+	in := []config.WorkflowConfig{{
+		Name:  "capture",
+		Agent: "pair",
+		Steps: []config.StepConfig{
+			{Name: "wait", Advance: config.AdvanceExplicit},
+			{Name: "auto", Advance: config.AdvanceAuto},
+			{Name: "unset"},
+		},
+	}}
+
+	steps := summarizeWorkflows(cfg, in)[0].Steps
+	if got := steps[0].Advance; got != config.AdvanceExplicit {
+		t.Errorf("wait.Advance = %q, want %q", got, config.AdvanceExplicit)
+	}
+	for _, st := range steps[1:] {
+		if st.Advance != "" {
+			t.Errorf("%s.Advance = %q, want empty (omitted for auto/unset)", st.Name, st.Advance)
+		}
+	}
+}
