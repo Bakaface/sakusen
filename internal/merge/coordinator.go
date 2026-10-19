@@ -1,23 +1,22 @@
 // Package merge is the deep module that owns the per-repo merge invariant.
 //
-// "All merges into the same repo must serialize, and on any failure the repo's
-// working tree state must be cleaned." Before this module existed that
-// invariant was spread across three packages — the daemon held the per-repo
-// mutex map, the workflow engine drove the retry loop, and internal/git had a
-// deferred CleanRepoState on the merge primitive. Each piece was shallow
-// because it relied on the others to behave correctly.
+// "All merges into the same repo must serialize, and Sakusen never discards
+// changes or switches branches in the main checkout." The merge is a
+// fast-forward that git refuses rather than clobbering edits; if the main
+// checkout is dirty or on another branch, the merge waits in merge-blocked.
 //
-// This package consolidates them. The daemon hands out per-repo Locks via a
-// Locks registry that survives config reloads; an Engine wraps a Lock plus a
-// few engine-local callbacks (conflict resolution, DB writes) into a
-// Coordinator; callers invoke Coordinator.Finalize and get the whole pipeline.
+// This package consolidates the pieces of that invariant. The daemon hands
+// out per-repo Locks via a Locks registry that survives config reloads; an
+// Engine wraps a Lock plus a few engine-local callbacks (conflict resolution,
+// DB writes) into a Coordinator; callers invoke Coordinator.Finalize and get
+// the whole pipeline.
 //
 // The external interface is intentionally tiny:
 //
 //	coord.Finalize(ctx, task, baseBranch, log)
 //
-// Everything else — locking, conflict retry, target-branch wait,
-// cleanup-on-failure — is locality inside this package.
+// Everything else — locking, conflict retry, target-branch wait — is
+// locality inside this package.
 package merge
 
 import (
@@ -50,8 +49,9 @@ type Config struct {
 	// MaxAttempts caps the merge-retry loop. Defaults to 3 when zero.
 	MaxAttempts int
 
-	// BlockedPollInterval is how often to re-check whether the target branch is
-	// clean while waiting in merge-blocked state. Defaults to 10s when zero.
+	// BlockedPollInterval is how often to re-check whether the main checkout is
+	// clean and on the target branch while waiting in merge-blocked state.
+	// Defaults to 10s when zero.
 	BlockedPollInterval time.Duration
 }
 
@@ -75,27 +75,27 @@ type CommitRecorder func(taskID int64, commitHash string) error
 
 // gitRepo is the narrow set of *git.Repo operations the Coordinator depends
 // on. Defining it here — rather than depending on *git.Repo directly —
-// lets tests substitute a fake and exercise the merge/conflict/cleanup
+// lets tests substitute a fake and exercise the merge/conflict
 // pipeline without a real git binary. NewCoordinator always wires up the
 // real *git.Repo for production use; only this package's fake-backed unit
 // test and the internal newCoordinator constructor use the interface
 // directly.
 type gitRepo interface {
 	Commit(worktreePath, message string) error
-	CleanRepoState() error
-	MergeBranch(branch, baseBranch string) error
+	MergeBranch(branch string) error
 	AbortRebase(worktreePath string) error
 	RebaseInto(worktreePath, baseBranch string) error
 	GetConflictedFiles(worktreePath string) ([]string, error)
 	ContinueRebase(worktreePath string) error
 	HasChanges() (bool, error)
+	GetCurrentBranch(dir string) (string, error)
 	GetLastCommitHash(dir string) (string, error)
 	Root() string
 }
 
 // Coordinator owns the merge pipeline for one repository: it serializes via a
-// shared Lock, waits for the target branch to be clean, runs the merge with
-// conflict-retry, and guarantees CleanRepoState on any pipeline failure.
+// shared Lock, waits for the main checkout to be clean and on the target
+// branch, and runs the merge with conflict-retry.
 //
 // One Coordinator instance exists per Engine; the Lock is shared across all
 // Engines pointing at the same repoRoot (so config reloads do not break
@@ -164,18 +164,16 @@ func (c *Coordinator) Lock() *Lock { return c.lock }
 // RepoRoot returns the absolute path this Coordinator merges into.
 func (c *Coordinator) RepoRoot() string { return c.repo.Root() }
 
-// Finalize runs the configured on_complete action for the task and guarantees
-// that on any failure during a merge the repository's working tree is restored
-// to a clean state.
+// Finalize runs the configured on_complete action for the task.
 //
 // Locality of the merge invariant:
 //   - Serialization: the per-repo Lock is held only across the base-repo merge
 //     operation itself. Worktree-side work (commits, rebase, conflict
 //     resolution) runs outside the lock so two tasks can prep their worktrees
 //     in parallel.
-//   - Cleanup: CleanRepoState fires whenever the merge branch of this function
-//     returns an error — regardless of whether the failure came from
-//     MergeBranch, RebaseInto, ContinueRebase, or the conflict resolver.
+//   - Main checkout safety: the main checkout is never reset or switched.
+//     Readiness (clean and on baseBranch) is re-checked under the lock; if it
+//     doesn't hold, the merge waits in merge-blocked instead of proceeding.
 //
 // The action ("merge" | "commit" | "none" | "") is resolved per-task by the
 // caller (workflow-level override falling back to the project-level setting)
@@ -224,37 +222,16 @@ func (c *Coordinator) commit(t *task.Task, logf LogFunc) error {
 	return nil
 }
 
-// merge runs the merge pipeline with cleanup-on-failure as a top-level
-// guarantee. The deferred CleanRepoState fires for any non-nil return inside
-// this method — including failures that happen *after* MergeBranch has
-// committed and *before* the post-merge bookkeeping completes.
-//
-// The merge is always a fast-forward of the base branch onto the task tip.
-// When the base branch has advanced past the task's fork point, the merge
-// attempt fails and refreshFromBase rebases the task branch onto the latest
-// base before retrying. This keeps history linear — no synthetic merge
-// commits get added for either the refresh or the integration step.
-func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string, logf LogFunc) (retErr error) {
+// merge runs the merge pipeline. The merge is always a fast-forward of the
+// base branch onto the task tip. When the base branch has advanced past the
+// task's fork point, the merge attempt fails and refreshFromBase rebases the
+// task branch onto the latest base before retrying. This keeps history linear
+// — no synthetic merge commits get added for either the refresh or the
+// integration step.
+func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string, logf LogFunc) error {
 	if t.Branch == "" {
 		return errors.New("cannot merge: task branch name is empty")
 	}
-
-	// Top-level safety net: if any branch of the merge pipeline returns an
-	// error, abort any in-progress merge and hard-reset the base repo so a
-	// later task does not see staged conflict markers on main. This is the
-	// single owner of the cleanup invariant — internal/git's MergeBranch keeps
-	// its own deferred CleanRepoState as defence-in-depth, but the
-	// authoritative cleanup lives here so failures *outside* MergeBranch
-	// (conflict resolution, target-clean wait, etc.) are covered too.
-	defer func() {
-		if retErr == nil {
-			return
-		}
-		if err := c.repo.CleanRepoState(); err != nil {
-			log.Printf("merge.Coordinator: failed to clean repo state for %s after merge failure: %v", c.repo.Root(), err)
-			logf("Warning: cleanup after merge failure failed: %v", err)
-		}
-	}()
 
 	// Commit any uncommitted worktree changes. Safe to do outside the per-repo
 	// lock — this writes only to the worktree's index.
@@ -263,11 +240,10 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 		return fmt.Errorf("commit failed: %w", err)
 	}
 
-	// Wait for the target branch to be clean. Done outside the lock so other
-	// tasks can finish their own merges (which is what clears the dirty state).
-	logf("Checking target branch %s for pending changes...", baseBranch)
-	if err := c.waitForCleanTarget(ctx, t); err != nil {
-		return fmt.Errorf("waiting for clean target branch: %w", err)
+	// Wait outside the lock so other tasks can keep merging meanwhile.
+	logf("Checking main checkout is clean and on %s...", baseBranch)
+	if err := c.waitForReadyTarget(ctx, t, baseBranch); err != nil {
+		return fmt.Errorf("waiting for target branch: %w", err)
 	}
 
 	logf("Fast-forwarding %s to branch %s...", baseBranch, t.Branch)
@@ -279,6 +255,16 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 		}
 
 		mergeErr = c.lockedMerge(t.Branch, baseBranch)
+		if errors.Is(mergeErr, errTargetNotReady) {
+			// The user touched the main checkout since the wait; this is not
+			// a merge failure, so wait again without consuming an attempt.
+			logf("%v", mergeErr)
+			if err := c.waitForReadyTarget(ctx, t, baseBranch); err != nil {
+				return fmt.Errorf("waiting for target branch: %w", err)
+			}
+			attempt--
+			continue
+		}
 		if mergeErr == nil {
 			logf("Merge successful")
 			c.recordBaseCommit(t)
@@ -309,7 +295,43 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 func (c *Coordinator) lockedMerge(branch, baseBranch string) error {
 	c.lock.Acquire()
 	defer c.lock.Release()
-	return c.repo.MergeBranch(branch, baseBranch)
+	// Re-check under the lock: the user may have edited or switched branches
+	// in the main checkout since waitForReadyTarget returned.
+	blocker, err := c.targetBlocker(baseBranch)
+	if err != nil {
+		return err
+	}
+	if blocker != "" {
+		return fmt.Errorf("%w: %s", errTargetNotReady, blocker)
+	}
+	return c.repo.MergeBranch(branch)
+}
+
+// errTargetNotReady means the main checkout is dirty or not on the base
+// branch, so the merge must wait rather than proceed.
+var errTargetNotReady = errors.New("target not ready")
+
+// targetBlocker returns why the main checkout can't take the merge right now,
+// or "" when it is on baseBranch with no uncommitted (or untracked) changes.
+func (c *Coordinator) targetBlocker(baseBranch string) (string, error) {
+	branch, err := c.repo.GetCurrentBranch(c.repo.Root())
+	if err != nil {
+		return "", fmt.Errorf("failed to check target branch: %w", err)
+	}
+	if branch == "HEAD" {
+		return fmt.Sprintf("main checkout is on a detached HEAD instead of %s", baseBranch), nil
+	}
+	if branch != baseBranch {
+		return fmt.Sprintf("main checkout is on branch %s instead of %s", branch, baseBranch), nil
+	}
+	dirty, err := c.repo.HasChanges()
+	if err != nil {
+		return "", fmt.Errorf("failed to check target branch: %w", err)
+	}
+	if dirty {
+		return "main checkout has uncommitted changes", nil
+	}
+	return "", nil
 }
 
 // refreshFromBase rebases the task's worktree branch onto baseBranch,
@@ -402,20 +424,20 @@ func (c *Coordinator) markResolvingConflicts(t *task.Task) func() {
 	}
 }
 
-// waitForCleanTarget polls the repo root until it has no pending changes.
-// While waiting it transitions the task into the merge-blocked state via the
-// injected StatusSetter so the UI can show why work is stalled. Runs outside
-// any lock — the goal is to let other tasks finish their merges.
-func (c *Coordinator) waitForCleanTarget(ctx context.Context, t *task.Task) error {
-	dirty, err := c.repo.HasChanges()
+// waitForReadyTarget polls until the main checkout is clean and on
+// baseBranch. While waiting it transitions the task into the merge-blocked
+// state via the injected StatusSetter so the UI can show why work is stalled.
+// Runs outside any lock — the goal is to let other tasks finish their merges.
+func (c *Coordinator) waitForReadyTarget(ctx context.Context, t *task.Task, baseBranch string) error {
+	blocker, err := c.targetBlocker(baseBranch)
 	if err != nil {
-		return fmt.Errorf("failed to check target branch: %w", err)
+		return err
 	}
-	if !dirty {
+	if blocker == "" {
 		return nil
 	}
 
-	log.Printf("Task #%d: target branch has pending changes, entering merge-blocked state", t.ID)
+	log.Printf("Task #%d: %s, entering merge-blocked state", t.ID, blocker)
 	if c.setStatus != nil {
 		if err := c.setStatus(t.ID, task.StatusMergeBlocked); err != nil {
 			log.Printf("Warning: failed to set merge-blocked status for task #%d: %v", t.ID, err)
@@ -430,16 +452,16 @@ func (c *Coordinator) waitForCleanTarget(ctx context.Context, t *task.Task) erro
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			dirty, err := c.repo.HasChanges()
+			blocker, err := c.targetBlocker(baseBranch)
 			if err != nil {
-				log.Printf("Task #%d: failed to check target branch: %v", t.ID, err)
+				log.Printf("Task #%d: %v", t.ID, err)
 				continue
 			}
-			if !dirty {
-				log.Printf("Task #%d: target branch is clean, proceeding with merge", t.ID)
+			if blocker == "" {
+				log.Printf("Task #%d: main checkout is clean and on %s, proceeding with merge", t.ID, baseBranch)
 				return nil
 			}
-			log.Printf("Task #%d: target branch still has pending changes, retrying", t.ID)
+			log.Printf("Task #%d: %s, retrying", t.ID, blocker)
 		}
 	}
 }

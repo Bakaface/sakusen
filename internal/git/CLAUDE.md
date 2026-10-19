@@ -4,7 +4,7 @@ Worktree management, merge/rebase, conflict resolution, branch operations. Every
 
 ## Critical Invariants
 
-- **`MergeBranch()` includes deferred `CleanRepoState()` safety net** — aborts merge and hard-resets on failure to prevent corrupted state
+- **`MergeBranch()` is a bare `git merge --ff-only` in the repo root** — it never checks out a branch or resets; the caller ensures the root is clean and on the base branch, and git refuses rather than clobbering edits
 - **`RevertCommits()` reverses in newest-first order** — reverse iteration ensures correct commit lineage
 - **Non-worktree mode: no branch creation/deletion** — `on_complete` uses `Commit()`, not merge
 
@@ -14,7 +14,7 @@ Worktree management, merge/rebase, conflict resolution, branch operations. Every
 |------|---------|
 | `repo.go` | `Repo` — thin wrapper over a repo root. Main-tree operations (merge, branch management, worktree lifecycle) are methods with no path argument; operations scoped to one task worktree take that worktree's path explicitly. Cheap to construct per call site |
 | `worktree.go` | Worktree create/checkout/remove/list/prune, detach/reattach HEAD, default-branch detection (`symbolic-ref` → main/master → HEAD) |
-| `operations.go` | Commit, meaningful-change detection, merge (`--no-ff`), rebase with auto-abort, diff stat, conflict helpers (`MergeInto` / `GetConflictedFiles` / `CompleteMerge` / `AbortMerge`), revert, commit-message utilities |
+| `operations.go` | Commit, meaningful-change detection, fast-forward-only merge, rebase with auto-abort, diff stat, conflict helpers (`MergeInto` / `GetConflictedFiles` / `CompleteMerge` / `AbortMerge`), revert, commit-message utilities |
 | `errors.go` | Sentinels classified from git stderr: `ErrWorktreeExists` (create falls back to checking out the existing branch), `ErrNotAWorktree` (remove treats as a no-op) |
 
 ## Conventions

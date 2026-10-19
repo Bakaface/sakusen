@@ -242,7 +242,7 @@ func TestMergeBranch_SequentialMerges(t *testing.T) {
 	// Merge both branches sequentially (as the mutex would enforce). feature-a
 	// fast-forwards from init; feature-b is rebased onto main (now at A) so it
 	// can also fast-forward.
-	if err := r.MergeBranch("feature-a", "main"); err != nil {
+	if err := r.MergeBranch("feature-a"); err != nil {
 		t.Fatalf("MergeBranch feature-a failed: %v", err)
 	}
 	runGit(t, repo, "checkout", "feature-b")
@@ -250,7 +250,7 @@ func TestMergeBranch_SequentialMerges(t *testing.T) {
 		t.Fatalf("RebaseBranch feature-b failed: %v", err)
 	}
 	runGit(t, repo, "checkout", "main")
-	if err := r.MergeBranch("feature-b", "main"); err != nil {
+	if err := r.MergeBranch("feature-b"); err != nil {
 		t.Fatalf("MergeBranch feature-b failed: %v", err)
 	}
 
@@ -332,7 +332,7 @@ func TestMergeBranch_ConcurrentWithMutex(t *testing.T) {
 			// First task fast-forwards; later tasks must rebase onto the
 			// updated main first because --ff-only refuses when their fork
 			// point has fallen behind.
-			err := r.MergeBranch(branchName, "main")
+			err := r.MergeBranch(branchName)
 			if err != nil {
 				runGit(t, repo, "checkout", branchName)
 				if rebaseErr := r.RebaseBranch(repo, "main"); rebaseErr != nil {
@@ -341,7 +341,7 @@ func TestMergeBranch_ConcurrentWithMutex(t *testing.T) {
 					return
 				}
 				runGit(t, repo, "checkout", "main")
-				err = r.MergeBranch(branchName, "main")
+				err = r.MergeBranch(branchName)
 			}
 			errs[idx] = err
 		}(i)
@@ -398,7 +398,7 @@ func TestMergeBranch_PreservesHistory(t *testing.T) {
 	featureTip := strings.TrimSpace(string(out))
 
 	runGit(t, repo, "checkout", "main")
-	if err := r.MergeBranch("feature", "main"); err != nil {
+	if err := r.MergeBranch("feature"); err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestMergeBranch_PreservesHistory(t *testing.T) {
 	}
 }
 
-func TestMergeBranch_NonFastForwardCleansUp(t *testing.T) {
+func TestMergeBranch_NonFastForwardPreservesUserEdits(t *testing.T) {
 	repo := initTestRepo(t)
 	r := NewRepo(repo)
 
@@ -453,21 +453,38 @@ func TestMergeBranch_NonFastForwardCleansUp(t *testing.T) {
 	runGit(t, repo, "checkout", "main")
 
 	// First merge fast-forwards.
-	if err := r.MergeBranch("branch-a", "main"); err != nil {
+	if err := r.MergeBranch("branch-a"); err != nil {
 		t.Fatalf("first merge should fast-forward: %v", err)
 	}
 
+	// An unrelated uncommitted user edit in the main checkout.
+	if err := os.WriteFile(filepath.Join(repo, "user.txt"), []byte("user edit"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "user.txt")
+	headBefore := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
 	// Second merge must fail — branch-b is not descended from main's new tip,
 	// so --ff-only refuses. The caller's job is to rebase branch-b first.
-	if err := r.MergeBranch("branch-b", "main"); err == nil {
+	if err := r.MergeBranch("branch-b"); err == nil {
 		t.Fatal("expected --ff-only merge to refuse non-descendant branch")
 	}
 
-	// Working directory must be clean after the refusal so other tasks can
-	// keep merging.
-	statusOut := runGitOutput(t, repo, "status", "--porcelain")
-	if strings.TrimSpace(statusOut) != "" {
-		t.Errorf("expected clean working directory after refused merge, got:\n%s", statusOut)
+	if got := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD")); got != headBefore {
+		t.Errorf("HEAD moved after refused merge: %s -> %s", headBefore, got)
+	}
+	if statusOut := runGitOutput(t, repo, "status", "--porcelain"); strings.TrimSpace(statusOut) != "A  user.txt" {
+		t.Errorf("expected only the staged user edit after refused merge, got:\n%s", statusOut)
+	}
+	if data, err := os.ReadFile(filepath.Join(repo, "user.txt")); err != nil || string(data) != "user edit" {
+		t.Errorf("user edit lost after refused merge: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git", "MERGE_HEAD")); !os.IsNotExist(err) {
+		t.Errorf("expected no MERGE_HEAD after refused merge, stat err: %v", err)
+	}
+	runGit(t, repo, "rm", "--cached", "-q", "user.txt")
+	if err := os.Remove(filepath.Join(repo, "user.txt")); err != nil {
+		t.Fatal(err)
 	}
 
 	// A descendant branch should still merge cleanly afterwards.
@@ -479,8 +496,43 @@ func TestMergeBranch_NonFastForwardCleansUp(t *testing.T) {
 	runGit(t, repo, "commit", "-m", "add other.txt")
 	runGit(t, repo, "checkout", "main")
 
-	if err := r.MergeBranch("branch-c", "main"); err != nil {
+	if err := r.MergeBranch("branch-c"); err != nil {
 		t.Fatalf("descendant merge after refusal should succeed: %v", err)
+	}
+}
+
+func TestMergeBranch_DirtyTouchedFilePreservesUserEdit(t *testing.T) {
+	repo := initTestRepo(t)
+	r := NewRepo(repo)
+
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-m", "add shared.txt")
+
+	runGit(t, repo, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("feature change"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-m", "modify shared.txt")
+	runGit(t, repo, "checkout", "main")
+
+	// The user edits the same file the fast-forward would touch.
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("user edit"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.MergeBranch("feature"); err == nil {
+		t.Fatal("expected merge to refuse overwriting a dirty file")
+	}
+
+	if data, err := os.ReadFile(filepath.Join(repo, "shared.txt")); err != nil || string(data) != "user edit" {
+		t.Errorf("user edit lost after refused merge: %q, %v", data, err)
+	}
+	if branch, _ := r.GetCurrentBranch(repo); branch != "main" {
+		t.Errorf("expected to stay on main, got %s", branch)
 	}
 }
 
@@ -609,13 +661,13 @@ func TestMergeBranch_RetryAfterRebase(t *testing.T) {
 	// Merge branch-a first — advances main
 	var mu sync.Mutex
 	mu.Lock()
-	if err := r.MergeBranch("branch-a", "main"); err != nil {
+	if err := r.MergeBranch("branch-a"); err != nil {
 		mu.Unlock()
 		t.Fatalf("first merge failed: %v", err)
 	}
 
 	// branch-b now isn't descended from main, so --ff-only must refuse it.
-	mergeErr := r.MergeBranch("branch-b", "main")
+	mergeErr := r.MergeBranch("branch-b")
 	if mergeErr == nil {
 		mu.Unlock()
 		t.Fatal("expected --ff-only to refuse branch-b before rebase")
@@ -630,7 +682,7 @@ func TestMergeBranch_RetryAfterRebase(t *testing.T) {
 	runGit(t, repo, "checkout", "main")
 
 	mu.Lock()
-	if err := r.MergeBranch("branch-b", "main"); err != nil {
+	if err := r.MergeBranch("branch-b"); err != nil {
 		mu.Unlock()
 		t.Fatalf("merge after rebase should succeed: %v", err)
 	}

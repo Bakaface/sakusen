@@ -1,8 +1,8 @@
 # internal/merge — Per-Repo Merge Serialization
 
-The deep module that owns the "all merges into the same repo must serialize, and on any failure
-the repo's working tree must be cleaned" invariant. Consolidates logic that previously lived
-across the daemon, the workflow engine, and `internal/git`.
+The deep module that owns the "all merges into the same repo must serialize, and Sakusen never
+discards changes or switches branches in the main checkout" invariant. Consolidates logic that
+previously lived across the daemon, the workflow engine, and `internal/git`.
 
 ## Critical Invariants
 
@@ -11,8 +11,12 @@ across the daemon, the workflow engine, and `internal/git`.
 - **Per-repo serialization via a shared `*Lock`** — the daemon owns a `*Locks` registry
   (`Locks.For(repoRoot)` returns a stable per-repo Lock). Multiple Coordinators (e.g., after
   config reload) that point at the same repo share the same Lock so serialization survives.
-- **Cleanup on any failure** — Coordinator must call `git.CleanRepoState` in a `defer` so a
-  failed merge never leaves the repo with conflict markers, partial commits, or a dirty index.
+- **Never touch user state in the main checkout** — Sakusen never discards changes or switches
+  branches in the main checkout; if main is dirty or on another branch the merge waits in
+  merge-blocked. Readiness (clean, including untracked files, and on `baseBranch`) is checked
+  before the merge and re-checked under the lock; a failed re-check re-enters the wait without
+  consuming a merge attempt. The merge is `--ff-only` and conflicts are resolved in the task
+  worktree, so nothing is ever left half-applied in main.
 - **Conflict resolver is engine-supplied** — `ConflictResolver` is wired by the workflow engine
   (typically spawns a Claude agent to fix conflicts and stage). A nil resolver means conflicts
   abort the merge — never silently succeed.
@@ -23,7 +27,7 @@ across the daemon, the workflow engine, and `internal/git`.
 
 | File | Purpose |
 |------|---------|
-| `coordinator.go` | `Coordinator`, `Config`, `Lock`, `Locks`, the `Finalize` pipeline, conflict-retry, `waitForCleanTarget`, commit-recorder hooks |
+| `coordinator.go` | `Coordinator`, `Config`, `Lock`, `Locks`, the `Finalize` pipeline, conflict-retry, `waitForReadyTarget`, commit-recorder hooks |
 | `coordinator_test.go` | Unit tests for the pipeline + locking |
 
 ## Patterns

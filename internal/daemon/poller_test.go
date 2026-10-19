@@ -10,21 +10,14 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
-	gitpkg "github.com/Bakaface/sakusen/internal/git"
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
-// TestRecoverOrphanedTasks_FinalizingRestartsAgent verifies the two coupled
-// fixes for the merge-recovery bug:
-//
-//  1. Tasks killed during finalization (status=finalizing — the state used
-//     while the merge coordinator is running, including mid-conflict
-//     resolution) must NOT be silently demoted to StatusTmux. Previously the
-//     demotion lost the in-flight merge entirely.
-//  2. The repo-cleanup pass must cover Finalizing tasks. The deferred
-//     CleanRepoState in merge.Coordinator does not fire on process kill, so
-//     a half-merged base branch needs to be reset before any recovery agent
-//     touches the repo.
+// TestRecoverOrphanedTasks_FinalizingRestartsAgent verifies that tasks killed
+// during finalization or while merge-blocked are re-entered via startTaskAgent
+// (not silently demoted to StatusTmux, which lost the in-flight merge), and
+// that recovery never touches uncommitted user edits in the main checkout —
+// a merge-blocked task is blocked precisely because those edits exist.
 func TestRecoverOrphanedTasks_FinalizingRestartsAgent(t *testing.T) {
 	repoDir := initRecoveryTestRepo(t)
 
@@ -57,55 +50,76 @@ func TestRecoverOrphanedTasks_FinalizingRestartsAgent(t *testing.T) {
 		t.Fatalf("failed to pre-load project context: %v", err)
 	}
 
-	// Leave a staged change in the repo to simulate a half-merged base branch
-	// from an interrupted merge commit.
-	if err := os.WriteFile(filepath.Join(repoDir, "leftover.txt"), []byte("partial merge"), 0644); err != nil {
-		t.Fatalf("failed to write leftover file: %v", err)
-	}
-	stage := exec.Command("git", "add", "leftover.txt")
-	stage.Dir = repoDir
-	if out, err := stage.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	if dirty, err := gitpkg.NewRepo(repoDir).HasChanges(); err != nil || !dirty {
-		t.Fatalf("expected dirty repo before recovery (dirty=%v err=%v)", dirty, err)
-	}
+	writeUserEdits(t, repoDir)
 
-	// Simulate the post-merge-conflict-killed state: status=Finalizing with
-	// step_index past the only step so the recovery RunTask invocation
+	// Step index past the only step so the recovery RunTask invocation
 	// no-ops cleanly without invoking claude.
-	tk, err := database.CreateTaskWithPriority(
-		proj.ID, "Test task", "desc", "slug", "default", "", "branch", "", "",
-		task.StatusFinalizing, task.PriorityMedium, false, nil, nil,
-	)
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
-	}
-	if err := database.UpdateTaskStep(tk.ID, 1, ""); err != nil {
-		t.Fatalf("failed to set step index past last step: %v", err)
+	var ids []int64
+	for _, status := range []task.Status{task.StatusFinalizing, task.StatusMergeBlocked} {
+		tk, err := database.CreateTaskWithPriority(
+			proj.ID, "Test task "+string(status), "desc", "slug-"+string(status), "default", "", "branch-"+string(status), "", "",
+			status, task.PriorityMedium, false, nil, nil,
+		)
+		if err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+		if err := database.UpdateTaskStep(tk.ID, 1, ""); err != nil {
+			t.Fatalf("failed to set step index past last step: %v", err)
+		}
+		ids = append(ids, tk.ID)
 	}
 
 	if err := s.recoverOrphanedTasks(); err != nil {
 		t.Fatalf("recoverOrphanedTasks failed: %v", err)
 	}
 
-	// Fix #1: the Finalizing→Tmux demotion bug would have synchronously set
-	// status=tmux. The fix routes the task through startTaskAgent instead.
-	refreshed, err := database.GetTask(tk.ID)
-	if err != nil {
-		t.Fatalf("failed to get task: %v", err)
-	}
-	if refreshed.Status == task.StatusTmux {
-		t.Fatalf("Finalizing task demoted to tmux on recovery (the bug); status=%s", refreshed.Status)
+	for _, id := range ids {
+		refreshed, err := database.GetTask(id)
+		if err != nil {
+			t.Fatalf("failed to get task: %v", err)
+		}
+		if refreshed.Status == task.StatusTmux {
+			t.Fatalf("task #%d demoted to tmux on recovery; status=%s", id, refreshed.Status)
+		}
 	}
 
-	// Fix #2: the repo cleanup pass must have run for the Finalizing task's
-	// project. Previously it only iterated GetRunningTasks() and missed
-	// repos whose only mid-flight task was Finalizing or MergeBlocked.
-	if dirty, err := gitpkg.NewRepo(repoDir).HasChanges(); err != nil {
-		t.Fatalf("failed to check repo state: %v", err)
-	} else if dirty {
-		t.Errorf("expected repo cleanup to reset staged changes for Finalizing task; repo still dirty")
+	assertUserEditsIntact(t, repoDir)
+}
+
+// writeUserEdits leaves a staged new file and an unstaged modification of a
+// tracked file in the repo root, simulating a human editing the main checkout.
+func writeUserEdits(t *testing.T, repoDir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repoDir, "staged.txt"), []byte("user staged"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stage := exec.Command("git", "add", "staged.txt")
+	stage.Dir = repoDir
+	if out, err := stage.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("user unstaged"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertUserEditsIntact checks that the edits from writeUserEdits survived.
+func assertUserEditsIntact(t *testing.T, repoDir string) {
+	t.Helper()
+	for file, want := range map[string]string{"staged.txt": "user staged", "README.md": "user unstaged"} {
+		got, err := os.ReadFile(filepath.Join(repoDir, file))
+		if err != nil || string(got) != want {
+			t.Errorf("%s = %q (err %v), want %q", file, got, err, want)
+		}
+	}
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if got, want := string(out), " M README.md\nA  staged.txt\n"; got != want {
+		t.Errorf("git status = %q, want %q", got, want)
 	}
 }
 

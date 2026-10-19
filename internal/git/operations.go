@@ -88,69 +88,26 @@ func (r *Repo) HasChanges() (bool, error) {
 	return strings.TrimSpace(stdout.String()) != "", nil
 }
 
-// CleanRepoState forcibly restores the repo root's working tree and index to
-// a clean state. It aborts any in-progress merge, then hard-resets to HEAD.
-// Returns an error only if the repo is still dirty after cleanup.
-func (r *Repo) CleanRepoState() error {
-	// Abort any in-progress merge first (handles conflicted/half-merged index)
-	abortCmd := exec.Command("git", "merge", "--abort")
-	abortCmd.Dir = r.root
-	abortCmd.Run() // ignore error — no merge in progress is fine
-
-	// Hard reset index and working tree
-	resetCmd := exec.Command("git", "reset", "--hard", "HEAD")
-	resetCmd.Dir = r.root
-	if err := resetCmd.Run(); err != nil {
-		return fmt.Errorf("git reset --hard failed: %w", err)
-	}
-
-	// Verify the cleanup actually worked
-	dirty, err := r.HasChanges()
-	if err != nil {
-		return fmt.Errorf("failed to verify clean state: %w", err)
-	}
-	if dirty {
-		return fmt.Errorf("repo still dirty after cleanup")
-	}
-	return nil
-}
-
-// MergeBranch fast-forwards the repo root's current baseBranch to the tip of
+// MergeBranch fast-forwards the repo root's checked-out branch to the tip of
 // branch. Fails if a fast-forward isn't possible — callers are expected to
-// rebase the task branch onto baseBranch first (via RebaseInto) and retry.
+// rebase the task branch onto the base first (via RebaseInto) and retry.
 // Linear history is the design: no merge commits are ever produced here, so
 // the base branch's log is the task branches' commits in order.
-func (r *Repo) MergeBranch(branch, baseBranch string) error {
-	// Safety net: if we exit without a successful commit, ensure we don't
-	// leave staged changes on the base branch (the root cause of the race
-	// condition where parallel merges leave pending changes on main).
-	committed := false
-	defer func() {
-		if !committed {
-			r.CleanRepoState() // best-effort: abort merge + hard reset
-		}
-	}()
-
-	checkoutCmd := exec.Command("git", "checkout", baseBranch)
-	checkoutCmd.Dir = r.root
-
-	var stderr bytes.Buffer
-	checkoutCmd.Stderr = &stderr
-
-	if err := checkoutCmd.Run(); err != nil {
-		return fmt.Errorf("git checkout %s failed: %w (stderr: %s)", baseBranch, err, stderr.String())
-	}
-
+//
+// The root is the user's main checkout, so this never checks out a branch or
+// discards changes: the caller must ensure the root is clean and on the base
+// branch. If not, git refuses the fast-forward rather than clobbering edits.
+func (r *Repo) MergeBranch(branch string) error {
 	mergeCmd := exec.Command("git", "merge", "--ff-only", branch)
 	mergeCmd.Dir = r.root
-	stderr.Reset()
+
+	var stderr bytes.Buffer
 	mergeCmd.Stderr = &stderr
 
 	if err := mergeCmd.Run(); err != nil {
 		return fmt.Errorf("git merge --ff-only failed: %w (stderr: %s)", err, stderr.String())
 	}
 
-	committed = true
 	return nil
 }
 
