@@ -101,6 +101,7 @@ type WorkflowConfig struct {
     WorktreeSetupCommand  string                  // Per-workflow setup command (override project-level)
     WorktreeSetupCommands []string                // Per-workflow ordered setup commands
     TmuxSetupCommand      string                  // Per-workflow tmux setup command (override project-level)
+    Notifications         *NotificationOverrides  // Per-workflow notification overrides (see below)
 
     // Populated by the loader, not from YAML:
     Hidden                bool                    // file-based workflow not referenced from .sakusen.yml
@@ -186,6 +187,25 @@ explicit `agent:`/`default_agent:` refs must resolve (the implicit `"claude"` fa
 exempt — it fails at step-run time with an instructive error), loop steps must not resolve to
 tmux agents, and `{{claude_command}}` in any tmux-setup-command is rejected (use
 `{{agent_command}}` / `{{run_agent}}`).
+
+### Notification overrides
+
+```go
+type NotificationOverrides struct {   // `notifications:` on a workflow or periodic entry
+    OnComplete, OnFailed, OnWaitingInput *bool // nil = inherit the next tier
+    NotifyIf *NotifyCondition                  // gates completion notifications only
+}
+
+type NotifyCondition struct {          // exactly one form
+    StepContextNonempty string         // step whose context must be non-blank
+    StepContextContains string         // step whose context must contain Marker
+    Marker              string         // literal, case-sensitive; required with StepContextContains
+}
+
+func (c *Config) EffectiveNotifications(workflowName, periodicName string, base NotificationsConfig) EffectiveNotifications
+```
+
+Each field cascades independently: `PeriodicEntry.Notifications` → `WorkflowConfig.Notifications` → `base` (the daemon's global `NotificationsConfig`); a missing periodic/workflow is skipped. `EffectiveNotifications` also records which values came from an override (`*Overridden`), used to suppress "All Tasks Completed". There is no `enabled` override: the global `Enabled` stays the master gate in `notify.Notifier.Send`. Both structs decode strictly (`checkKnownMappingKeys`) even though their parent entries do not. `ValidateNotifications` (workflows) and `validatePeriodic` (periodic entries, against the inline steps or the referenced workflow) enforce the one-form rule, the `marker` rule, and that the step names a step or parallel branch. An inline periodic's `notifications` is NOT copied onto its hidden `periodic:<name>` workflow.
 
 ### VerificationConfig
 

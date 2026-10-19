@@ -24,7 +24,7 @@ Unix socket server, request handlers, task polling, agent lifecycle. Protocol is
 | `protocol.go` | Message types, request/response structs |
 | `poller.go` | `taskPollerLoop` → `checkPendingTasks` → `startTaskAgent` (claim in DB, project context, work dir, runner wrapping `engine.RunTask`, spawn via manager) |
 | `scheduler.go` | Periodic definitions: reconcile from each project's `.sakusen.yml`, fire due ones as ordinary tasks; startup catch-up runs separately |
-| `broadcast.go` | `onAgentStateChange` → `MsgAgentUpdate` to subscribers; terminal states update the task, fire notifications, `checkProjectTasksDone` |
+| `broadcast.go` | `onAgentStateChange` → `MsgAgentUpdate` to subscribers; terminal states update the task, fire notifications (per-task switches via `taskNotifications`: periodic → workflow → global; `notify_if` evaluated in `notifyCompleted` from `task_steps`), `checkProjectTasksDone` (skipped when the trigger's own notification was silenced by an override) |
 | `tmux_monitor.go` | Background tmux activity loop, broadcasts activity changes |
 | `agent_spawn.go` | `spawnInteractiveSession` / `interactiveAgent` (see invariants) |
 | `handlers_task.go` | Task CRUD & metadata: create (async title/slug via `summarizer:`), get, list, delete, retry, priority/field/dependency updates, revert, step contexts |

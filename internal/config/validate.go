@@ -322,6 +322,8 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 //  4. when input is empty, no step prompt of the effective workflow may
 //     reference {{task.input}} (it would resolve to the empty string)
 //  5. names are unique and non-empty
+//  6. a notifications override is well-formed and its notify_if names a step
+//     of the effective workflow
 func validatePeriodic(cfg *Config) error {
 	seen := make(map[string]bool, len(cfg.Periodic))
 	for i := range cfg.Periodic {
@@ -369,6 +371,12 @@ func validatePeriodic(cfg *Config) error {
 			inputPinned = wf.Input != ""
 		} else {
 			steps = p.Steps
+		}
+
+		if p.Notifications != nil {
+			if err := p.Notifications.validate(&WorkflowConfig{Steps: steps}); err != nil {
+				return fmt.Errorf("periodic %q: %w", p.Name, err)
+			}
 		}
 
 		if p.Input == "" && !inputPinned {

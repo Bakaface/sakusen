@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -214,6 +215,12 @@ type PeriodicEntry struct {
 
 	// Paused, when true, keeps the definition registered but prevents fires.
 	Paused bool `yaml:"paused,omitempty"`
+
+	// Notifications overrides the per-event notification switches for tasks
+	// fired by this entry, in both ref and inline mode. It is the most
+	// specific tier (see Config.EffectiveNotifications) and is never copied
+	// onto the hidden "periodic:<name>" workflow.
+	Notifications *NotificationOverrides `yaml:"notifications,omitempty"`
 }
 
 // UnmarshalYAML decodes a PeriodicEntry and rejects the removed `tmux:` and
@@ -267,6 +274,7 @@ var knownWorkflowFields = map[string]bool{
 	"worktree-setup-commands": true,
 	"tmux-setup-command":      true,
 	"workdir":                 true,
+	"notifications":           true,
 	"tmux":                    true, // removed — routed to the migration error
 	"print":                   true, // removed — routed to the migration error
 }
@@ -434,6 +442,10 @@ type WorkflowConfig struct {
 	WorktreeSetupCommand  string                  `yaml:"worktree-setup-command,omitempty"`
 	WorktreeSetupCommands []string                `yaml:"worktree-setup-commands,omitempty"`
 	TmuxSetupCommand      string                  `yaml:"tmux-setup-command,omitempty"`
+
+	// Notifications overrides the per-event notification switches for tasks
+	// running this workflow (see Config.EffectiveNotifications).
+	Notifications *NotificationOverrides `yaml:"notifications,omitempty"`
 
 	// Hidden marks workflows loaded from .sakusen/workflows/ that are NOT
 	// referenced from .sakusen.yml. Hidden workflows remain engine-reachable
@@ -622,6 +634,21 @@ func checkRemovedModeFields(node *yaml.Node, scope string) error {
 	}
 	return checkRemovedMappingKey(node, "print",
 		fmt.Sprintf("%s field `print` was removed: execution mode now comes from the agent record — set `agent: <slug>` where the agent's `mode` is \"headless\" (print) or \"tmux\"", scope))
+}
+
+// checkKnownMappingKeys rejects any top-level key of a mapping node that is
+// not in known.
+func checkKnownMappingKeys(node *yaml.Node, scope string, known ...string) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind == yaml.ScalarNode && !slices.Contains(known, key.Value) {
+			return fmt.Errorf("%s: unknown field %q (valid: %s)", scope, key.Value, strings.Join(known, ", "))
+		}
+	}
+	return nil
 }
 
 // checkRemovedMappingKey returns errMsg as an error when the given mapping
@@ -1121,6 +1148,109 @@ type NotificationsConfig struct {
 	OnFailed       bool `yaml:"on_failed"`
 	OnWaitingInput bool `yaml:"on_waiting_input"`
 	OnMergeBlocked bool `yaml:"on_merge_blocked"`
+}
+
+// NotificationOverrides is the `notifications:` block on a workflow or a
+// periodic entry. Each field overrides the global per-event switch only when
+// set. There is deliberately no `enabled`: the global switch stays the master
+// gate, so an override can silence events but never turn notifications on.
+type NotificationOverrides struct {
+	OnComplete     *bool `yaml:"on_complete,omitempty"`
+	OnFailed       *bool `yaml:"on_failed,omitempty"`
+	OnWaitingInput *bool `yaml:"on_waiting_input,omitempty"`
+	// NotifyIf further gates completion notifications on a step's context.
+	NotifyIf *NotifyCondition `yaml:"notify_if,omitempty"`
+}
+
+// UnmarshalYAML decodes strictly: the enclosing workflow and periodic entries
+// tolerate unknown keys, but a typo here would silently re-enable noise.
+func (n *NotificationOverrides) UnmarshalYAML(value *yaml.Node) error {
+	if err := checkKnownMappingKeys(value, "notifications", "on_complete", "on_failed", "on_waiting_input", "notify_if"); err != nil {
+		return err
+	}
+	type raw NotificationOverrides
+	var r raw
+	if err := value.Decode(&r); err != nil {
+		return err
+	}
+	*n = NotificationOverrides(r)
+	return nil
+}
+
+// NotifyCondition limits completion notifications to runs where a step
+// published something worth a look. Exactly one form is set:
+// StepContextNonempty, or StepContextContains together with Marker.
+type NotifyCondition struct {
+	// StepContextNonempty names a step whose context must be non-blank.
+	StepContextNonempty string `yaml:"step_context_nonempty,omitempty"`
+	// StepContextContains names a step whose context must contain Marker
+	// (literal, case-sensitive substring, as in LoopExitCondition).
+	StepContextContains string `yaml:"step_context_contains,omitempty"`
+	Marker              string `yaml:"marker,omitempty"`
+}
+
+// UnmarshalYAML decodes strictly, for the same reason as NotificationOverrides.
+func (c *NotifyCondition) UnmarshalYAML(value *yaml.Node) error {
+	if err := checkKnownMappingKeys(value, "notify_if", "step_context_nonempty", "step_context_contains", "marker"); err != nil {
+		return err
+	}
+	type raw NotifyCondition
+	var r raw
+	if err := value.Decode(&r); err != nil {
+		return err
+	}
+	*c = NotifyCondition(r)
+	return nil
+}
+
+// Step returns the name of the step whose context the condition inspects.
+func (c *NotifyCondition) Step() string {
+	if c.StepContextContains != "" {
+		return c.StepContextContains
+	}
+	return c.StepContextNonempty
+}
+
+// Matches reports whether the inspected step's context satisfies the condition.
+func (c *NotifyCondition) Matches(stepContext string) bool {
+	if c.StepContextContains != "" {
+		return strings.Contains(stepContext, c.Marker)
+	}
+	return strings.TrimSpace(stepContext) != ""
+}
+
+// validate checks the block's shape and that notify_if names a step or
+// parallel branch of wf.
+func (n *NotificationOverrides) validate(wf *WorkflowConfig) error {
+	c := n.NotifyIf
+	if c == nil {
+		return nil
+	}
+	switch {
+	case c.StepContextNonempty != "" && c.StepContextContains != "":
+		return fmt.Errorf("notifications.notify_if: set exactly one of `step_context_nonempty` or `step_context_contains`, not both")
+	case c.StepContextNonempty == "" && c.StepContextContains == "":
+		return fmt.Errorf("notifications.notify_if: set one of `step_context_nonempty` or `step_context_contains`")
+	case c.StepContextContains != "" && strings.TrimSpace(c.Marker) == "":
+		return fmt.Errorf("notifications.notify_if: `marker` is required with `step_context_contains`")
+	case c.StepContextNonempty != "" && c.Marker != "":
+		return fmt.Errorf("notifications.notify_if: `marker` is only valid with `step_context_contains`")
+	}
+	step := c.Step()
+	for _, name := range wf.AllStepNames() {
+		if name == step {
+			return nil
+		}
+	}
+	return fmt.Errorf("notifications.notify_if: step %q does not exist", step)
+}
+
+// ValidateNotifications checks the workflow's notifications override block.
+func (wf *WorkflowConfig) ValidateNotifications() error {
+	if wf.Notifications == nil {
+		return nil
+	}
+	return wf.Notifications.validate(wf)
 }
 
 // CommandsConfig is used during init for project detection

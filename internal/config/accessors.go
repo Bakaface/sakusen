@@ -62,6 +62,67 @@ func (c *Config) EffectiveOnComplete(workflowName string) string {
 	return c.OnComplete
 }
 
+// EffectiveNotifications is the per-event notification decision for one task.
+// The *Overridden fields record that the value came from a periodic or
+// workflow override rather than the global config.
+type EffectiveNotifications struct {
+	OnComplete     bool
+	OnFailed       bool
+	OnWaitingInput bool
+
+	OnCompleteOverridden     bool
+	OnFailedOverridden       bool
+	OnWaitingInputOverridden bool
+
+	// NotifyIf, when non-nil, gates completion notifications.
+	NotifyIf *NotifyCondition
+}
+
+// EffectiveNotifications resolves the notification switches for a task running
+// workflowName, fired by the periodic entry periodicName ("" when the task is
+// not periodic). Each field cascades independently: periodic entry, then
+// workflow, then base. A periodic or workflow that cannot be found is skipped.
+// base.Enabled is not part of the result: it stays the notifier's master gate.
+func (c *Config) EffectiveNotifications(workflowName, periodicName string, base NotificationsConfig) EffectiveNotifications {
+	eff := EffectiveNotifications{
+		OnComplete:     base.OnComplete,
+		OnFailed:       base.OnFailed,
+		OnWaitingInput: base.OnWaitingInput,
+	}
+	var tiers []*NotificationOverrides
+	if periodicName != "" {
+		for i := range c.Periodic {
+			if c.Periodic[i].Name == periodicName {
+				tiers = append(tiers, c.Periodic[i].Notifications)
+				break
+			}
+		}
+	}
+	if wf := c.GetTaskWorkflow(workflowName); wf != nil {
+		tiers = append(tiers, wf.Notifications)
+	}
+	// Apply least specific first so more specific tiers overwrite.
+	for i := len(tiers) - 1; i >= 0; i-- {
+		o := tiers[i]
+		if o == nil {
+			continue
+		}
+		if o.OnComplete != nil {
+			eff.OnComplete, eff.OnCompleteOverridden = *o.OnComplete, true
+		}
+		if o.OnFailed != nil {
+			eff.OnFailed, eff.OnFailedOverridden = *o.OnFailed, true
+		}
+		if o.OnWaitingInput != nil {
+			eff.OnWaitingInput, eff.OnWaitingInputOverridden = *o.OnWaitingInput, true
+		}
+		if o.NotifyIf != nil {
+			eff.NotifyIf = o.NotifyIf
+		}
+	}
+	return eff
+}
+
 // ListWorkflowNames returns the names of active (non-hidden) workflows used for
 // new task creation menus. If none configured, returns ["default"]. Use
 // ListAllWorkflowNames for picker surfaces that should expose hidden workflows

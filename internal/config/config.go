@@ -700,6 +700,9 @@ func appendTrackWorkflows(cfg *Config, projectBaseDir string) error {
 			if err := wf.ValidateOnComplete(); err != nil {
 				return fmt.Errorf("workflow %q: %w", wf.Name, err)
 			}
+			if err := wf.ValidateNotifications(); err != nil {
+				return fmt.Errorf("workflow %q: %w", wf.Name, err)
+			}
 			cfg.Workflows = append(cfg.Workflows, wf)
 			seen[wf.Name] = true
 		}
@@ -819,6 +822,9 @@ func resolveWorkflows(cfg *Config, proj *ProjectConfig, filePool *workflowFilePo
 			return fmt.Errorf("workflow %q: %w", cfg.Workflows[i].Name, err)
 		}
 		if err := cfg.Workflows[i].ValidateOnComplete(); err != nil {
+			return fmt.Errorf("workflow %q: %w", cfg.Workflows[i].Name, err)
+		}
+		if err := cfg.Workflows[i].ValidateNotifications(); err != nil {
 			return fmt.Errorf("workflow %q: %w", cfg.Workflows[i].Name, err)
 		}
 	}
