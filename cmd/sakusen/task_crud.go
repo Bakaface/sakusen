@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/action"
 	"github.com/Bakaface/sakusen/internal/task"
@@ -57,6 +58,14 @@ The daemon must be running.`,
 		target, _ := cmd.Flags().GetString("target")
 		checkout, _ := cmd.Flags().GetString("checkout")
 		track, _ := cmd.Flags().GetString("track")
+		var notBefore *time.Time
+		if raw, _ := cmd.Flags().GetString("not-before"); raw != "" {
+			nb, err := task.ParseNotBefore(raw)
+			if err != nil {
+				return fmt.Errorf("--not-before: %w", err)
+			}
+			notBefore = &nb
+		}
 
 		// Early priority validation gives the user immediate feedback before
 		// we try to load any project context. The action's own Validate() will
@@ -81,6 +90,7 @@ The daemon must be running.`,
 			Worktree:    worktree,
 			Track:       track,
 			ProjectPath: cfg.ProjectDir,
+			NotBefore:   notBefore,
 		}
 
 		return runAction(cmd, func(actx action.Ctx) (action.Result, error) {

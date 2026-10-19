@@ -696,6 +696,14 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 		}
 		s.handleUpdateField(conn, req)
 
+	case MsgUpdateNotBefore:
+		var req UpdateNotBeforeRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleUpdateNotBefore(conn, req)
+
 	case MsgRevertTask:
 		var req RevertTaskRequest
 		if err := msg.DecodePayload(&req); err != nil {

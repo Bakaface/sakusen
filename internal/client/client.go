@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/daemon"
@@ -637,6 +638,23 @@ func (c *Client) UpdateTaskField(id int64, field, value string) (*daemon.TaskInf
 		return nil, err
 	}
 	var resp daemon.UpdateFieldResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp.Task, nil
+}
+
+// UpdateTaskNotBefore sets (non-nil) or clears (nil) a pending task's
+// not-before time.
+func (c *Client) UpdateTaskNotBefore(id int64, notBefore *time.Time) (*daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgUpdateNotBefore, daemon.UpdateNotBeforeRequest{
+		TaskID:    id,
+		NotBefore: notBefore,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.UpdateNotBeforeResponse
 	if err := msg.DecodePayload(&resp); err != nil {
 		return nil, err
 	}

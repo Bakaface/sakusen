@@ -7,6 +7,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/client"
 	"github.com/Bakaface/sakusen/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/task"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -29,6 +30,7 @@ type CreateTaskArgs struct {
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this task runs."`
 	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). The track's context becomes available to step prompts via {{track.context}}. For create_tasks_and_wait children: empty inherits the parent task's track; pass 'none' to explicitly detach."`
+	NotBefore      string   `json:"not_before,omitempty" jsonschema:"Keep the task pending until this time (RFC3339 with offset, e.g. '2026-01-02T15:04:05Z' or '2026-01-02T15:04:05+02:00'). A past time runs on the next poll. Blockers still apply."`
 	WaitForReady   bool     `json:"wait_for_ready,omitempty" jsonschema:"Block until the daemon resolves the task's title and branch (typically a few seconds). Default false returns immediately with a half-initialized task."`
 }
 
@@ -56,6 +58,15 @@ func handleCreateTask(ctx context.Context, c *client.Client, args CreateTaskArgs
 		return resultErr("workflow is required — call list_workflows to see available workflows (only tmux_direct tasks may omit it)")
 	}
 
+	var notBefore *time.Time
+	if args.NotBefore != "" {
+		nb, err := task.ParseNotBefore(args.NotBefore)
+		if err != nil {
+			return resultErr("%v", err)
+		}
+		notBefore = &nb
+	}
+
 	projectPath, err := resolveProjectPath(args.ProjectPath)
 	if err != nil {
 		return resultErr("%v", err)
@@ -76,6 +87,7 @@ func handleCreateTask(ctx context.Context, c *client.Client, args CreateTaskArgs
 		Images:         args.Images,
 		BlockedBy:      args.BlockedBy,
 		Track:          args.Track,
+		NotBefore:      notBefore,
 	}
 
 	// Subscribe before issuing the create so we don't miss the post-refinement

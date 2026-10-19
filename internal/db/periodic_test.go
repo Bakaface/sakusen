@@ -27,7 +27,7 @@ func TestUpsertPeriodicDef_InsertAndUpdate(t *testing.T) {
 	database, projID := newPeriodicTestDB(t)
 	next := time.Now().Add(time.Hour).Truncate(time.Second)
 
-	d, err := database.UpsertPeriodicDef(projID, "nightly", "0 3 * * *", "default", "do it", "high", false, next)
+	d, err := database.UpsertPeriodicDef(projID, "nightly", "0 3 * * *", "", "default", "do it", "high", false, next)
 	if err != nil {
 		t.Fatalf("upsert insert: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestUpsertPeriodicDef_InsertAndUpdate(t *testing.T) {
 
 	// Update without cadence change: next_fire_at must be preserved.
 	later := time.Now().Add(10 * time.Hour)
-	d2, err := database.UpsertPeriodicDef(projID, "nightly", "0 3 * * *", "default", "changed", "low", false, later)
+	d2, err := database.UpsertPeriodicDef(projID, "nightly", "0 3 * * *", "", "default", "changed", "low", false, later)
 	if err != nil {
 		t.Fatalf("upsert update: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestUpsertPeriodicDef_InsertAndUpdate(t *testing.T) {
 
 	// Update WITH cadence change: next_fire_at recomputed to the new value.
 	newFire := time.Now().Add(20 * time.Hour).Truncate(time.Second)
-	d3, err := database.UpsertPeriodicDef(projID, "nightly", "0 4 * * *", "default", "changed", "low", false, newFire)
+	d3, err := database.UpsertPeriodicDef(projID, "nightly", "0 4 * * *", "", "default", "changed", "low", false, newFire)
 	if err != nil {
 		t.Fatalf("upsert cadence change: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestUpsertPeriodicDef_PreservesInteractivePause(t *testing.T) {
 	database, projID := newPeriodicTestDB(t)
 	next := time.Now().Add(time.Hour)
 
-	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, next); err != nil {
+	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, next); err != nil {
 		t.Fatal(err)
 	}
 	d, _ := database.GetPeriodicByName(projID, "p")
@@ -72,7 +72,7 @@ func TestUpsertPeriodicDef_PreservesInteractivePause(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reconcile again with paused=false in yml; interactive pause must win.
-	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, next); err != nil {
+	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, next); err != nil {
 		t.Fatal(err)
 	}
 	d2, _ := database.GetPeriodicByName(projID, "p")
@@ -86,12 +86,12 @@ func TestUpsertPeriodicDef_YAMLPausedToggleHonored(t *testing.T) {
 	next := time.Now().Add(time.Hour)
 
 	// Initial reconcile, not paused in yml.
-	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, next); err != nil {
+	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, next); err != nil {
 		t.Fatal(err)
 	}
 
 	// yml now sets paused: true → runtime flag must follow.
-	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", true, next); err != nil {
+	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", true, next); err != nil {
 		t.Fatal(err)
 	}
 	d, _ := database.GetPeriodicByName(projID, "p")
@@ -100,7 +100,7 @@ func TestUpsertPeriodicDef_YAMLPausedToggleHonored(t *testing.T) {
 	}
 
 	// yml flips back to paused: false → runtime flag must resume.
-	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, next); err != nil {
+	if _, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, next); err != nil {
 		t.Fatal(err)
 	}
 	d2, _ := database.GetPeriodicByName(projID, "p")
@@ -112,7 +112,7 @@ func TestUpsertPeriodicDef_YAMLPausedToggleHonored(t *testing.T) {
 func TestClaimPeriodicFire_Atomic(t *testing.T) {
 	database, projID := newPeriodicTestDB(t)
 	past := time.Now().Add(-time.Minute)
-	d, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, past)
+	d, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, past)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestClaimPeriodicFire_Atomic(t *testing.T) {
 func TestSoftDeletePreservesRuns(t *testing.T) {
 	database, projID := newPeriodicTestDB(t)
 	next := time.Now().Add(time.Hour)
-	d, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, next)
+	d, err := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, next)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestSoftDeletePreservesRuns(t *testing.T) {
 func TestTaskPeriodicIDRoundTrip(t *testing.T) {
 	database, projID := newPeriodicTestDB(t)
 	next := time.Now().Add(time.Hour)
-	d, _ := database.UpsertPeriodicDef(projID, "p", "@every 5m", "default", "", "medium", false, next)
+	d, _ := database.UpsertPeriodicDef(projID, "p", "@every 5m", "", "default", "", "medium", false, next)
 
 	tk, err := database.CreateTask(projID, "t", "d", "t", "default", "", task.StatusPending, nil)
 	if err != nil {
@@ -202,11 +202,11 @@ func TestListDuePeriodics(t *testing.T) {
 	now := time.Now()
 
 	// Due (past), active.
-	database.UpsertPeriodicDef(projID, "due", "@every 5m", "default", "", "medium", false, now.Add(-time.Minute))
+	database.UpsertPeriodicDef(projID, "due", "@every 5m", "", "default", "", "medium", false, now.Add(-time.Minute))
 	// Not due (future).
-	database.UpsertPeriodicDef(projID, "future", "@every 5m", "default", "", "medium", false, now.Add(time.Hour))
+	database.UpsertPeriodicDef(projID, "future", "@every 5m", "", "default", "", "medium", false, now.Add(time.Hour))
 	// Due but paused.
-	dp, _ := database.UpsertPeriodicDef(projID, "paused", "@every 5m", "default", "", "medium", false, now.Add(-time.Minute))
+	dp, _ := database.UpsertPeriodicDef(projID, "paused", "@every 5m", "", "default", "", "medium", false, now.Add(-time.Minute))
 	database.SetPeriodicPaused(dp.ID, true)
 
 	due, err := database.ListDuePeriodics(now)

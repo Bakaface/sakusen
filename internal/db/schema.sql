@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- Set while a tmux task's interactive session is hibernated (killed to
     -- free memory; the task stays in 'tmux' status and its worktree, branch,
     -- step cursor and agent conversation are intact). NULL = live session.
-    hibernated_at DATETIME
+    hibernated_at DATETIME,
+    -- Earliest time (UTC) the poller may claim this pending task. NULL = now.
+    not_before DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -91,6 +93,11 @@ CREATE TABLE IF NOT EXISTS periodic_definitions (
     next_fire_at DATETIME NOT NULL,
     last_fired_at DATETIME,
     last_task_id INTEGER REFERENCES tasks(id),
+    -- Non-empty ⇒ event-triggered: fires when the named upstream periodic's
+    -- run completes (cadence is '' and next_fire_at is unused).
+    -- after_last_task_id is the upstream run already consumed.
+    after_name TEXT NOT NULL DEFAULT '',
+    after_last_task_id INTEGER,
     deleted_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

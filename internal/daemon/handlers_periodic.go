@@ -16,6 +16,7 @@ func (s *Server) periodicToInfo(d *db.PeriodicDef) PeriodicInfo {
 		ProjectID:   d.ProjectID,
 		Name:        d.Name,
 		Cadence:     d.Cadence,
+		After:       d.AfterName,
 		WorkflowRef: d.WorkflowRef,
 		Inline:      d.WorkflowRef == "",
 		Input:       d.Input,

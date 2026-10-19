@@ -142,9 +142,14 @@ type TmuxConfig struct {
 // slugged "periodic" whose workflow name collides with a periodic entry name is
 // rejected as a workflow-name collision at load time). Ref-mode entries reuse
 // an existing workflow by name.
+//
+// An entry declares exactly one trigger: Cadence (cron schedule) or After (the
+// name of another periodic in the same project; this entry fires each time a
+// run of that periodic reaches completed).
 type PeriodicEntry struct {
 	Name        string `yaml:"name"`
-	Cadence     string `yaml:"cadence"`
+	Cadence     string `yaml:"cadence,omitempty"`
+	After       string `yaml:"after,omitempty"`
 	Description string `yaml:"description,omitempty"`
 
 	// Workflow references an existing workflow by name (ref mode). Mutually

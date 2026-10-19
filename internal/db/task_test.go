@@ -392,7 +392,7 @@ func TestGetClaimableTasks_SortedByPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tasks, err := database.GetClaimableTasks()
+	tasks, err := database.GetClaimableTasks(time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1060,7 +1060,7 @@ func TestFailDependentTasks_RemovesFromClaimable(t *testing.T) {
 	if _, err := database.FailDependentTasks(blocker.ID); err != nil {
 		t.Fatal(err)
 	}
-	claimable, err := database.GetClaimableTasks()
+	claimable, err := database.GetClaimableTasks(time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

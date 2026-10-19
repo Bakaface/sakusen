@@ -184,6 +184,12 @@ func (v *taskInfoView) renderMetadata() string {
 		b.WriteString("\n")
 	}
 
+	if t.NotBefore != nil {
+		b.WriteString(labelStyle.Render("Not before: "))
+		b.WriteString(valueStyle.Render(fmtPeriodicTime(t.NotBefore)))
+		b.WriteString("\n")
+	}
+
 	// Waiting on (child tasks this step is suspended for)
 	if len(t.WaitsOn) > 0 {
 		ids := make([]string, len(t.WaitsOn))

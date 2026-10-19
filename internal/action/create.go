@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/daemon"
 	"github.com/Bakaface/sakusen/internal/task"
@@ -36,6 +37,8 @@ type CreateArgs struct {
 	Images      []string
 	TmuxDirect  bool
 	BranchMode  *int
+	// NotBefore keeps the task pending until this time; nil means no wait.
+	NotBefore *time.Time
 }
 
 func (a CreateArgs) Validate() error {
@@ -72,6 +75,7 @@ func RunCreate(ctx Ctx, args CreateArgs) (Result, error) {
 		TmuxDirect:     args.TmuxDirect,
 		Images:         args.Images,
 		BlockedBy:      args.DependsOn,
+		NotBefore:      args.NotBefore,
 	}
 
 	t, err := ctx.Client.CreateTaskWithOptions(req)

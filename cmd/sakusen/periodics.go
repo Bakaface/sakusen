@@ -159,8 +159,8 @@ func runPeriodicsList() error {
 		fmt.Fprintln(w, "--\t----\t-------\t--------\t---------\t---------\t------")
 		for _, p := range periodics {
 			fmt.Fprintf(w, "#%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				p.ID, p.Name, p.Cadence, periodicWorkflowLabel(p),
-				fmtTime(&p.NextFireAt), fmtTime(p.LastFiredAt), periodicStatusLabel(p))
+				p.ID, p.Name, periodicCadenceLabel(p), periodicWorkflowLabel(p),
+				periodicNextFireLabel(p), fmtTime(p.LastFiredAt), periodicStatusLabel(p))
 		}
 		w.Flush()
 		return nil
@@ -182,11 +182,32 @@ func setPaused(idStr string, paused bool) error {
 	})
 }
 
+// periodicCadenceLabel is the cadence, or "-" for an event-triggered entry.
+func periodicCadenceLabel(p daemon.PeriodicInfo) string {
+	if p.After != "" {
+		return "-"
+	}
+	return p.Cadence
+}
+
+// periodicNextFireLabel is the next fire time, or "after <name>" for an
+// event-triggered entry (which has no scheduled slot).
+func periodicNextFireLabel(p daemon.PeriodicInfo) string {
+	if p.After != "" {
+		return "after " + p.After
+	}
+	return fmtTime(&p.NextFireAt)
+}
+
 func printPeriodicDetail(p *daemon.PeriodicInfo) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "ID:\t#%d\n", p.ID)
 	fmt.Fprintf(w, "Name:\t%s\n", p.Name)
-	fmt.Fprintf(w, "Cadence:\t%s\n", p.Cadence)
+	if p.After != "" {
+		fmt.Fprintf(w, "After:\t%s\n", p.After)
+	} else {
+		fmt.Fprintf(w, "Cadence:\t%s\n", p.Cadence)
+	}
 	fmt.Fprintf(w, "Workflow:\t%s\n", periodicWorkflowLabel(*p))
 	if p.Input != "" {
 		fmt.Fprintf(w, "Input:\t%s\n", truncateStr(p.Input, 60))
@@ -197,7 +218,7 @@ func printPeriodicDetail(p *daemon.PeriodicInfo) {
 	}
 	fmt.Fprintf(w, "Priority:\t%s\n", priority)
 	fmt.Fprintf(w, "Status:\t%s\n", periodicStatusLabel(*p))
-	fmt.Fprintf(w, "Next fire:\t%s\n", fmtTime(&p.NextFireAt))
+	fmt.Fprintf(w, "Next fire:\t%s\n", periodicNextFireLabel(*p))
 	fmt.Fprintf(w, "Last fire:\t%s\n", fmtTime(p.LastFiredAt))
 	if p.LastTaskID != nil {
 		fmt.Fprintf(w, "Last task:\t#%d\n", *p.LastTaskID)

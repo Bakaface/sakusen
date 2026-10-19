@@ -64,7 +64,7 @@ periodic:
 // next_fire_at verbatim on INSERT, so no separate clamp step is needed.
 func duePeriodicDef(t *testing.T, database *db.DB, projID int64, name, cadence, workflowRef, input, priority string) *db.PeriodicDef {
 	t.Helper()
-	d, err := database.UpsertPeriodicDef(projID, name, cadence, workflowRef, input, priority, false, time.Now().Add(-time.Minute))
+	d, err := database.UpsertPeriodicDef(projID, name, cadence, "", workflowRef, input, priority, false, time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("upsert periodic %q: %v", name, err)
 	}

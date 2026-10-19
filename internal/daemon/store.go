@@ -39,7 +39,7 @@ type taskStore interface {
 	GetTask(id int64) (*task.Task, error)
 	GetAllTasks() ([]*task.Task, error)
 	GetRunningTasks() ([]*task.Task, error)
-	GetClaimableTasks() ([]*task.Task, error)
+	GetClaimableTasks(now time.Time) ([]*task.Task, error)
 	GetTasksByProject(projectID int64) ([]*task.Task, error)
 	GetTasksByProjectName(name string) ([]*task.Task, error)
 	ClaimTask(id int64) (bool, error)
@@ -107,13 +107,17 @@ type taskStore interface {
 	GetPeriodicByName(projectID int64, name string) (*db.PeriodicDef, error)
 	ListPeriodicsForProject(projectID int64) ([]*db.PeriodicDef, error)
 	ListDuePeriodics(now time.Time) ([]*db.PeriodicDef, error)
-	UpsertPeriodicDef(projectID int64, name, cadence, workflowRef, input, priority string, paused bool, nextFireAt time.Time) (*db.PeriodicDef, error)
+	ListAfterPeriodics() ([]*db.PeriodicDef, error)
+	UpsertPeriodicDef(projectID int64, name, cadence, afterName, workflowRef, input, priority string, paused bool, nextFireAt time.Time) (*db.PeriodicDef, error)
 	SoftDeletePeriodicDef(projectID int64, name string) error
 	ClaimPeriodicFire(id int64, now, newNextFire time.Time) (bool, error)
+	ClaimAfterFire(id int64, prevConsumed *int64, upstreamTaskID int64, fire bool, now time.Time) (bool, error)
 	SetPeriodicPaused(id int64, paused bool) error
 	UpdatePeriodicLastTask(id, taskID int64) error
 	GetTasksForPeriodic(periodicID int64) ([]*task.Task, error)
 	SetTaskPeriodicID(taskID, periodicID int64) error
+	SetTaskNotBefore(taskID int64, notBefore *time.Time) error
+	SetPendingTaskNotBefore(taskID int64, notBefore *time.Time) (bool, error)
 
 	// Per-step execution tracking (task_steps table). Note: manual
 	// step-context writes (the update_step_context MCP tool) do NOT call

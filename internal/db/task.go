@@ -47,7 +47,7 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workfl
 
 const taskColumns = `id, project_id, track_id, title, input, slug, workflow, status, priority, step_index, current_step, loop_iteration,
 	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, exit_code, error_message, context, images, commits, periodic_id,
-	created_at, started_at, completed_at, updated_at, hibernated_at`
+	created_at, started_at, completed_at, updated_at, hibernated_at, not_before`
 
 func (db *DB) GetTask(id int64) (*task.Task, error) {
 	row := db.sqlDB.QueryRow(fmt.Sprintf(`SELECT %s FROM tasks WHERE id = ?`, taskColumns), id)
@@ -91,10 +91,13 @@ func (db *DB) GetRunningTasks() ([]*task.Task, error) {
 	return db.getTasksByStatus(task.StatusRunning)
 }
 
-func (db *DB) GetClaimableTasks() ([]*task.Task, error) {
+// GetClaimableTasks returns pending tasks whose blockers have all completed and
+// whose not_before (if any) is at or before now.
+func (db *DB) GetClaimableTasks(now time.Time) ([]*task.Task, error) {
 	rows, err := db.sqlDB.Query(fmt.Sprintf(`
 		SELECT %s FROM tasks
 		WHERE status = ?
+		AND (not_before IS NULL OR not_before <= ?)
 		AND id NOT IN (
 			SELECT td.task_id FROM task_dependencies td
 			JOIN tasks dep ON dep.id = td.blocked_by
@@ -109,7 +112,7 @@ func (db *DB) GetClaimableTasks() ([]*task.Task, error) {
 				ELSE 2
 			END DESC,
 			created_at ASC
-	`, taskColumns), task.StatusPending, task.StatusCompleted)
+	`, taskColumns), task.StatusPending, now.UTC(), task.StatusCompleted)
 	if err != nil {
 		return nil, err
 	}
@@ -725,13 +728,13 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	var worktreeInt int
 	var worktreeDetached int
 	var startedAt, completedAt sql.NullTime
-	var updatedAt, hibernatedAt sql.NullTime
+	var updatedAt, hibernatedAt, notBefore sql.NullTime
 
 	err := s.Scan(
 		&t.ID, &projectID, &trackID, &title, &t.Input, &slug, &workflow, &t.Status, &priority,
 		&t.StepIndex, &currentStep, &t.LoopIteration,
 		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON, &periodicID,
-		&t.CreatedAt, &startedAt, &completedAt, &updatedAt, &hibernatedAt,
+		&t.CreatedAt, &startedAt, &completedAt, &updatedAt, &hibernatedAt, &notBefore,
 	)
 	if err != nil {
 		return nil, err
@@ -815,6 +818,10 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	if hibernatedAt.Valid {
 		t.HibernatedAt = &hibernatedAt.Time
 	}
+	if notBefore.Valid {
+		nb := notBefore.Time.UTC()
+		t.NotBefore = &nb
+	}
 
 	return &t, nil
 }
@@ -844,6 +851,43 @@ func (db *DB) SetTaskPeriodicID(taskID, periodicID int64) error {
 		periodicID, time.Now(), taskID,
 	)
 	return err
+}
+
+// SetTaskNotBefore sets (or with nil, clears) the earliest time the poller may
+// claim the task. Stored in UTC so the lexical DATETIME comparison in
+// GetClaimableTasks is consistent regardless of the caller's offset.
+func (db *DB) SetTaskNotBefore(taskID int64, notBefore *time.Time) error {
+	var v any
+	if notBefore != nil {
+		v = notBefore.UTC()
+	}
+	_, err := db.sqlDB.Exec(
+		"UPDATE tasks SET not_before = ?, updated_at = ? WHERE id = ?",
+		v, time.Now(), taskID,
+	)
+	return err
+}
+
+// SetPendingTaskNotBefore is SetTaskNotBefore guarded on status = pending in
+// the same statement, so it cannot race the poller's claim. Returns false when
+// the task is absent or not pending.
+func (db *DB) SetPendingTaskNotBefore(taskID int64, notBefore *time.Time) (bool, error) {
+	var v any
+	if notBefore != nil {
+		v = notBefore.UTC()
+	}
+	result, err := db.sqlDB.Exec(
+		"UPDATE tasks SET not_before = ?, updated_at = ? WHERE id = ? AND status = ?",
+		v, time.Now(), taskID, task.StatusPending,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (db *DB) SetWorktreeDetached(id int64, detached bool) error {

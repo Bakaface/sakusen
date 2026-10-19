@@ -27,6 +27,7 @@ const (
 	MsgDeleteTask              MessageType = "delete_task"
 	MsgUpdatePriority          MessageType = "update_priority"
 	MsgUpdateField             MessageType = "update_field"
+	MsgUpdateNotBefore         MessageType = "update_not_before"
 	MsgAgentList               MessageType = "agent_list"
 	MsgTaskList                MessageType = "task_list"
 	MsgAgentUpdate             MessageType = "agent_update"
@@ -177,6 +178,8 @@ type CreateTaskRequest struct {
 	Track string `json:"track,omitempty"`
 	// PeriodicID is set by the scheduler when materializing a periodic fire.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
+	// NotBefore keeps the task pending until this time; nil means no wait.
+	NotBefore *time.Time `json:"not_before,omitempty"`
 }
 
 type ContinueTaskRequest struct {
@@ -212,6 +215,13 @@ type UpdateFieldRequest struct {
 	TaskID int64  `json:"task_id"`
 	Field  string `json:"field"`
 	Value  string `json:"value"`
+}
+
+// UpdateNotBeforeRequest sets (NotBefore non-nil) or clears (nil) a pending
+// task's not-before time.
+type UpdateNotBeforeRequest struct {
+	TaskID    int64      `json:"task_id"`
+	NotBefore *time.Time `json:"not_before,omitempty"`
 }
 
 type RevertTaskRequest struct {
@@ -385,6 +395,10 @@ type UpdatePriorityResponse struct {
 }
 
 type UpdateFieldResponse struct {
+	Task TaskInfo `json:"task"`
+}
+
+type UpdateNotBeforeResponse struct {
 	Task TaskInfo `json:"task"`
 }
 
@@ -609,6 +623,7 @@ type TaskInfo struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	NotBefore    *time.Time `json:"not_before,omitempty"`
 	TmuxActivity string     `json:"tmux_activity,omitempty"`
 	// StepHuman reflects the Human flag on the workflow step that the task is
 	// currently paused at (when Status is "tmux" or "awaiting-approval").
@@ -639,6 +654,7 @@ type PeriodicInfo struct {
 	ProjectPath string     `json:"project_path,omitempty"`
 	Name        string     `json:"name"`
 	Cadence     string     `json:"cadence"`
+	After       string     `json:"after,omitempty"`        // set ⇒ event-triggered; Cadence empty, NextFireAt unused
 	WorkflowRef string     `json:"workflow_ref,omitempty"` // empty ⇒ inline
 	Inline      bool       `json:"inline"`                 // true when steps are inline (no workflow_ref)
 	Input       string     `json:"input,omitempty"`

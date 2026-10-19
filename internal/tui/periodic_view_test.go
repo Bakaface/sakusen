@@ -85,3 +85,35 @@ func TestRenderPeriodicRuns_Structure(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderPeriodicList_AfterEntry(t *testing.T) {
+	now := time.Now()
+	m := Model{
+		width:  120,
+		height: 40,
+		keys:   newKeyMap(),
+		periodic: periodicViewState{
+			defs: []daemon.PeriodicInfo{
+				{ID: 1, Name: "intrum-sync", Cadence: "0 0 * * *", WorkflowRef: "default", NextFireAt: now},
+				{ID: 2, Name: "intrum-log-backfill", After: "intrum-sync", WorkflowRef: "default", NextFireAt: now},
+			},
+		},
+	}
+
+	out := m.renderPeriodicList()
+	var row string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "intrum-log-backfill") {
+			row = line
+		}
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line exceeds width %d: %d (%q)", m.width, w, line)
+		}
+	}
+	if !strings.Contains(row, "after intrum-sync") {
+		t.Errorf("after: row should show the trigger instead of a fire time: %q", row)
+	}
+	if strings.Contains(row, fmtPeriodicTime(&now)) {
+		t.Errorf("after: row should not show a next-fire time: %q", row)
+	}
+}

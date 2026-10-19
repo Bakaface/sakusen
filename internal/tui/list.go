@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Bakaface/sakusen/internal/daemon"
 	// Aliased: this file uses "task" as the local parameter/variable name for
@@ -632,6 +633,8 @@ func (l *listView) statusText(task daemon.TaskInfo) string {
 			} else {
 				statusLabel = "pending (blocked)"
 			}
+		} else if task.NotBefore != nil && task.NotBefore.After(time.Now()) {
+			statusLabel = "pending (until " + fmtPeriodicTime(task.NotBefore) + ")"
 		}
 	case taskpkg.StatusAwaitingChildren:
 		switch n := len(task.WaitsOn); {

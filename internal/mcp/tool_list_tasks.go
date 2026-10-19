@@ -53,6 +53,8 @@ type TaskSummary struct {
 	// hibernated: the status is still "tmux", but no agent process is running
 	// until someone attaches.
 	HibernatedAt *time.Time `json:"hibernated_at,omitempty"`
+	// NotBefore is the earliest time a pending task may start (UTC).
+	NotBefore *time.Time `json:"not_before,omitempty"`
 }
 
 // ListTasksResult is the payload returned by list_tasks. Project fields are
@@ -204,5 +206,6 @@ func taskSummaryFrom(t daemon.TaskInfo) TaskSummary {
 		CreatedAt:       t.CreatedAt,
 		CompletedAt:     t.CompletedAt,
 		HibernatedAt:    t.HibernatedAt,
+		NotBefore:       t.NotBefore,
 	}
 }

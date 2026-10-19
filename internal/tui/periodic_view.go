@@ -190,7 +190,7 @@ func (m Model) renderPeriodicList() string {
 		return b.String()
 	}
 
-	header := fmt.Sprintf("  %-20s %-16s %-16s %-16s %-8s", "NAME", "CADENCE", "WORKFLOW", "NEXT FIRE", "STATUS")
+	header := fmt.Sprintf("  %-20s %-16s %-16s %-24s %-8s", "NAME", "CADENCE", "WORKFLOW", "NEXT FIRE", "STATUS")
 	b.WriteString(dimStyle.Render(header) + "\n")
 
 	for i, p := range m.periodic.defs {
@@ -202,11 +202,15 @@ func (m Model) renderPeriodicList() string {
 		if p.Paused {
 			status = "paused"
 		}
-		row := fmt.Sprintf("%-20s %-16s %-16s %-16s %-8s",
+		cadence, next := p.Cadence, fmtPeriodicTime(&p.NextFireAt)
+		if p.After != "" {
+			cadence, next = "-", "after "+p.After
+		}
+		row := fmt.Sprintf("%-20s %-16s %-16s %-24s %-8s",
 			truncate(p.Name, 20),
-			truncate(p.Cadence, 16),
+			truncate(cadence, 16),
 			truncate(wf, 16),
-			fmtPeriodicTime(&p.NextFireAt),
+			truncate(next, 24),
 			status,
 		)
 		if i == m.periodic.cursor {
