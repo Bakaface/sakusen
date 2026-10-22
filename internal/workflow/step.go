@@ -113,7 +113,12 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	env["SAKUSEN_PROMPT_FILE"] = promptFile
 	env["SAKUSEN_RESULT_FILE"] = resultFile
 
-	proc := runner.NewProcess(fmt.Sprintf("%d", t.ID), t.WorktreePath, agent.Command, resultFile)
+	startDir, err := ResolveAgentWorkDir(t)
+	if err != nil {
+		return 1, "", "", err
+	}
+	proc := runner.NewProcess(fmt.Sprintf("%d", t.ID), startDir, agent.Command, resultFile)
+	proc.OutputFile = filepath.Join(t.WorktreePath, runner.OutputLogFileName)
 	if spawn.OutputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(spawn.OutputFile), 0755); err != nil {
 			return 1, "", "", fmt.Errorf("failed to create output capture dir: %w", err)
@@ -291,8 +296,13 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 		return 1, "", fmt.Errorf("tmux is not installed or not in PATH (required for tmux-mode agents)")
 	}
 
+	startDir, err := ResolveAgentWorkDir(t)
+	if err != nil {
+		return 1, "", err
+	}
 	taskID := fmt.Sprintf("%d", t.ID)
-	session := tmux.NewSession(e.cfg.ProjectName, taskID, t.WorktreePath)
+	session := tmux.NewSession(e.cfg.ProjectName, taskID, startDir)
+	session.RootDir = t.WorktreePath
 
 	// Kill stale session if exists (handles retries)
 	if session.Exists() {
@@ -342,7 +352,7 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 	// If the setup command contains {{run_agent}} or {{agent_command}}, the user
 	// controls which window/pane runs the agent — create a bare session instead
 	// of auto-starting the agent in window 0.
-	setupCmd := e.cfg.TmuxSetupCommand
+	setupCmd := e.cfg.GetTmuxSetupCommand(e.cfg.GetTaskWorkflow(t.Workflow))
 	if tmux.SetupCommandControlsAgent(setupCmd) {
 		// Create bare session (just a shell), setup command will place the agent
 		if err := session.Create(""); err != nil {

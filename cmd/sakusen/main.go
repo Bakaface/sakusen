@@ -86,6 +86,7 @@ func init() {
 	createCmd.Flags().StringP("title", "t", "", "Skip AI title generation; use this title directly")
 	createCmd.Flags().String("slug", "", "Skip AI slug generation; use this slug directly")
 	createCmd.Flags().Bool("no-worktree", false, "Run task in current directory without creating a worktree")
+	createCmd.Flags().String("workdir", "", "Subdirectory of the task's checkout where agents and tmux sessions start (overrides the workflow's workdir pin)")
 	createCmd.Flags().String("target", "", "Target branch to branch from and merge into (overrides git.base_branch)")
 	createCmd.Flags().String("checkout", "", "Check out an existing branch instead of creating a new one")
 	createCmd.Flags().String("track", "", "Attach the task to a track (slug or numeric ID)")

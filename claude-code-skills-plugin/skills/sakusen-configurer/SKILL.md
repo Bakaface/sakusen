@@ -82,7 +82,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `worktree-sync-paths` | object | — | Hard-link or copy paths from main checkout into each worktree (e.g., `.docs`, `.env`). Also settable per-workflow. See [Sharing files into worktrees](#sharing-files-into-worktrees). |
 | `worktree-setup-command` | string | — | Single shell command run after worktree creation (`{{worktree_path}}` available). Also settable per-workflow. |
 | `worktree-setup-commands` | list[string] | — | Multiple setup commands run in order; preferred over the singular form when more than one step is needed. Also settable per-workflow. |
-| `tmux-setup-command` | string | — | Shell command run when launching a tmux step. Variables: `{{session_name}}`, `{{worktree_path}}`, `{{run_agent}}`, `{{agent_command}}`. Also settable per-workflow. |
+| `tmux-setup-command` | string | — | Shell command run when launching a tmux step. Variables: `{{session_name}}`, `{{worktree_path}}` (the checkout root), `{{run_agent}}`, `{{agent_command}}`. Runs in the task's start directory (the checkout root, or its `workdir` subdirectory). Also settable per-workflow. |
 | `tmux` | object | — | Hibernation of idle interactive sessions: `hibernate_after` (duration, default `4h`), `max_live_sessions` (int, default `12`); either `0` disables. Read daemon-level like `max_workers`. See [Tmux Session Hibernation](references/config-reference.md#tmux-session-hibernation). |
 
 ### Removed keys (hard load errors — never emit these)
@@ -231,7 +231,7 @@ Every agent spawn gets:
 |---|---|
 | `SAKUSEN_TASK_ID` | Task id |
 | `SAKUSEN_STEP` | Step name |
-| `SAKUSEN_WORKTREE` | Absolute path of the task workdir |
+| `SAKUSEN_WORKTREE` | Absolute path of the task's checkout root (the worktree, or the main checkout when `worktree: false`). The agent's cwd is this joined with the task's `workdir`, when set |
 | `SAKUSEN_PROJECT_PATH` | Absolute path of the project repo root |
 | `SAKUSEN_PURPOSE` | `step` (or `merge_conflict` for the conflict resolver) |
 | `SAKUSEN_AGENT` | Resolved agent slug |
@@ -350,7 +350,7 @@ workflows:
 
 "Kind" is an emergent property of pinning: a workflow that pins every New Task field (`input` + `worktree` + `branch`/`checkout` + `target`) creates its task immediately instead of showing the form.
 
-A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`), `agent`, `on_complete`, `exclusive_workdir` (a `worktree: false` task waits while another active `worktree: false` task of the project holds the project root), `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `advance`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop` — or, instead of `prompt`, a `parallel:` block that fans out to concurrent headless branches on the same worktree (see the reference's Parallel Groups section). **Execution mode comes from the resolved agent record, never from the step.**
+A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`, `workdir`), `agent`, `on_complete`, `exclusive_workdir` (a `worktree: false` task waits while another active `worktree: false` task of the project holds the project root), `summarizer_prompt`, the per-workflow worktree/tmux overrides, and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `advance`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop` — or, instead of `prompt`, a `parallel:` block that fans out to concurrent headless branches on the same worktree (see the reference's Parallel Groups section). **Execution mode comes from the resolved agent record, never from the step.**
 
 Prompts interpolate `{{task.*}}`, `{{git.*}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`, `{{children.*}}`, and `{{prompt.<name>}}` (inlines `<project>/.sakusen/prompts/<name>.md`, falling back to `~/.sakusen/prompts/<name>.md`, for passages shared across workflows). **Every multi-line variable must be wrapped in a semantic XML-style tag** (`<task-input>`, `<step-context name="...">`, `<track-context>`, `<chat>`, …) so the receiving agent can tell fixed prompt text from interpolated content. Do not hard-wrap prompt prose — see the reference for the canonical tag table, the full variable catalog, and prompt-formatting rules.
 

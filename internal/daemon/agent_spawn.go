@@ -73,9 +73,19 @@ func (s *Server) spawnInteractiveSession(pc *projectContext, t *task.Task, opts 
 	setupCmd := ""
 	if pc != nil {
 		projectName = pc.cfg.Project.Name
-		setupCmd = pc.cfg.TmuxSetupCommand
+		// Workflow-less sessions (tmux_direct) keep the project-level command.
+		var wf *config.WorkflowConfig
+		if t.Workflow != "" {
+			wf = pc.cfg.GetTaskWorkflow(t.Workflow)
+		}
+		setupCmd = pc.cfg.GetTmuxSetupCommand(wf)
 	}
-	session := tmux.NewSession(projectName, taskID, t.WorktreePath)
+	startDir, err := workflow.ResolveAgentWorkDir(t)
+	if err != nil {
+		return false, err
+	}
+	session := tmux.NewSession(projectName, taskID, startDir)
+	session.RootDir = t.WorktreePath
 	if session.Exists() {
 		session.Kill()
 	}

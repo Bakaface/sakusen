@@ -344,9 +344,14 @@ func (e *Engine) loadStepChatContent(ctx context.Context, t *task.Task, wf *conf
 			}
 		}
 
+		// Same cwd as the session: agents like Claude Code scope transcripts by it.
+		startDir, err := ResolveAgentWorkDir(t)
+		if err != nil {
+			return "", err
+		}
 		cmdCtx, cancel := context.WithTimeout(ctx, chatLogCommandTimeout)
 		defer cancel()
-		out, err := runner.RunSync(cmdCtx, agent.ChatLogCommand, t.WorktreePath, runner.MergeEnv(env, agent.Env), "")
+		out, err := runner.RunSync(cmdCtx, agent.ChatLogCommand, startDir, runner.MergeEnv(env, agent.Env), "")
 		if err != nil {
 			return "", fmt.Errorf("chat_log_command failed for tmux step %q: %w", step.Name, err)
 		}

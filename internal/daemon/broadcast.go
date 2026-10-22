@@ -376,6 +376,7 @@ func TaskInfoFromTask(t *task.Task) TaskInfo {
 		Worktree:         t.Worktree,
 		WorktreePath:     t.WorktreePath,
 		WorktreeDetached: t.WorktreeDetached,
+		Workdir:          t.Workdir,
 		ErrorMessage:     t.ErrorMessage,
 		Context:          t.Context,
 		Images:           t.Images,

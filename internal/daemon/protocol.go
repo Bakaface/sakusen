@@ -167,6 +167,7 @@ type CreateTaskRequest struct {
 	CheckoutBranch string   `json:"checkout_branch,omitempty"`
 	ProjectPath    string   `json:"project_path,omitempty"` // resolved to project_id by daemon
 	Worktree       *bool    `json:"worktree,omitempty"`     // nil means default (true)
+	Workdir        string   `json:"workdir,omitempty"`      // agent start dir relative to the checkout; "" = workflow pin or root
 	BranchMode     *int     `json:"branch_mode,omitempty"`  // nil means default (0 = new branch)
 	TmuxDirect     bool     `json:"tmux_direct,omitempty"`  // when true, skip workflow and go straight to tmux
 	Images         []string `json:"images,omitempty"`
@@ -322,7 +323,7 @@ type ParallelStepSummary struct {
 }
 
 // WorkflowSummary describes a single workflow available in a project. It
-// carries the pinnable New Task fields (input/worktree/branch/checkout/target)
+// carries the pinnable New Task fields (input/worktree/branch/checkout/target/workdir)
 // and FullySpec so consumers can decide skip-vs-show without re-resolving
 // config. Description is human-readable metadata (NOT a pin); Input, when
 // non-empty, is the pinned task input.
@@ -334,6 +335,7 @@ type WorkflowSummary struct {
 	Branch          string                `json:"branch,omitempty"`             // pinned new-branch template
 	Checkout        string                `json:"checkout,omitempty"`           // pinned existing branch to check out
 	Target          string                `json:"target,omitempty"`             // pinned target/base branch
+	Workdir         string                `json:"workdir,omitempty"`            // pinned agent start directory
 	FullySpec       bool                  `json:"fully_spec"`                   // every New Task field pinned → screen can be skipped
 	Agent           string                `json:"agent,omitempty"`              // workflow-level explicit agent slug (steps may override)
 	FirstStepIsTmux bool                  `json:"first_step_is_tmux,omitempty"` // derived; useful for picking interactive workflows
@@ -598,6 +600,7 @@ type TaskInfo struct {
 	Worktree         bool     `json:"worktree"`
 	WorktreePath     string   `json:"worktree_path,omitempty"`
 	WorktreeDetached bool     `json:"worktree_detached,omitempty"`
+	Workdir          string   `json:"workdir,omitempty"`
 	ErrorMessage     string   `json:"error_message,omitempty"`
 	Context          string   `json:"context,omitempty"`
 	Images           []string `json:"images,omitempty"`

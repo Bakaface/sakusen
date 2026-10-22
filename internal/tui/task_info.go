@@ -231,6 +231,11 @@ func (v *taskInfoView) renderMetadata() string {
 		}
 		b.WriteString("\n")
 	}
+	if t.Workdir != "" {
+		b.WriteString(labelStyle.Render("Workdir:   "))
+		b.WriteString(dimStyle.Render(t.Workdir))
+		b.WriteString("\n")
+	}
 
 	// Workflow progress
 	if v.workflow != nil && len(v.workflow.Steps) > 0 {

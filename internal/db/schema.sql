@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     worktree INTEGER NOT NULL DEFAULT 1,
     worktree_path TEXT,
     worktree_detached INTEGER NOT NULL DEFAULT 0,
+    -- Agent start directory relative to the task's checkout; '' = checkout root.
+    workdir TEXT NOT NULL DEFAULT '',
     exit_code INTEGER,
     error_message TEXT,
     context TEXT,

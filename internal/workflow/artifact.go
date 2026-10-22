@@ -58,8 +58,9 @@ func ImagesDir(worktreePath string) string {
 }
 
 // CopyImagesToWorktree copies the given image files into .sakusen/images/ in the worktree.
-// Returns the list of worktree-relative paths for the copied images.
-func CopyImagesToWorktree(worktreePath string, imagePaths []string) ([]string, error) {
+// Returns the copied images' paths relative to relDir (the agent start
+// directory), so they resolve from the agent's cwd.
+func CopyImagesToWorktree(worktreePath, relDir string, imagePaths []string) ([]string, error) {
 	if len(imagePaths) == 0 {
 		return nil, nil
 	}
@@ -82,7 +83,7 @@ func CopyImagesToWorktree(worktreePath string, imagePaths []string) ([]string, e
 			return nil, fmt.Errorf("failed to write image %s: %w", dst, err)
 		}
 
-		relPath, _ := filepath.Rel(worktreePath, dst)
+		relPath, _ := filepath.Rel(relDir, dst)
 		relativePaths = append(relativePaths, relPath)
 	}
 

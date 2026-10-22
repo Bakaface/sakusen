@@ -173,3 +173,9 @@ func TestWorkflowAllowsEmptyDescription(t *testing.T) {
 		t.Error("description-pinned workflow should allow empty descriptions")
 	}
 }
+
+func TestCreateCmd_WorkdirFlag(t *testing.T) {
+	if f := createCmd.Flag("workdir"); f == nil {
+		t.Fatal("expected --workdir flag to be registered on create command")
+	}
+}

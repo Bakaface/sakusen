@@ -86,6 +86,7 @@ var migrations = []func(db *DB) error{
 	migrateV22,
 	migrateV23,
 	migrateV24,
+	migrateV25,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -481,6 +482,22 @@ func migrateV24(db *DB) error {
 	}
 	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN hibernated_at DATETIME`); err != nil {
 		return fmt.Errorf("failed to add hibernated_at column: %w", err)
+	}
+	return nil
+}
+
+// migrateV25 adds tasks.workdir — the agent start directory relative to the
+// task's checkout. Existing rows read as empty (the checkout root).
+func migrateV25(db *DB) error {
+	hasWorkdir, err := db.tasksHasColumn("workdir")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tasks columns: %w", err)
+	}
+	if hasWorkdir {
+		return nil
+	}
+	if _, err := db.sqlDB.Exec(`ALTER TABLE tasks ADD COLUMN workdir TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("failed to add workdir column: %w", err)
 	}
 	return nil
 }

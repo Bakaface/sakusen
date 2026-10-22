@@ -77,9 +77,13 @@ single flat list. A workflow may pin any subset of New Task screen fields:
 | `branch` | string | Pins a new-branch template; forces branch-mode "new" |
 | `checkout` | string | Pins an existing branch to check out; forces branch-mode "existing" |
 | `target` | string | Pins the target/base branch |
+| `workdir` | string | Pins the agent start directory: a path relative to the task's worktree (or the main checkout when `worktree: false`) where every agent and tmux session starts. Must stay inside the checkout and exist when the agent starts (the step fails otherwise) |
 
 Validation: `branch` and `checkout` are mutually exclusive; `branch`/`checkout`/`target` are
-rejected when `worktree: false`.
+rejected when `worktree: false`; `workdir` must be a relative path inside the checkout (no
+absolute paths, no `..` escapes). `workdir` is optional and never gates skipping the New Task
+screen. An explicit `workdir` on `create_task` / `sakusen create --workdir` / the New Task form
+overrides the pin.
 
 **Skipping the New Task screen.** A workflow that pins *every* field (`input` + `worktree` +
 `branch`/`checkout` + `target`) creates a task immediately without showing the form. Two
@@ -258,6 +262,7 @@ no implicit shadowing of ordinary workflows — `auth:harden` and `harden` are u
   branch: "..."              # pin (mutually exclusive with checkout)
   checkout: "..."            # pin
   target: main               # pin
+  workdir: em/rails-foundation # pin: agents and tmux sessions start in this subdirectory
   agent: claude              # agent slug every step inherits unless it sets its own
   on_complete: commit        # per-workflow override: "commit" | "merge" | "none"
   summarizer_prompt: "..."   # custom prompt for the post-completion task summarizer
@@ -905,8 +910,8 @@ and self-advance.
 | Tool | Purpose |
 |---|---|
 | `list_workflows` | List a project's workflows (name, description, pins, `fully_spec`, `first_step_is_tmux`, per-step name + description). Call before `create_task`. |
-| `create_task` | Queue a new task. `workflow` is required except for `tmux_direct` tasks. |
-| `create_tasks_and_wait` | Spawn child tasks and suspend the calling step until all reach a terminal status. |
+| `create_task` | Queue a new task. `workflow` is required except for `tmux_direct` tasks. Optional `workdir` sets the agent start subdirectory (overrides the workflow's pin). |
+| `create_tasks_and_wait` | Spawn child tasks and suspend the calling step until all reach a terminal status. Each child spec accepts `workdir` like `create_task`. |
 | `wait_for_tasks` | Same suspension, for pre-existing task IDs (any project). |
 | `get_task` | Task detail; `include_*` flags opt into per-step state, captured step contexts, and recent agent output. |
 | `list_tasks` | Compact task summaries, project-scoped or `all_projects=true`. |

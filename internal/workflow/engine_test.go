@@ -199,7 +199,7 @@ func TestCopyImagesToWorktree(t *testing.T) {
 	// Create a worktree directory
 	worktree := t.TempDir()
 
-	relPaths, err := CopyImagesToWorktree(worktree, []string{img1, img2})
+	relPaths, err := CopyImagesToWorktree(worktree, worktree, []string{img1, img2})
 	if err != nil {
 		t.Fatalf("CopyImagesToWorktree failed: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestCopyImagesToWorktree(t *testing.T) {
 func TestCopyImagesToWorktreeEmpty(t *testing.T) {
 	worktree := t.TempDir()
 
-	relPaths, err := CopyImagesToWorktree(worktree, nil)
+	relPaths, err := CopyImagesToWorktree(worktree, worktree, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -12,7 +12,7 @@ Session creation, lifecycle, pane capture, activity monitoring for interactive t
 
 | File | Purpose |
 |------|---------|
-| `session.go` | `Session{Name, WorkDir}`: create (`new-session -d`, working dir via `-c`), exists/alive/kill, `KillSessionsForTask`, pane capture, `SendKeys`, `PipePane` (log capture), attach/switch-client/nested-attach commands, setup-command templating (`{{session_name}}`, `{{worktree_path}}`, `{{agent_command}}`, `{{run_agent}}`), `IsAvailable`, `IsInsideTmux`, `ListSessions`, `ExtractTaskID` |
+| `session.go` | `Session{Name, WorkDir, RootDir}`: create (`new-session -d`, working dir via `-c`; the setup command also runs in `WorkDir`, while `{{worktree_path}}` expands to `RootDir`, defaulting to `WorkDir`), exists/alive/kill, `KillSessionsForTask`, pane capture, `SendKeys`, `PipePane` (log capture), attach/switch-client/nested-attach commands, setup-command templating (`{{session_name}}`, `{{worktree_path}}`, `{{agent_command}}`, `{{run_agent}}`), `IsAvailable`, `IsInsideTmux`, `ListSessions`, `ExtractTaskID` |
 | `monitor.go` | `Monitor.Check(session)` → idle / wip / unknown by hashing captured lines and counting consecutive identical hashes per session; a configured idle pattern matching the tail lines uses the lower `StableThreshold`, otherwise the hash-only fallback threshold. `Remove` drops tracking state for ended sessions |
 
 ## Conventions

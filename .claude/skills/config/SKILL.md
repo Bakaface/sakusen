@@ -92,6 +92,7 @@ type WorkflowConfig struct {
     Checkout              string                  // pins an existing branch to check out (forces branch-mode "existing")
     Target                string                  // pins the target/base branch
     ExclusiveWorkdir      bool                    // worktree:false tasks wait while another active worktree:false task of the project runs (inline periodics copy it; ref mode ignores the entry's)
+    Workdir               string                  // pins the agent start directory (relative to the task's checkout); optional, never gates IsFullySpec
     Agent                 string                  // workflow-level agent slug; steps inherit unless they set their own
     OnComplete            string                  // per-workflow override of the finalization action
     Steps                 []StepConfig
@@ -108,7 +109,7 @@ type WorkflowConfig struct {
 }
 ```
 
-Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped — note `description` is metadata and does NOT gate skip); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false).
+Methods: `IsFullySpec() bool` (true when input + worktree + branch/checkout + target are all pinned, so the New Task screen is skipped — note `description` is metadata and does NOT gate skip); `ValidatePins() error` (branch and checkout are mutually exclusive; branch/checkout/target are rejected when worktree is pinned false; `workdir` must be a local relative path — `filepath.IsLocal` after `Clean`, so absolute paths and `..` escapes are rejected). Inline periodic entries carry the same `workdir` pin and copy it onto the hidden `periodic:<name>` workflow.
 
 The removed `tmux:` and `print:` fields are rejected at parse time (workflow and step level) with migration errors — execution mode now comes from the resolved agent record's `mode` (see the Agents section below).
 

@@ -40,8 +40,12 @@ func exactPane(name string) string {
 }
 
 type Session struct {
-	Name    string
+	Name string
+	// WorkDir is where the session (and the setup command) starts.
 	WorkDir string
+	// RootDir is the task's checkout root, exposed to the setup command as
+	// {{worktree_path}}. Empty means WorkDir.
+	RootDir string
 }
 
 func NewSession(projectName, taskID, workDir string) *Session {
@@ -111,7 +115,11 @@ func (s *Session) RunSetupCommand(command string, vars *SetupVars) error {
 	}
 
 	resolved := strings.ReplaceAll(command, "{{session_name}}", s.Name)
-	resolved = strings.ReplaceAll(resolved, "{{worktree_path}}", s.WorkDir)
+	rootDir := s.RootDir
+	if rootDir == "" {
+		rootDir = s.WorkDir
+	}
+	resolved = strings.ReplaceAll(resolved, "{{worktree_path}}", rootDir)
 	if vars != nil {
 		resolved = strings.ReplaceAll(resolved, "{{agent_command}}", vars.AgentCommand)
 		resolved = strings.ReplaceAll(resolved, "{{run_agent}}", vars.RunAgent)

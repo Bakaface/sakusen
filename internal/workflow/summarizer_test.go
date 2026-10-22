@@ -269,6 +269,22 @@ func TestLoadStepChatContentTmuxEnvContract(t *testing.T) {
 		}
 	})
 
+	t.Run("chat_log_command runs in the task workdir", func(t *testing.T) {
+		e, wf, step, _, tk := newTmuxChatEngine(t, "pwd -P")
+		tk.Workdir = "sub"
+		start := filepath.Join(tk.WorktreePath, "sub")
+		if err := os.MkdirAll(start, 0755); err != nil {
+			t.Fatal(err)
+		}
+		out, err := e.loadStepChatContent(context.Background(), tk, wf, step, true)
+		if err != nil {
+			t.Fatalf("loadStepChatContent: %v", err)
+		}
+		if want, _ := filepath.EvalSymlinks(start); out != want {
+			t.Errorf("chat_log_command cwd = %q, want %q", out, want)
+		}
+	})
+
 	t.Run("failing chat_log_command surfaces an error", func(t *testing.T) {
 		e, wf, step, _, tk := newTmuxChatEngine(t, "exit 1")
 		writeSentinel(t, tk.WorktreePath, "grill-1234567890.json", `{}`)

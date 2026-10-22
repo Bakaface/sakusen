@@ -204,7 +204,7 @@ func (m Model) addTaskDependency(taskID, blockedByID int64) tea.Cmd {
 	})
 }
 
-func (m Model) createTaskWithPrompt(title, slug, input, branchName string, worktree bool, images []string, targetBranch, checkoutBranch string) tea.Cmd {
+func (m Model) createTaskWithPrompt(title, slug, input, branchName string, worktree bool, images []string, targetBranch, checkoutBranch, workdir string) tea.Cmd {
 	return func() tea.Msg {
 		if m.client == nil {
 			return nil
@@ -223,6 +223,7 @@ func (m Model) createTaskWithPrompt(title, slug, input, branchName string, workt
 			Target:      targetBranch,
 			Checkout:    checkoutBranch,
 			Worktree:    &worktreeChoice,
+			Workdir:     workdir,
 			ProjectPath: m.projectPath,
 			Images:      images,
 			BranchMode:  &bm,

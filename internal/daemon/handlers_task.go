@@ -238,6 +238,19 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		worktree = *req.Worktree
 	}
 
+	// Workdir precedence: explicit request > workflow pin > checkout root.
+	// Never persisted as a project default.
+	workdir := ""
+	if wf != nil {
+		workdir = config.CleanWorkdir(wf.Workdir)
+	}
+	if reqWorkdir := strings.TrimSpace(req.Workdir); reqWorkdir != "" {
+		if err := config.ValidateWorkdir(reqWorkdir); err != nil {
+			return nil, "", err
+		}
+		workdir = config.CleanWorkdir(reqWorkdir)
+	}
+
 	// Persist form preferences for this project. Only user-driven choices
 	// (explicit request values) should overwrite the saved project defaults —
 	// pin-derived worktree values must not leak into the persisted default.
@@ -265,6 +278,13 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	t, err := s.database.CreateTaskWithPriority(proj.ID, title, input, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create task: %v", err)
+	}
+
+	if workdir != "" {
+		if err := s.database.SetTaskWorkdir(t.ID, workdir); err != nil {
+			return nil, "", fmt.Errorf("failed to set workdir: %v", err)
+		}
+		t.Workdir = workdir
 	}
 
 	// Link the task to its periodic definition (scheduler-materialized fires).

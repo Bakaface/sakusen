@@ -29,6 +29,9 @@ type CreateArgs struct {
 	// project default. A non-nil value (a real user choice) overrides both. Leaving
 	// this nil is what lets a workflow's worktree:false pin actually take effect.
 	Worktree *bool
+	// Workdir is the agent start directory relative to the task's checkout.
+	// Empty defers to the workflow's workdir pin, else the checkout root.
+	Workdir string
 	// Track attaches the task to a track (slug or numeric ID).
 	Track       string
 	DependsOn   []int64
@@ -67,6 +70,7 @@ func RunCreate(ctx Ctx, args CreateArgs) (Result, error) {
 		CheckoutBranch: args.Checkout,
 		ProjectPath:    args.ProjectPath,
 		Worktree:       args.Worktree,
+		Workdir:        args.Workdir,
 		Track:          args.Track,
 		BranchMode:     args.BranchMode,
 		TmuxDirect:     args.TmuxDirect,

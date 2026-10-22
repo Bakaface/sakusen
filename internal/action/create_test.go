@@ -51,3 +51,21 @@ func TestRunCreate_WorktreePassthrough(t *testing.T) {
 		})
 	}
 }
+
+func TestRunCreate_WorkdirPassthrough(t *testing.T) {
+	var got daemon.CreateTaskRequest
+	fc := &fakeClient{createTask: func(req daemon.CreateTaskRequest) (*daemon.TaskInfo, error) {
+		got = req
+		return &daemon.TaskInfo{ID: 1}, nil
+	}}
+	if _, err := action.RunCreate(action.Ctx{Client: fc}, action.CreateArgs{
+		Input:       "do the thing",
+		ProjectPath: "/tmp/proj",
+		Workdir:     "em/rails-foundation",
+	}); err != nil {
+		t.Fatalf("RunCreate: %v", err)
+	}
+	if got.Workdir != "em/rails-foundation" {
+		t.Errorf("Workdir: got %q, want em/rails-foundation", got.Workdir)
+	}
+}

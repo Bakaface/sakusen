@@ -147,6 +147,7 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 	branchName := m.prompt.BranchName()
 	targetBranch := m.prompt.TargetBranch()
 	worktree := m.prompt.Worktree()
+	workdir := m.prompt.Workdir()
 
 	// Persist the current form selections as the new defaults for this session
 	m.defaultWorktree = worktree
@@ -154,7 +155,7 @@ func (m Model) handlePromptSubmit() (tea.Model, tea.Cmd) {
 	m.defaultWorkflow = m.selectedWorkflow
 	m.prompt.defaultWorkflow = m.defaultWorkflow
 
-	deferred := m.createTaskWithPrompt(title, slug, description, branchName, worktree, images, targetBranch, checkoutBranch)
+	deferred := m.createTaskWithPrompt(title, slug, description, branchName, worktree, images, targetBranch, checkoutBranch, workdir)
 	if m.animationEnabled() {
 		positions := m.planePositions(description)
 		m.sakusen = newSakusenAnimation(positions, m.width, m.height, m.animationDuration())

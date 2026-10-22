@@ -248,7 +248,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		wf := m.cfg.GetTaskWorkflow(m.selectedWorkflow)
 		// Fully-pinned workflow → skip the screen and create immediately.
 		if wf != nil && wf.IsFullySpec() {
-			return m, m.createTaskWithPrompt("", "", wf.Input, wf.Branch, *wf.Worktree, nil, wf.Target, wf.Checkout)
+			return m, m.createTaskWithPrompt("", "", wf.Input, wf.Branch, *wf.Worktree, nil, wf.Target, wf.Checkout, wf.Workdir)
 		}
 		m.view = viewPrompt
 		m.prompt.defaultWorkflow = m.defaultWorkflow
@@ -284,7 +284,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Fully-pinned workflow → create the blocking task immediately
 		// (m.blockingTaskID is threaded through createTaskWithPrompt).
 		if wf != nil && wf.IsFullySpec() {
-			return m, m.createTaskWithPrompt("", "", wf.Input, wf.Branch, *wf.Worktree, nil, wf.Target, wf.Checkout)
+			return m, m.createTaskWithPrompt("", "", wf.Input, wf.Branch, *wf.Worktree, nil, wf.Target, wf.Checkout, wf.Workdir)
 		}
 		m.view = viewPrompt
 		m.prompt.defaultWorkflow = m.defaultWorkflow
@@ -541,7 +541,7 @@ func (m Model) launchWorkflow(wfName string) (tea.Model, tea.Cmd) {
 	m.selectedWorkflow = wfName
 
 	if wf.IsFullySpec() {
-		return m, m.createTaskWithPrompt("", "", wf.Input, wf.Branch, *wf.Worktree, nil, wf.Target, wf.Checkout)
+		return m, m.createTaskWithPrompt("", "", wf.Input, wf.Branch, *wf.Worktree, nil, wf.Target, wf.Checkout, wf.Workdir)
 	}
 
 	m.view = viewPrompt

@@ -98,7 +98,7 @@ sakusen tasks                                     # list, or `sakusen tasks <id>
 
 Workflows live in `.sakusen.yml` at the repo root as a flat `workflows:` list. Each entry is either a string ref (resolved to `.sakusen/workflows/<name>.yml`) or an inline workflow mapping.
 
-A workflow may **pin** any subset of New Task screen fields (`input`, `worktree`, `branch`, `checkout`, `target`). Pinned fields are pre-filled and hidden from the form. If all fields are pinned the New Task screen is skipped entirely and the task is created immediately. (A separate top-level `description:` is human-readable metadata — a one-line summary surfaced in the workflow picker and via MCP `list_workflows`; it is **not** a pin and never becomes the task input.)
+A workflow may **pin** any subset of New Task screen fields (`input`, `worktree`, `branch`, `checkout`, `target`, `workdir`). Pinned fields are pre-filled and hidden from the form. `workdir` names a subdirectory of the task's checkout where every agent and tmux session starts (useful when a subdirectory carries its own `CLAUDE.md` / `.mcp.json` / `.claude/settings.json`); it is optional and never required for skipping the screen. If all other fields are pinned the New Task screen is skipped entirely and the task is created immediately. (A separate top-level `description:` is human-readable metadata — a one-line summary surfaced in the workflow picker and via MCP `list_workflows`; it is **not** a pin and never becomes the task input.)
 
 Minimal `.sakusen.yml`:
 

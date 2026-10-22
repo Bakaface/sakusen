@@ -209,6 +209,9 @@ func printTaskDetail(t *daemon.TaskInfo) {
 	} else if t.WorktreePath != "" {
 		fmt.Printf("  Worktree:    %s\n", t.WorktreePath)
 	}
+	if t.Workdir != "" {
+		fmt.Printf("  Workdir:     %s\n", t.Workdir)
+	}
 	if len(t.BlockedBy) > 0 {
 		fmt.Printf("  Blocked by:  %v\n", t.BlockedBy)
 	}

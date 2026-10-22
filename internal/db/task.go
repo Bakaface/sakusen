@@ -46,7 +46,7 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workfl
 }
 
 const taskColumns = `id, project_id, track_id, title, input, slug, workflow, status, priority, step_index, current_step, loop_iteration,
-	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, exit_code, error_message, context, images, commits, periodic_id,
+	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, workdir, exit_code, error_message, context, images, commits, periodic_id,
 	created_at, started_at, completed_at, updated_at, hibernated_at`
 
 func (db *DB) GetTask(id int64) (*task.Task, error) {
@@ -325,6 +325,16 @@ func (db *DB) UpdateTaskError(id int64, errMsg string) error {
 	_, err := db.sqlDB.Exec(
 		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?",
 		errMsg, task.StatusFailed, time.Now(), id,
+	)
+	return err
+}
+
+// SetTaskWorkdir records the agent start directory (relative to the task's
+// checkout) chosen at create time.
+func (db *DB) SetTaskWorkdir(id int64, workdir string) error {
+	_, err := db.sqlDB.Exec(
+		"UPDATE tasks SET workdir = ?, updated_at = ? WHERE id = ?",
+		workdir, time.Now(), id,
 	)
 	return err
 }
@@ -759,7 +769,7 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	err := s.Scan(
 		&t.ID, &projectID, &trackID, &title, &t.Input, &slug, &workflow, &t.Status, &priority,
 		&t.StepIndex, &currentStep, &t.LoopIteration,
-		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON, &periodicID,
+		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &t.Workdir, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON, &periodicID,
 		&t.CreatedAt, &startedAt, &completedAt, &updatedAt, &hibernatedAt,
 	)
 	if err != nil {

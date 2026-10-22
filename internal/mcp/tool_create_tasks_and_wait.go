@@ -24,6 +24,7 @@ type ChildTaskSpec struct {
 	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override."`
 	CheckoutBranch string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one."`
 	Worktree       *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree."`
+	Workdir        string   `json:"workdir,omitempty" jsonschema:"Subdirectory, relative to the task's worktree (or main checkout when worktree is false), where agents and tmux sessions start. Must be a relative path inside the checkout and exist when the agent starts. Defaults to the workflow's workdir pin, else the checkout root."`
 	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this child runs."`
@@ -132,6 +133,7 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 			CheckoutBranch: t.CheckoutBranch,
 			ProjectPath:    projectPath,
 			Worktree:       t.Worktree,
+			Workdir:        t.Workdir,
 			TmuxDirect:     t.TmuxDirect,
 			Images:         t.Images,
 			BlockedBy:      t.BlockedBy,

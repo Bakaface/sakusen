@@ -383,7 +383,7 @@ func TestPromptView_NewlineWithInterleaved(t *testing.T) {
 
 func TestPromptView_NewlineAfterLongLine(t *testing.T) {
 	p := newPromptView(true, branchModeNew, "", "")
-	p.SetSize(40, 20) // Narrow terminal to force wrapping
+	p.SetSize(40, 22) // Narrow terminal to force wrapping
 
 	// Type a long line that will wrap
 	longText := "this is a long line that should wrap in a narrow terminal"
@@ -713,7 +713,7 @@ func TestPromptView_DefaultFocusIsDescription(t *testing.T) {
 }
 
 func TestPromptView_SwitchFocusForward(t *testing.T) {
-	// Without worktree: title → slug → description → title
+	// Without worktree: title → slug → workdir → description → title
 	p := newPromptView(false, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
@@ -733,13 +733,18 @@ func TestPromptView_SwitchFocusForward(t *testing.T) {
 	}
 
 	p.SwitchFocus(true)
+	if p.focusField != promptFieldWorkdir {
+		t.Errorf("expected focus on workdir after slug, got %v", p.focusField)
+	}
+
+	p.SwitchFocus(true)
 	if p.focusField != promptFieldInput {
-		t.Errorf("expected focus back on description after third forward switch, got %v", p.focusField)
+		t.Errorf("expected focus back on description after the workdir, got %v", p.focusField)
 	}
 }
 
 func TestPromptView_SwitchFocusForwardWithWorktree(t *testing.T) {
-	// With worktree and branchModeNew: title → slug → description → branch → targetBranch → title
+	// With worktree and branchModeNew: title → slug → workdir → description → branch → targetBranch → title
 	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
@@ -765,17 +770,27 @@ func TestPromptView_SwitchFocusForwardWithWorktree(t *testing.T) {
 	}
 
 	p.SwitchFocus(true)
+	if p.focusField != promptFieldWorkdir {
+		t.Errorf("expected focus on workdir after slug, got %v", p.focusField)
+	}
+
+	p.SwitchFocus(true)
 	if p.focusField != promptFieldInput {
-		t.Errorf("expected focus on description after slug, got %v", p.focusField)
+		t.Errorf("expected focus on description after workdir, got %v", p.focusField)
 	}
 }
 
 func TestPromptView_SwitchFocusBackward(t *testing.T) {
-	// Without worktree: backward from description → slug → title → description
+	// Without worktree: backward from description → workdir → slug → title → description
 	p := newPromptView(false, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Start on description
+	p.SwitchFocus(false)
+	if p.focusField != promptFieldWorkdir {
+		t.Errorf("expected focus on workdir after backward from description, got %v", p.focusField)
+	}
+
 	p.SwitchFocus(false)
 	if p.focusField != promptFieldSlug {
 		t.Errorf("expected focus on slug after backward switch, got %v", p.focusField)
@@ -793,11 +808,16 @@ func TestPromptView_SwitchFocusBackward(t *testing.T) {
 }
 
 func TestPromptView_SwitchFocusBackwardWithWorktree(t *testing.T) {
-	// With worktree: backward from description → slug → title → targetBranch → branch → description
+	// With worktree: backward from description → workdir → slug → title → targetBranch → branch → description
 	p := newPromptView(true, branchModeNew, "", "")
 	p.SetSize(80, 24)
 
 	// Start on description, go backward
+	p.SwitchFocus(false)
+	if p.focusField != promptFieldWorkdir {
+		t.Errorf("expected focus on workdir after backward from description, got %v", p.focusField)
+	}
+
 	p.SwitchFocus(false)
 	if p.focusField != promptFieldSlug {
 		t.Errorf("expected focus on slug after backward from description, got %v", p.focusField)

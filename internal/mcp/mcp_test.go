@@ -361,6 +361,7 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 				"priority":      "high",
 				"branch_name":   "feat/{{task.slug}}",
 				"target_branch": "develop",
+				"workdir":       "em/rails-foundation",
 				"images":        []string{"/tmp/a.png"},
 				"blocked_by":    []int{7, 8},
 			},
@@ -393,6 +394,9 @@ func TestMCP_CreateTask_PassesAllFields(t *testing.T) {
 	}
 	if captured.TargetBranch != "develop" {
 		t.Errorf("TargetBranch: %q", captured.TargetBranch)
+	}
+	if captured.Workdir != "em/rails-foundation" {
+		t.Errorf("Workdir: %q", captured.Workdir)
 	}
 	if len(captured.Images) != 1 || captured.Images[0] != "/tmp/a.png" {
 		t.Errorf("Images: %v", captured.Images)
@@ -1485,7 +1489,7 @@ func TestMCP_CreateTasksAndWait_PassesSlugThrough(t *testing.T) {
 			Arguments: map[string]any{
 				"parent_task_id": 1,
 				"tasks": []map[string]any{
-					{"input": "child a", "workflow": "implement", "slug": "child-a"},
+					{"input": "child a", "workflow": "implement", "slug": "child-a", "workdir": "sub/a"},
 					{"input": "child b", "workflow": "implement"},
 				},
 			},
@@ -1502,6 +1506,9 @@ func TestMCP_CreateTasksAndWait_PassesSlugThrough(t *testing.T) {
 	}
 	if captured.Tasks[0].Slug != "child-a" {
 		t.Errorf("child a slug = %q, want child-a", captured.Tasks[0].Slug)
+	}
+	if captured.Tasks[0].Workdir != "sub/a" || captured.Tasks[1].Workdir != "" {
+		t.Errorf("child workdirs = %q/%q, want sub/a and empty", captured.Tasks[0].Workdir, captured.Tasks[1].Workdir)
 	}
 	if captured.Tasks[1].Slug != "" {
 		t.Errorf("child b slug = %q, want empty (auto-generated)", captured.Tasks[1].Slug)

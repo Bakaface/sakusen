@@ -59,6 +59,7 @@ func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) [
 			Branch:          wf.Branch,
 			Checkout:        wf.Checkout,
 			Target:          wf.Target,
+			Workdir:         wf.Workdir,
 			FullySpec:       wf.IsFullySpec(),
 			Agent:           wf.Agent,
 			FirstStepIsTmux: cfg.FirstStepIsTmux(wf),

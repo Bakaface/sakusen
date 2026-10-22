@@ -29,6 +29,7 @@ type promptField int
 const (
 	promptFieldTitle promptField = iota
 	promptFieldSlug
+	promptFieldWorkdir
 	promptFieldInput
 	promptFieldBranch
 	promptFieldCheckout
@@ -57,6 +58,7 @@ type promptPins struct {
 	branch   bool // pinned by wf.Branch
 	checkout bool // pinned by wf.Checkout
 	target   bool // pinned by wf.Target
+	workdir  bool // pinned by wf.Workdir
 }
 
 // promptSaved holds user-entered field values displaced by workflow pins, so
@@ -69,12 +71,14 @@ type promptSaved struct {
 	branch     string
 	checkout   string
 	target     string
+	workdir    string
 }
 
 type promptView struct {
 	textarea          textarea.Model
 	titleInput        textinput.Model
 	slugInput         textinput.Model
+	workdirInput      textinput.Model
 	branchInput       textinput.Model
 	checkoutInput     textinput.Model
 	targetBranchInput textinput.Model
@@ -131,6 +135,10 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 	slugIn.Placeholder = "auto-generated if left blank"
 	slugIn.CharLimit = 200
 
+	wdIn := textinput.New()
+	wdIn.Placeholder = "checkout root if left blank"
+	wdIn.CharLimit = 200
+
 	bi := textinput.New()
 	bi.Placeholder = branchTemplate
 	if bi.Placeholder == "" {
@@ -153,6 +161,7 @@ func newPromptView(defaultWorktree bool, defaultBranchMode branchMode, defaultBa
 		textarea:          ta,
 		titleInput:        titleIn,
 		slugInput:         slugIn,
+		workdirInput:      wdIn,
 		branchInput:       bi,
 		checkoutInput:     ci,
 		targetBranchInput: ti,
@@ -172,6 +181,7 @@ func (p *promptView) SetSize(width, height int) {
 	prefix := 2
 	p.titleInput.Width = width - 4 - prefix - lipgloss.Width("Title: ") - lipgloss.Width(p.titleInput.Prompt) - 1
 	p.slugInput.Width = width - 4 - prefix - lipgloss.Width("Slug: ") - lipgloss.Width(p.slugInput.Prompt) - 1
+	p.workdirInput.Width = width - 4 - prefix - lipgloss.Width("Workdir: ") - lipgloss.Width(p.workdirInput.Prompt) - 1
 	// Git inputs are inside a frame: border(2) + paddingLeft(1) = 3 chars overhead.
 	// textinput.View() renders at Width + promptWidth + 1 (cursor), so subtract that too.
 	frameOuterWidth := width - 1 // matches innerWidth in View()
@@ -191,10 +201,14 @@ func (p *promptView) SetSize(width, height int) {
 func (p *promptView) maxHeight() int {
 	// Reserve lines for non-textarea content:
 	// title bar(1) + blank(1) + titleInput(1) + blank(1) + slugInput(1) + blank(1) +
+	// workdirInput(1) + blank(1) [unless pinned] +
 	// [textarea goes here] + blank(1) +
 	// git frame top(1) + padding(1) + worktree(1) + mode(1) + blank(1) + branch(1) + target(1) + git frame bottom(1) +
 	// blank(1) + help(1)
-	reserved := 16
+	reserved := 18
+	if p.pins.workdir {
+		reserved -= 2
+	}
 	if !p.worktree {
 		reserved -= 4 // no mode/blank/branch/target lines
 	}
@@ -253,6 +267,7 @@ func (p *promptView) Reset() {
 	p.textarea.Reset()
 	p.titleInput.Reset()
 	p.slugInput.Reset()
+	p.workdirInput.Reset()
 	p.branchInput.Reset()
 	p.checkoutInput.Reset()
 	p.targetBranchInput.Reset()
@@ -299,6 +314,9 @@ func (p *promptView) applyPins(wf *config.WorkflowConfig) {
 	if p.pins.target {
 		p.targetBranchInput.SetValue(p.saved.target)
 	}
+	if p.pins.workdir {
+		p.workdirInput.SetValue(p.saved.workdir)
+	}
 	p.pins = promptPins{}
 	p.saved = promptSaved{}
 
@@ -331,6 +349,11 @@ func (p *promptView) applyPins(wf *config.WorkflowConfig) {
 			p.saved.target = p.targetBranchInput.Value()
 			p.targetBranchInput.SetValue(wf.Target)
 			p.pins.target = true
+		}
+		if wf.Workdir != "" {
+			p.saved.workdir = p.workdirInput.Value()
+			p.workdirInput.SetValue(wf.Workdir)
+			p.pins.workdir = true
 		}
 	}
 
@@ -379,6 +402,11 @@ func (p *promptView) SlugValue() string {
 	return strings.TrimSpace(p.slugInput.Value())
 }
 
+// Workdir returns the agent start directory; empty means the checkout root.
+func (p *promptView) Workdir() string {
+	return strings.TrimSpace(p.workdirInput.Value())
+}
+
 func (p *promptView) BranchName() string {
 	return strings.TrimSpace(p.branchInput.Value())
 }
@@ -404,6 +432,7 @@ func (p *promptView) blurAll() {
 	p.textarea.Blur()
 	p.titleInput.Blur()
 	p.slugInput.Blur()
+	p.workdirInput.Blur()
 	p.branchInput.Blur()
 	p.checkoutInput.Blur()
 	p.targetBranchInput.Blur()
@@ -419,6 +448,8 @@ func (p *promptView) focusInput(field promptField) {
 		p.titleInput.Focus()
 	case promptFieldSlug:
 		p.slugInput.Focus()
+	case promptFieldWorkdir:
+		p.workdirInput.Focus()
 	case promptFieldInput:
 		p.textarea.Focus()
 	case promptFieldBranch:
@@ -434,6 +465,9 @@ func (p *promptView) focusInput(field promptField) {
 // based on the current worktree and branch mode state.
 func (p *promptView) visibleFields() []promptField {
 	fields := []promptField{promptFieldTitle, promptFieldSlug}
+	if !p.pins.workdir {
+		fields = append(fields, promptFieldWorkdir)
+	}
 	if !p.pins.input {
 		fields = append(fields, promptFieldInput)
 	}
@@ -459,7 +493,7 @@ func (p *promptView) ToggleWorktree() {
 		return
 	}
 	p.worktree = !p.worktree
-	if !p.worktree && p.focusField != promptFieldInput && p.focusField != promptFieldTitle && p.focusField != promptFieldSlug {
+	if !p.worktree && p.focusField != promptFieldInput && p.focusField != promptFieldTitle && p.focusField != promptFieldSlug && p.focusField != promptFieldWorkdir {
 		p.focusFirstVisible()
 	}
 }
@@ -497,6 +531,8 @@ func (p *promptView) Update(msg tea.Msg) tea.Cmd {
 		p.titleInput, cmd = p.titleInput.Update(msg)
 	case promptFieldSlug:
 		p.slugInput, cmd = p.slugInput.Update(msg)
+	case promptFieldWorkdir:
+		p.workdirInput, cmd = p.workdirInput.Update(msg)
 	case promptFieldInput:
 		// Pre-expand textarea to max height so the internal viewport doesn't
 		// scroll when content grows beyond the current height.
@@ -621,7 +657,7 @@ func (p *promptView) hasVisibleGitField() bool {
 // forward=true goes main→git→workflow; forward=false reverses.
 func (p *promptView) CyclePane(forward bool) {
 	isMainField := p.activePane == paneTask &&
-		(p.focusField == promptFieldTitle || p.focusField == promptFieldSlug || p.focusField == promptFieldInput)
+		(p.focusField == promptFieldTitle || p.focusField == promptFieldSlug || p.focusField == promptFieldWorkdir || p.focusField == promptFieldInput)
 	isGitField := p.activePane == paneTask &&
 		(p.focusField == promptFieldBranch || p.focusField == promptFieldCheckout || p.focusField == promptFieldTargetBranch)
 	hasGit := p.hasVisibleGitField()
@@ -842,6 +878,13 @@ func (p *promptView) View() string {
 	b.WriteString(fieldLabel("Slug: ", promptFieldSlug, true))
 	b.WriteString(p.slugInput.View())
 	b.WriteString("\n\n")
+
+	// Workdir input — hidden when the workflow pins it.
+	if !p.pins.workdir {
+		b.WriteString(fieldLabel("Workdir: ", promptFieldWorkdir, false))
+		b.WriteString(p.workdirInput.View())
+		b.WriteString("\n\n")
+	}
 
 	// Input textarea — skipped entirely when the workflow pins the input
 	// (the pinned text is what gets submitted).

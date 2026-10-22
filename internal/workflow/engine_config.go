@@ -24,11 +24,10 @@ import (
 // snapshotted at construction time is exactly as fresh as holding the full
 // *config.Config would be.
 type engineConfig struct {
-	BaseBranch       string
-	MergeConflicts   config.MergeConflictsConfig
-	Summarizer       config.SummarizerConfig
-	ProjectName      string
-	TmuxSetupCommand string
+	BaseBranch     string
+	MergeConflicts config.MergeConflictsConfig
+	Summarizer     config.SummarizerConfig
+	ProjectName    string
 
 	// PromptDirs are the ordered {{prompt.<name>}} include search roots
 	// (project then global). Snapshotted like every other value here; the
@@ -51,13 +50,12 @@ func newEngineConfig(cfg *config.Config, repoRoot string) *engineConfig {
 		projectDir = repoRoot
 	}
 	return &engineConfig{
-		BaseBranch:       cfg.Git.BaseBranch,
-		MergeConflicts:   cfg.MergeConflicts,
-		Summarizer:       cfg.Summarizer,
-		ProjectName:      cfg.Project.Name,
-		TmuxSetupCommand: cfg.TmuxSetupCommand,
-		PromptDirs:       config.PromptDirs(projectDir),
-		full:             cfg,
+		BaseBranch:     cfg.Git.BaseBranch,
+		MergeConflicts: cfg.MergeConflicts,
+		Summarizer:     cfg.Summarizer,
+		ProjectName:    cfg.Project.Name,
+		PromptDirs:     config.PromptDirs(projectDir),
+		full:           cfg,
 	}
 }
 
@@ -93,6 +91,10 @@ func (e *engineConfig) GetWorktreeSetupCommand(wf *config.WorkflowConfig) string
 
 func (e *engineConfig) GetWorktreeSetupCommands(wf *config.WorkflowConfig) []string {
 	return e.full.GetWorktreeSetupCommands(wf)
+}
+
+func (e *engineConfig) GetTmuxSetupCommand(wf *config.WorkflowConfig) string {
+	return e.full.GetTmuxSetupCommand(wf)
 }
 
 func (e *engineConfig) ResolveBranchForTask(taskID int64, taskTitle, taskSlug, branchName string) string {

@@ -120,6 +120,7 @@ type Task struct {
 	Worktree         bool   // whether to use git worktree isolation (default true)
 	WorktreePath     string
 	WorktreeDetached bool
+	Workdir          string // agent start directory relative to WorktreePath ("" = checkout root)
 	ExitCode         *int
 	ErrorMessage     string
 	Context          string

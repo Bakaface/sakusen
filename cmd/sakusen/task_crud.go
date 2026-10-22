@@ -57,6 +57,7 @@ The daemon must be running.`,
 		target, _ := cmd.Flags().GetString("target")
 		checkout, _ := cmd.Flags().GetString("checkout")
 		track, _ := cmd.Flags().GetString("track")
+		workdir, _ := cmd.Flags().GetString("workdir")
 
 		// Early priority validation gives the user immediate feedback before
 		// we try to load any project context. The action's own Validate() will
@@ -79,6 +80,7 @@ The daemon must be running.`,
 			Target:      target,
 			Checkout:    checkout,
 			Worktree:    worktree,
+			Workdir:     workdir,
 			Track:       track,
 			ProjectPath: cfg.ProjectDir,
 		}

@@ -19,12 +19,13 @@ type CreateTaskArgs struct {
 	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the nearest ancestor of the MCP process's cwd containing .sakusen.yml (not crossing the git toplevel), else the git toplevel."`
 	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
 	Slug           string   `json:"slug,omitempty" jsonschema:"Skip AI slug generation and use this slug (short kebab-case, e.g. 'fix-login-redirect'). It is normalized to lowercase letters, digits and dashes and capped at 24 characters. Feeds {{task.slug}} in branch templates and the worktree directory name."`
-	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every task except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch tasks still run their workflow steps, so the requirement applies to them too. A workflow may pin fields like input/worktree/branch/target; explicit arguments here override those pins."`
+	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every task except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch tasks still run their workflow steps, so the requirement applies to them too. A workflow may pin fields like input/worktree/branch/target/workdir; explicit arguments here override those pins."`
 	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent. Defaults to the project's configured priority."`
 	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'. Supports {{task.id}}, {{task.title}}, {{task.slug}}."`
 	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override (defaults to git.base_branch from .sakusen.yml)."`
 	CheckoutBranch string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one. Mutually exclusive with branch_name."`
 	Worktree       *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree. Defaults to the project's preference (usually true)."`
+	Workdir        string   `json:"workdir,omitempty" jsonschema:"Subdirectory, relative to the task's worktree (or main checkout when worktree is false), where agents and tmux sessions start. Must be a relative path inside the checkout and exist when the agent starts. Defaults to the workflow's workdir pin, else the checkout root."`
 	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
 	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
 	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this task runs."`
@@ -72,6 +73,7 @@ func handleCreateTask(ctx context.Context, c *client.Client, args CreateTaskArgs
 		CheckoutBranch: args.CheckoutBranch,
 		ProjectPath:    projectPath,
 		Worktree:       args.Worktree,
+		Workdir:        args.Workdir,
 		TmuxDirect:     args.TmuxDirect,
 		Images:         args.Images,
 		BlockedBy:      args.BlockedBy,

@@ -448,7 +448,7 @@ func (e *Engine) prepareWorkspace(ctx context.Context, t *task.Task, wf *config.
 	var imageRelPaths []string
 	if len(t.Images) > 0 {
 		var err error
-		imageRelPaths, err = CopyImagesToWorktree(t.WorktreePath, t.Images)
+		imageRelPaths, err = CopyImagesToWorktree(t.WorktreePath, AgentWorkDir(t), t.Images)
 		if err != nil {
 			log.Printf("Warning: failed to copy images to worktree: %v", err)
 		}

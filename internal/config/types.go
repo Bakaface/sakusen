@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -179,7 +180,7 @@ type PeriodicEntry struct {
 	// SummarizerPrompt is the inline-workflow summarizer prompt. Ignored in ref mode.
 	SummarizerPrompt string `yaml:"summarizer_prompt,omitempty"`
 
-	// Worktree, Branch, Checkout and Target are the inline-workflow New Task
+	// Worktree, Branch, Checkout, Target and Workdir are the inline-workflow New Task
 	// pins (see the same-named WorkflowConfig fields). They are copied verbatim
 	// onto the hidden "periodic:<name>" workflow, so materialized fires pick
 	// them up through the ordinary workflow-pin path in createTaskFromRequest.
@@ -195,6 +196,7 @@ type PeriodicEntry struct {
 	Branch   string `yaml:"branch,omitempty"`
 	Checkout string `yaml:"checkout,omitempty"`
 	Target   string `yaml:"target,omitempty"`
+	Workdir  string `yaml:"workdir,omitempty"`
 
 	// ExclusiveWorkdir is the inline-workflow working-tree lock (see
 	// WorkflowConfig.ExclusiveWorkdir). Ignored in ref mode.
@@ -264,6 +266,7 @@ var knownWorkflowFields = map[string]bool{
 	"worktree-setup-command":  true,
 	"worktree-setup-commands": true,
 	"tmux-setup-command":      true,
+	"workdir":                 true,
 	"tmux":                    true, // removed — routed to the migration error
 	"print":                   true, // removed — routed to the migration error
 }
@@ -383,7 +386,7 @@ type WorkflowConfig struct {
 	// that overload was removed.)
 	Description string `yaml:"description,omitempty"`
 
-	// The following five fields pre-pin New Task screen fields. When set, the
+	// The following six fields pre-pin New Task screen fields. When set, the
 	// corresponding form field is hidden and its value supplied by the workflow.
 	// See IsFullySpec() and the prompt-screen pin logic.
 	//
@@ -394,6 +397,8 @@ type WorkflowConfig struct {
 	//   Branch pins a new-branch template (forces branch-mode "new").
 	//   Checkout pins an existing branch to check out (forces branch-mode "existing").
 	//   Target pins the target/base branch (task.TargetBranch).
+	//   Workdir pins the agent start directory (task.Workdir), relative to the
+	//     task's checkout.
 	//
 	// Branch and Checkout are mutually exclusive. Setting branch/checkout/target
 	// while Worktree is pinned false is a config error (the git section is hidden).
@@ -402,6 +407,7 @@ type WorkflowConfig struct {
 	Branch   string `yaml:"branch,omitempty"`
 	Checkout string `yaml:"checkout,omitempty"`
 	Target   string `yaml:"target,omitempty"`
+	Workdir  string `yaml:"workdir,omitempty"`
 
 	// ExclusiveWorkdir opts worktree:false tasks of this workflow into the
 	// working-tree lock: such a task stays pending while any other active
@@ -468,8 +474,12 @@ func (wf *WorkflowConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // ValidatePins checks the pinnable New Task fields for internal consistency:
 // branch and checkout are mutually exclusive, and branch/checkout/target are
-// meaningless (and rejected) when the worktree toggle is pinned off.
+// meaningless (and rejected) when the worktree toggle is pinned off, and
+// workdir must be a local relative path.
 func (wf *WorkflowConfig) ValidatePins() error {
+	if err := ValidateWorkdir(wf.Workdir); err != nil {
+		return fmt.Errorf("workflow %q: %w", wf.Name, err)
+	}
 	if wf.Branch != "" && wf.Checkout != "" {
 		return fmt.Errorf("workflow %q: cannot set both branch and checkout", wf.Name)
 	}
@@ -477,6 +487,28 @@ func (wf *WorkflowConfig) ValidatePins() error {
 		if wf.Branch != "" || wf.Checkout != "" || wf.Target != "" {
 			return fmt.Errorf("workflow %q: branch/checkout/target cannot be set when worktree: false", wf.Name)
 		}
+	}
+	return nil
+}
+
+// CleanWorkdir normalizes a task workdir; "." and "" both mean the checkout root
+// and return "".
+func CleanWorkdir(workdir string) string {
+	if workdir == "" {
+		return ""
+	}
+	c := filepath.Clean(workdir)
+	if c == "." {
+		return ""
+	}
+	return c
+}
+
+// ValidateWorkdir rejects a workdir that is absolute or escapes the checkout.
+func ValidateWorkdir(workdir string) error {
+	c := CleanWorkdir(workdir)
+	if c != "" && !filepath.IsLocal(c) {
+		return fmt.Errorf("workdir %q must be a relative path inside the checkout", workdir)
 	}
 	return nil
 }
