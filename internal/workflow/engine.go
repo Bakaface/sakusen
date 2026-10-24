@@ -730,8 +730,8 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 			shouldLoop = false
 		}
 
-		// Check exit conditions. Both forms may be configured; the loop exits
-		// as soon as either matches.
+		// Check exit conditions. Several forms may be configured; the loop
+		// exits as soon as one matches.
 		if shouldLoop && step.Loop.ExitCondition != nil {
 			if name := step.Loop.ExitCondition.StepContextEmpty; name != "" {
 				content, _ := e.database.GetTaskStepContext(t.ID, name)
@@ -747,6 +747,13 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 					shouldLoop = false
 					log.Printf("Loop exit: step context %q contains marker %q for task #%d", name, marker, t.ID)
 				}
+			}
+			if shouldLoop && step.Loop.ExitCondition.Command != "" {
+				exit, err := e.evalLoopExitCommand(ctx, t, step)
+				if err != nil {
+					return stepOutcome{}, err
+				}
+				shouldLoop = !exit
 			}
 		}
 

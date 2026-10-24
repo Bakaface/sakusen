@@ -234,6 +234,19 @@ sakusen routines pause|resume <name>  # triggered (cadence/after) routines only
       step_context_empty: reviewing   # exit early when this step's output is empty
 ```
 
+`exit_condition` accepts three forms; the loop exits as soon as any configured one matches:
+
+- `step_context_empty: <step>` — exit when that step's context is empty.
+- `step_context_contains: <step>` + `marker: <literal>` — exit when that step's context contains the marker.
+- `command: <shell string>` — let a program decide. It runs via `bash -c` in the task's workdir with the step env (`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_LOOP_ITERATION`, …, `SAKUSEN_PURPOSE=loop_exit`). Optional `stdin_from: <step>` pipes that step's context to stdin, and `timeout:` (Go duration, default `2m`) bounds it. Exit `0` ends the loop, `1` continues it; any other status, a timeout or a failure to start fails the task, with the command's output in the task log and failure reason.
+
+```yaml
+    exit_condition:
+      command: 'test "$(grep -rl old_api src | wc -l)" -eq 0'
+```
+
+Prefer an affirmative form (`step_context_contains` or `command`): `step_context_empty` cannot tell "done" from "the step crashed or published nothing".
+
 Loops must point to an earlier step, can't be `human:` or resolve to a tmux-mode agent, and can't overlap with other loops.
 
 ### Template variables

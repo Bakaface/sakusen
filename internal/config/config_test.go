@@ -2572,7 +2572,54 @@ func TestValidateLoopsContainsExitCondition(t *testing.T) {
 		{
 			name:    "empty exit condition block",
 			ec:      &LoopExitCondition{},
-			wantErr: "must set step_context_empty or step_context_contains",
+			wantErr: "must set step_context_empty, step_context_contains or command",
+		},
+		{
+			name: "valid command alone",
+			ec:   &LoopExitCondition{Command: "exit 0"},
+		},
+		{
+			name: "valid command with stdin_from and timeout",
+			ec:   &LoopExitCondition{Command: "jev-gate", StdinFrom: "plan", Timeout: "30s"},
+		},
+		{
+			name: "valid command alongside marker",
+			ec:   &LoopExitCondition{Command: "exit 1", StepContextContains: "plan", Marker: "LOOP-EXIT"},
+		},
+		{
+			name:    "blank command",
+			ec:      &LoopExitCondition{Command: "  "},
+			wantErr: "command must not be blank",
+		},
+		{
+			name:    "stdin_from references unknown step",
+			ec:      &LoopExitCondition{Command: "exit 0", StdinFrom: "nonexistent"},
+			wantErr: "stdin_from references unknown step",
+		},
+		{
+			name:    "stdin_from without command",
+			ec:      &LoopExitCondition{StepContextEmpty: "plan", StdinFrom: "plan"},
+			wantErr: "stdin_from requires command",
+		},
+		{
+			name:    "timeout without command",
+			ec:      &LoopExitCondition{StepContextEmpty: "plan", Timeout: "1m"},
+			wantErr: "timeout requires command",
+		},
+		{
+			name:    "unparseable timeout",
+			ec:      &LoopExitCondition{Command: "exit 0", Timeout: "soon"},
+			wantErr: "invalid duration",
+		},
+		{
+			name:    "zero timeout",
+			ec:      &LoopExitCondition{Command: "exit 0", Timeout: "0s"},
+			wantErr: "must be > 0",
+		},
+		{
+			name:    "negative timeout",
+			ec:      &LoopExitCondition{Command: "exit 0", Timeout: "-1m"},
+			wantErr: "must be > 0",
 		},
 	}
 

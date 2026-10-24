@@ -733,15 +733,22 @@ type LoopConfig struct {
 	ExitCondition *LoopExitCondition `yaml:"exit_condition,omitempty"`
 }
 
-// LoopExitCondition defines when a loop should exit early. Both forms may be
-// set; the loop exits as soon as either matches.
+// LoopExitCondition defines when a loop should exit early. Any combination of
+// the forms may be set; the loop exits as soon as one matches.
 //
 // step_context_empty exits on an ABSENCE, so it cannot distinguish "the step
 // decided the work is done" from "the step crashed, timed out, or forgot to
 // publish" — every one of those silently ends the loop and ships whatever is
-// on the branch. Prefer step_context_contains, which requires the step to make
-// a positive statement to end the loop; a step that fails to run leaves the
-// marker absent and the loop keeps going (bounded by max_iterations).
+// on the branch. Prefer an affirmative form: step_context_contains requires the
+// step to make a positive statement to end the loop (a step that fails to run
+// leaves the marker absent and the loop keeps going, bounded by
+// max_iterations), and command lets a program make the decision.
+//
+// command runs via `bash -c` in the task's agent workdir with the step env
+// contract plus SAKUSEN_LOOP_ITERATION, stdin fed from StdinFrom's context.
+// Exit 0 ends the loop, exit 1 continues it, and any other status, a timeout
+// or a failure to start fails the task — an uncertain decision must never
+// silently end or continue the loop.
 type LoopExitCondition struct {
 	StepContextEmpty string `yaml:"step_context_empty"` // step name whose context must be empty
 
@@ -750,6 +757,32 @@ type LoopExitCondition struct {
 	// Marker is the literal substring that ends the loop. Required whenever
 	// StepContextContains is set; matched case-sensitively, not as a regexp.
 	Marker string `yaml:"marker"`
+
+	// Command is a shell string whose exit status decides the loop.
+	Command string `yaml:"command,omitempty"`
+	// StdinFrom names the step whose context is piped to Command's stdin
+	// (empty stdin when unset). Only valid with Command.
+	StdinFrom string `yaml:"stdin_from,omitempty"`
+	// Timeout bounds one Command run as a Go duration; defaults to
+	// DefaultLoopExitCommandTimeout. Only valid with Command.
+	Timeout string `yaml:"timeout,omitempty"`
+}
+
+// DefaultLoopExitCommandTimeout bounds an exit_condition command when its
+// timeout is unset.
+const DefaultLoopExitCommandTimeout = 2 * time.Minute
+
+// EffectiveTimeout returns the command's timeout, or the default when unset.
+// Parseability is validated at load.
+func (ec *LoopExitCondition) EffectiveTimeout() time.Duration {
+	if ec.Timeout == "" {
+		return DefaultLoopExitCommandTimeout
+	}
+	d, err := time.ParseDuration(ec.Timeout)
+	if err != nil || d <= 0 {
+		return DefaultLoopExitCommandTimeout
+	}
+	return d
 }
 
 // ParallelConfig is the body of a `parallel:` group step: a join policy plus
@@ -983,8 +1016,31 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 			if ec.Marker != "" && ec.StepContextContains == "" {
 				return fmt.Errorf("step %q: exit_condition marker requires step_context_contains", step.Name)
 			}
-			if ec.StepContextEmpty == "" && ec.StepContextContains == "" {
-				return fmt.Errorf("step %q: exit_condition must set step_context_empty or step_context_contains", step.Name)
+			if ec.Command != "" && strings.TrimSpace(ec.Command) == "" {
+				return fmt.Errorf("step %q: exit_condition command must not be blank", step.Name)
+			}
+			if ec.Command == "" {
+				if ec.StdinFrom != "" {
+					return fmt.Errorf("step %q: exit_condition stdin_from requires command", step.Name)
+				}
+				if ec.Timeout != "" {
+					return fmt.Errorf("step %q: exit_condition timeout requires command", step.Name)
+				}
+			}
+			if ec.StdinFrom != "" && !knownContextStep(ec.StdinFrom) {
+				return fmt.Errorf("step %q: exit_condition stdin_from references unknown step %q", step.Name, ec.StdinFrom)
+			}
+			if ec.Timeout != "" {
+				d, err := time.ParseDuration(ec.Timeout)
+				if err != nil {
+					return fmt.Errorf("step %q: exit_condition timeout %q: %w", step.Name, ec.Timeout, err)
+				}
+				if d <= 0 {
+					return fmt.Errorf("step %q: exit_condition timeout %q must be > 0", step.Name, ec.Timeout)
+				}
+			}
+			if ec.StepContextEmpty == "" && ec.StepContextContains == "" && ec.Command == "" {
+				return fmt.Errorf("step %q: exit_condition must set step_context_empty, step_context_contains or command", step.Name)
 			}
 		}
 

@@ -535,9 +535,12 @@ Loops allow iterative refinement (e.g. implement → review → fix → review a
 loop:
   goto: "step-name"      # must reference an EARLIER step
   max_iterations: 3      # >= 1
-  exit_condition:                       # set either form, or both (exit when either matches)
-    step_context_contains: "step-name"    # preferred: exit when that step's context contains marker
+  exit_condition:                       # set any combination (exit as soon as one matches)
+    step_context_contains: "step-name"    # affirmative: exit when that step's context contains marker
     marker: "LOOP-EXIT"                   # required with step_context_contains; literal, case-sensitive
+    command: 'my-gate --check'            # affirmative: exit 0 ends the loop, 1 continues, else task fails
+    stdin_from: "step-name"               # optional, command only: pipe that step's context to stdin
+    timeout: 2m                           # optional, command only: Go duration > 0, default 2m
     step_context_empty: "step-name"       # exit when that step's context is empty
 ```
 
@@ -547,6 +550,32 @@ to publish" — every one of those silently ends the loop and ships whatever is 
 marker makes the exit an explicit statement the step has to produce; a step that fails to run
 leaves it absent and the loop keeps going, bounded by `max_iterations`. Use
 `step_context_empty` only when an empty context is genuinely unambiguous.
+
+**`command` lets a program make the decision** instead of a substring match on free text —
+e.g. a sweep loop that ends once `grep -rl old_api src` finds nothing, or a classifier CLI
+that reads a decider step's verdict on stdin. It is evaluated after the loop step's context
+is captured (only while the loop would otherwise continue), via `bash -c` in the task's
+workdir (worktree or main checkout, honouring `workdir`), with the step env contract
+(`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH`,
+`SAKUSEN_TRACK_ID` when tracked) plus `SAKUSEN_LOOP_ITERATION` (same value as
+`{{loop.iteration}}`) and `SAKUSEN_PURPOSE=loop_exit`. The exit status is a three-way
+contract:
+
+- `0` — exit the loop.
+- `1` — continue looping (bounded by `max_iterations`).
+- anything else, a timeout, or a failure to start (a missing binary exits `127`) — **fail the
+  task**. The reason and the command's combined output (truncated) go to the task log and the
+  failure reason; an uncertain decision never silently ends or continues the loop.
+
+Each evaluation is logged to the task log (`Loop exit: command `…` exited 0, exiting loop`).
+
+```yaml
+loop:
+  goto: planning
+  max_iterations: 15
+  exit_condition:
+    command: 'test "$(grep -rl old_api src | wc -l)" -eq 0'
+```
 
 The marker has to actually reach the referenced step's *context*, so instruct the producing
 step to emit it:
@@ -588,9 +617,11 @@ steps:
 
 - `goto` must reference a step that appears BEFORE the loop step; no self-reference
 - `max_iterations` must be >= 1
-- `exit_condition`, when present, must set `step_context_empty` or `step_context_contains`
+- `exit_condition`, when present, must set `step_context_empty`, `step_context_contains` or `command`
 - `marker` is required with `step_context_contains`, and is rejected without it
-- Both `step_context_empty` and `step_context_contains` must name steps that exist
+- `step_context_empty`, `step_context_contains` and `stdin_from` must name steps that exist
+- `command` must not be blank; `stdin_from` and `timeout` are only valid with `command`
+- `timeout` must parse as a Go duration and be > 0
 - Loop steps cannot have `human: true`
 - Loop steps cannot resolve to a tmux-mode agent (a tmux step pauses the engine, so a loop
   over it could never iterate) — use a headless agent on the loop step or its workflow
