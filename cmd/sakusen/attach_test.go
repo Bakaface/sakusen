@@ -12,7 +12,7 @@ func TestAttachCommandFor(t *testing.T) {
 		want       []string
 	}{
 		{"inside tmux switches client", true, []string{"tmux", "switch-client", "-t", "=sakusen-proj-5"}},
-		{"outside tmux attaches", false, []string{"tmux", "attach-session", "-t", "sakusen-proj-5"}},
+		{"outside tmux attaches", false, []string{"tmux", "attach-session", "-t", "=sakusen-proj-5"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

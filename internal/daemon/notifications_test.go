@@ -86,7 +86,7 @@ func createNotifyTask(t *testing.T, s *Server, projID int64, workflowName, perio
 		t.Fatal(err)
 	}
 	if periodicName != "" {
-		d, err := s.database.UpsertPeriodicDef(projID, periodicName, "@every 1h", workflowName, "", "", false, time.Now().Add(time.Hour))
+		d, err := s.database.UpsertPeriodicDef(projID, periodicName, "@every 1h", "", workflowName, "", "", false, time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}
