@@ -130,7 +130,7 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 		log.Printf("%sParent task #%d will suspend on %d children: %v", s.projectLogPrefix(parent.ProjectID), parent.ID, len(createdTasks), childIDsOf(createdTasks))
 	}
 
-	s.sendMessage(conn, MsgCreateTasksAndWait, CreateTasksAndWaitResponse{
+	_ = s.sendMessage(conn, MsgCreateTasksAndWait, CreateTasksAndWaitResponse{
 		ParentTaskID: parent.ID,
 		Children:     created,
 	})
@@ -200,7 +200,7 @@ func (s *Server) handleWaitForTasks(conn net.Conn, req WaitForTasksRequest) {
 	}
 	s.broadcastTaskUpdate(parent.ID)
 
-	s.sendMessage(conn, MsgWaitForTasks, WaitForTasksResponse{
+	_ = s.sendMessage(conn, MsgWaitForTasks, WaitForTasksResponse{
 		ParentTaskID: parent.ID,
 		Children:     infos,
 	})

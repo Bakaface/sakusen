@@ -39,7 +39,7 @@ func Open(path string) (*DB, error) {
 	db := &DB{sqlDB: sqlDB, path: path}
 
 	if err := db.migrate(); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 

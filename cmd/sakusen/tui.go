@@ -49,7 +49,7 @@ func resolveProjectMode(globalFlag bool) (projectID int64, projectPath string, p
 	if err != nil {
 		return 0, root, "", false, true, 0, ""
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	proj, err := database.GetOrCreateProject(root)
 	if err != nil {

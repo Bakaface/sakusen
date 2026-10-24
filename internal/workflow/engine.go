@@ -467,6 +467,13 @@ type stepResult struct {
 	useTmux    bool
 }
 
+// recordExitCode persists a failed step's exit code and error message.
+func (e *Engine) recordExitCode(taskID int64, exitCode int, errMsg string) {
+	if err := e.database.UpdateTaskExitCode(taskID, exitCode, errMsg); err != nil {
+		log.Printf("Warning: failed to record exit code for task #%d: %v", taskID, err)
+	}
+}
+
 // runStep builds the per-step template context/prompt and executes step i,
 // either headless (through the agentRunner seam — see step.go) or in tmux.
 // A non-nil error means the step itself did not complete successfully (spawn
@@ -579,7 +586,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	resolvedPrompt, err := ResolveTemplate(step.Prompt, tmplCtx)
 	if err != nil {
 		promptErr := fmt.Errorf("step %q: prompt: %w", step.Name, err)
-		e.database.UpdateTaskExitCode(t.ID, 1, promptErr.Error())
+		e.recordExitCode(t.ID, 1, promptErr.Error())
 		return stepResult{}, promptErr
 	}
 
@@ -590,7 +597,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	// instructive error instead of spawning anything.
 	agentSlug, agentCfg, agentErr := e.cfg.StepAgent(wf, &step)
 	if agentErr != nil {
-		e.database.UpdateTaskExitCode(t.ID, 1, agentErr.Error())
+		e.recordExitCode(t.ID, 1, agentErr.Error())
 		return stepResult{}, fmt.Errorf("step %q failed: %w", step.Name, agentErr)
 	}
 
@@ -608,7 +615,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		exitCode, resultText, outputTail, spawnErr = e.runner.runHeadlessStep(ctx, e, t, step, agentCfg, resolvedPrompt, env, outputFn, headlessSpawn{})
 	}
 	if spawnErr != nil {
-		e.database.UpdateTaskExitCode(t.ID, 1, spawnErr.Error())
+		e.recordExitCode(t.ID, 1, spawnErr.Error())
 		return stepResult{}, fmt.Errorf("step %q failed: %w", step.Name, spawnErr)
 	}
 
@@ -617,7 +624,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		if outputTail != "" {
 			errMsg += "\n" + outputTail
 		}
-		e.database.UpdateTaskExitCode(t.ID, exitCode, errMsg)
+		e.recordExitCode(t.ID, exitCode, errMsg)
 		return stepResult{}, errors.New(errMsg)
 	}
 
@@ -701,7 +708,7 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 				log.Printf("Warning: failed to check for changes in step %q: %v", step.Name, err)
 			} else if !hasChanges {
 				errMsg := fmt.Sprintf("step %q exited successfully but produced no output or code changes", step.Name)
-				e.database.UpdateTaskExitCode(t.ID, 1, errMsg)
+				e.recordExitCode(t.ID, 1, errMsg)
 				return stepOutcome{}, errors.New(errMsg)
 			}
 		}
@@ -817,7 +824,7 @@ var ErrStepContextRequired = errors.New("required step context could not be capt
 // next step with an empty {{steps.<name>.context}}.
 func (e *Engine) ResumeAfterApproval(ctx context.Context, t *task.Task, outputFn func([]string)) error {
 	if err := e.summarizePreviousTmuxStep(ctx, t, nil); err != nil {
-		e.database.UpdateTaskExitCode(t.ID, 1, err.Error())
+		e.recordExitCode(t.ID, 1, err.Error())
 		return err
 	}
 	return e.RunTask(ctx, t, outputFn)

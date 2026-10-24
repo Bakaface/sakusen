@@ -166,7 +166,9 @@ func (r *Repo) RemoveWorktree(worktreePath string) error {
 	}
 
 	if _, err := os.Stat(worktreePath); err == nil {
-		os.RemoveAll(worktreePath)
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return fmt.Errorf("failed to remove worktree directory: %w", err)
+		}
 	}
 
 	return nil

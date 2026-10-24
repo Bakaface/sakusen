@@ -50,7 +50,7 @@ func runBackfillContext(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open db %s: %w", dbPath, err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	projectFilter, err := resolveBackfillProjectFilter(database)
 	if err != nil {

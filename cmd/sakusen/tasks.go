@@ -90,7 +90,7 @@ func listTasksFromDB(jsonOut bool, periodicID int64) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	tasks, err := database.GetAllTasks()
 	if err != nil {
@@ -162,7 +162,7 @@ func showTaskDetailFromDB(taskID int64, jsonOut bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	t, err := database.GetTask(taskID)
 	if err != nil {

@@ -163,7 +163,7 @@ func (e *Engine) runParallelGroup(ctx context.Context, t *task.Task, wf *config.
 		if tail := e.firstFailedBranchTail(t.ID, outcomes); tail != "" {
 			errMsg += "\n" + tail
 		}
-		e.database.UpdateTaskExitCode(t.ID, 1, errMsg)
+		e.recordExitCode(t.ID, 1, errMsg)
 		return stepResult{}, errors.New(errMsg)
 	}
 

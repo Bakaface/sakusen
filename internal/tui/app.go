@@ -283,7 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editorPromptFinishedMsg:
 		data, err := os.ReadFile(msg.path)
-		os.Remove(msg.path)
+		_ = os.Remove(msg.path)
 		if err != nil {
 			m.err = fmt.Errorf("failed to read temp file: %w", err)
 			return m, nil

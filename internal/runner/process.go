@@ -130,7 +130,7 @@ func (p *Process) Start() error {
 	// Pipe stdout for line streaming.
 	stdout, err := p.cmd.StdoutPipe()
 	if err != nil {
-		outFile.Close()
+		_ = outFile.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
@@ -138,7 +138,7 @@ func (p *Process) Start() error {
 	p.cmd.Stderr = outFile
 
 	if err := p.cmd.Start(); err != nil {
-		outFile.Close()
+		_ = outFile.Close()
 		return fmt.Errorf("failed to start agent command: %w", err)
 	}
 
@@ -159,12 +159,15 @@ func (p *Process) streamOutput(stdout io.ReadCloser, rawFile *os.File) {
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer for long lines
 
 	linesRead := 0
+	rawWriteFailed := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		linesRead++
 
-		rawFile.WriteString(line)
-		rawFile.WriteString("\n")
+		if _, err := rawFile.WriteString(line + "\n"); err != nil && !rawWriteFailed {
+			rawWriteFailed = true
+			log.Printf("[task %s] failed to write raw output file: %v", p.TaskID, err)
+		}
 
 		p.mu.Lock()
 		p.stdoutTail = append(p.stdoutTail, line)
@@ -188,7 +191,9 @@ func (p *Process) streamOutput(stdout io.ReadCloser, rawFile *os.File) {
 
 func (p *Process) waitForExit(outFile *os.File) {
 	err := p.cmd.Wait()
-	outFile.Close()
+	if closeErr := outFile.Close(); closeErr != nil {
+		log.Printf("[task %s] failed to close raw output file: %v", p.TaskID, closeErr)
+	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()

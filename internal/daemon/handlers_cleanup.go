@@ -53,7 +53,7 @@ func (s *Server) handleCleanup(conn net.Conn, req CleanupRequest) {
 		}
 	}
 
-	s.sendMessage(conn, MsgCleanup, CleanupResponse{Count: count, Tasks: infos})
+	_ = s.sendMessage(conn, MsgCleanup, CleanupResponse{Count: count, Tasks: infos})
 }
 
 // cleanupTask removes the worktree, deletes the task branch (unless the user

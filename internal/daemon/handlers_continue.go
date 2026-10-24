@@ -201,7 +201,7 @@ func (s *Server) respondWithContinueTask(conn net.Conn, taskID int64) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-	s.sendMessage(conn, MsgContinueTask, ContinueTaskResponse{Task: s.taskToInfo(refreshed)})
+	_ = s.sendMessage(conn, MsgContinueTask, ContinueTaskResponse{Task: s.taskToInfo(refreshed)})
 }
 
 func (s *Server) handleAdvanceTask(conn net.Conn, req AdvanceTaskRequest) {
@@ -220,7 +220,7 @@ func (s *Server) handleAdvanceTask(conn net.Conn, req AdvanceTaskRequest) {
 		s.sendError(conn, err.Error())
 		return
 	}
-	s.sendMessage(conn, MsgOK, OKResponse{Message: outcome.message})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: outcome.message})
 }
 
 // handleWakeTask brings a tmux task's interactive session back up, whether it
@@ -235,7 +235,7 @@ func (s *Server) handleWakeTask(conn net.Conn, req WakeTaskRequest) {
 		s.sendError(conn, err.Error())
 		return
 	}
-	s.sendMessage(conn, MsgOK, OKResponse{Message: message})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: message})
 }
 
 // wakeTmuxTask is the implementation behind handleWakeTask. Serialized per
@@ -506,7 +506,9 @@ func (s *Server) cleanupWorktreeAndBranch(pc *projectContext, t *task.Task) {
 			if err := pc.repo.RemoveWorktree(t.WorktreePath); err != nil {
 				log.Printf("%sWarning: failed to remove worktree for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 			}
-			pc.repo.CleanupWorktrees()
+			if err := pc.repo.CleanupWorktrees(); err != nil {
+				log.Printf("%sWarning: failed to prune worktrees for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+			}
 		}
 		// Only delete branches that sakusen created; preserve user-provided branches
 		if t.Branch != "" && t.CheckoutBranch == "" {
@@ -624,7 +626,7 @@ func (s *Server) handleDetachBranch(conn net.Conn, req DetachBranchRequest) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-	s.sendMessage(conn, MsgDetachBranch, DetachBranchResponse{Task: s.taskToInfo(refreshed)})
+	_ = s.sendMessage(conn, MsgDetachBranch, DetachBranchResponse{Task: s.taskToInfo(refreshed)})
 }
 
 func (s *Server) handleAttachBranch(conn net.Conn, req AttachBranchRequest) {
@@ -670,7 +672,7 @@ func (s *Server) handleAttachBranch(conn net.Conn, req AttachBranchRequest) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-	s.sendMessage(conn, MsgAttachBranch, AttachBranchResponse{Task: s.taskToInfo(refreshed)})
+	_ = s.sendMessage(conn, MsgAttachBranch, AttachBranchResponse{Task: s.taskToInfo(refreshed)})
 }
 
 func dirExists(path string) bool {

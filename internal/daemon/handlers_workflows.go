@@ -44,7 +44,7 @@ func (s *Server) handleListWorkflows(conn net.Conn, req ListWorkflowsRequest) {
 		resp.Workflows = summarizeWorkflows(pc.cfg, []config.WorkflowConfig{def})
 	}
 
-	s.sendMessage(conn, MsgListWorkflows, resp)
+	_ = s.sendMessage(conn, MsgListWorkflows, resp)
 }
 
 func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) []WorkflowSummary {

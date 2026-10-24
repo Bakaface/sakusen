@@ -16,6 +16,26 @@ linters:
     - exhaustive
     - contextcheck
     - bodyclose
+    - errcheck
   settings:
     exhaustive:
       default-signifies-exhaustive: true
+    errcheck:
+      exclude-functions:
+        # CLI output to stdout/stderr.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*text/tabwriter.Writer).Flush
+        # Deferred Close/Rollback: iteration errors surface via rows.Err(),
+        # and Rollback after Commit is a no-op returning sql.ErrTxDone.
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        # Best-effort teardown of the daemon socket connection.
+        - (*github.com/Bakaface/sakusen/internal/client.Client).Close
+        - (github.com/Bakaface/sakusen/internal/tui.TaskService).Close
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck

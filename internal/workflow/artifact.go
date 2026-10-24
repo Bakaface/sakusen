@@ -45,7 +45,7 @@ func (e *Engine) appendTaskLog(taskID int64, format string, args ...any) {
 		log.Printf("Warning: failed to open task log for task #%d: %v", taskID, err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
 	if _, err := f.WriteString(line); err != nil {
 		log.Printf("Warning: failed to append to task log for task #%d: %v", taskID, err)

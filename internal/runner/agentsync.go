@@ -43,7 +43,7 @@ func RunAgentSync(ctx context.Context, call AgentSyncCall, prompt string) (strin
 	if err != nil {
 		return "", fmt.Errorf("create scratch dir: %w", err)
 	}
-	defer os.RemoveAll(scratch)
+	defer func() { _ = os.RemoveAll(scratch) }()
 
 	promptFile := filepath.Join(scratch, "prompt.txt")
 	resultFile := filepath.Join(scratch, "result.txt")

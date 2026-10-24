@@ -333,7 +333,7 @@ func (s *Server) dropDeadConns(conns []net.Conn) {
 	}
 	s.mu.Unlock()
 	for _, conn := range conns {
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 

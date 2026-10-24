@@ -67,7 +67,7 @@ func completeTaskIDs(statuses ...task.Status) func(*cobra.Command, []string, str
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer database.Close()
+		defer func() { _ = database.Close() }()
 
 		tasks, err := database.GetAllTasks()
 		if err != nil {

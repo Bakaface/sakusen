@@ -557,7 +557,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		delete(s.clients, conn)
 		delete(s.subscribers, conn)
 		s.mu.Unlock()
-		conn.Close()
+		_ = conn.Close()
 	}()
 
 	scanner := bufio.NewScanner(conn)
@@ -584,7 +584,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 	switch msg.Type {
 	case MsgPing:
-		s.sendMessage(conn, MsgPong, nil)
+		_ = s.sendMessage(conn, MsgPong, nil)
 
 	case MsgListAgents:
 		s.handleListAgents(conn)
@@ -937,7 +937,7 @@ func (s *Server) shutdown() {
 	log.Printf("Shutting down daemon (pid=%d, ppid=%d)\nshutdown caller goroutine:\n%s", os.Getpid(), os.Getppid(), buf[:n])
 
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close()
 	}
 
 	if s.database != nil {
@@ -960,16 +960,21 @@ func (s *Server) shutdown() {
 
 	s.mu.Lock()
 	for conn := range s.clients {
-		conn.Close()
+		_ = conn.Close()
 	}
 	s.mu.Unlock()
 
 	if s.database != nil {
-		s.database.Close()
+		if err := s.database.Close(); err != nil {
+			log.Printf("Warning: failed to close database: %v", err)
+		}
 	}
 
-	os.Remove(s.cfg.PidFile)
-	os.Remove(s.cfg.SocketPath)
+	for _, path := range []string{s.cfg.PidFile, s.cfg.SocketPath} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: failed to remove %s: %v", path, err)
+		}
+	}
 
 	log.Println("Daemon stopped")
 
@@ -993,7 +998,9 @@ func (s *Server) killTaskSessions() {
 			continue
 		}
 		for _, sess := range sessions {
-			sess.Kill()
+			if err := sess.Kill(); err != nil {
+				log.Printf("Warning: failed to kill tmux session %s: %v", sess.Name, err)
+			}
 		}
 	}
 }
@@ -1018,11 +1025,13 @@ func Stop(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("daemon not running or cannot connect: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	msg, _ := NewMessage(MsgShutdown, nil)
 	data, _ := EncodeMessage(msg)
-	conn.Write(data)
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("failed to send shutdown request: %w", err)
+	}
 
 	return nil
 }
@@ -1050,7 +1059,7 @@ func Status(cfg *config.Config) (bool, int, error) {
 
 	err = process.Signal(syscall.Signal(0))
 	if err != nil {
-		os.Remove(cfg.PidFile)
+		_ = os.Remove(cfg.PidFile)
 		return false, 0, nil //nolint:nilerr // stale PID file
 	}
 

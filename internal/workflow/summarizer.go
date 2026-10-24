@@ -65,7 +65,7 @@ func (e *Engine) FinalizeTask(ctx context.Context, t *task.Task) error {
 	}
 	defer func() {
 		if logFile != nil {
-			logFile.Close()
+			_ = logFile.Close()
 		}
 	}()
 
@@ -73,7 +73,8 @@ func (e *Engine) FinalizeTask(ctx context.Context, t *task.Task) error {
 		msg := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
 		log.Printf("Task #%d finalize: %s", t.ID, fmt.Sprintf(format, args...))
 		if logFile != nil {
-			logFile.WriteString(msg + "\n")
+			// The message already went to the daemon log above.
+			_, _ = logFile.WriteString(msg + "\n")
 		}
 	}
 

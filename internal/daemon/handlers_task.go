@@ -63,7 +63,7 @@ func (s *Server) handleListTasks(conn net.Conn, req ListTasksRequest) {
 		infos[i] = s.taskToInfo(t)
 	}
 
-	s.sendMessage(conn, MsgTaskList, TaskListResponse{Tasks: infos})
+	_ = s.sendMessage(conn, MsgTaskList, TaskListResponse{Tasks: infos})
 }
 
 func (s *Server) handleGetTask(conn net.Conn, req GetTaskRequest) {
@@ -74,7 +74,7 @@ func (s *Server) handleGetTask(conn net.Conn, req GetTaskRequest) {
 	}
 
 	info := s.taskToInfo(t)
-	s.sendMessage(conn, MsgGetTask, GetTaskResponse{Task: info})
+	_ = s.sendMessage(conn, MsgGetTask, GetTaskResponse{Task: info})
 }
 
 func (s *Server) handleCreateTask(conn net.Conn, req CreateTaskRequest) {
@@ -85,7 +85,7 @@ func (s *Server) handleCreateTask(conn net.Conn, req CreateTaskRequest) {
 	}
 
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
-	s.sendMessage(conn, MsgCreateTask, CreateTaskResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgCreateTask, CreateTaskResponse{Task: s.taskToInfo(t)})
 
 	s.kickOffPostCreate(t, req)
 }
@@ -359,7 +359,7 @@ func (s *Server) handleDeleteTask(conn net.Conn, req DeleteTaskRequest) {
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("task #%d deleted", t.ID)})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("task #%d deleted", t.ID)})
 
 	go s.cleanupDeletedTaskResources(t)
 }
@@ -426,7 +426,7 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 			return
 		}
 		s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-		s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
+		_ = s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
 		return
 	}
 
@@ -473,7 +473,7 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 			return
 		}
 		s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-		s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
+		_ = s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
 		return
 	}
 
@@ -516,7 +516,7 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-	s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
+	_ = s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
 }
 
 func (s *Server) handleUpdatePriority(conn net.Conn, req UpdatePriorityRequest) {
@@ -536,7 +536,7 @@ func (s *Server) handleUpdatePriority(conn net.Conn, req UpdatePriorityRequest) 
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
-	s.sendMessage(conn, MsgUpdatePriority, UpdatePriorityResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgUpdatePriority, UpdatePriorityResponse{Task: s.taskToInfo(t)})
 }
 
 func (s *Server) handleUpdateNotBefore(conn net.Conn, req UpdateNotBeforeRequest) {
@@ -560,7 +560,7 @@ func (s *Server) handleUpdateNotBefore(conn net.Conn, req UpdateNotBeforeRequest
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
-	s.sendMessage(conn, MsgUpdateNotBefore, UpdateNotBeforeResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgUpdateNotBefore, UpdateNotBeforeResponse{Task: s.taskToInfo(t)})
 }
 
 func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {
@@ -616,7 +616,7 @@ func (s *Server) handleUpdateField(conn net.Conn, req UpdateFieldRequest) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
-	s.sendMessage(conn, MsgUpdateField, UpdateFieldResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgUpdateField, UpdateFieldResponse{Task: s.taskToInfo(t)})
 }
 
 // updateTaskTrack attaches an existing task to a track, or detaches it when
@@ -687,7 +687,7 @@ func (s *Server) handleRevertTask(conn net.Conn, req RevertTaskRequest) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-	s.sendMessage(conn, MsgRevertTask, RevertTaskResponse{Task: s.taskToInfo(refreshed)})
+	_ = s.sendMessage(conn, MsgRevertTask, RevertTaskResponse{Task: s.taskToInfo(refreshed)})
 }
 
 func (s *Server) handleUpdateDependency(conn net.Conn, req UpdateDependencyRequest) {
@@ -733,7 +733,7 @@ func (s *Server) handleUpdateDependency(conn net.Conn, req UpdateDependencyReque
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
-	s.sendMessage(conn, MsgUpdateDependency, UpdateDependencyResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgUpdateDependency, UpdateDependencyResponse{Task: s.taskToInfo(t)})
 }
 
 func (s *Server) handleGetStepContexts(conn net.Conn, req GetStepContextsRequest) {
@@ -742,7 +742,7 @@ func (s *Server) handleGetStepContexts(conn net.Conn, req GetStepContextsRequest
 		s.sendError(conn, fmt.Sprintf("failed to get step contexts: %v", err))
 		return
 	}
-	s.sendMessage(conn, MsgGetStepContexts, GetStepContextsResponse{Steps: steps})
+	_ = s.sendMessage(conn, MsgGetStepContexts, GetStepContextsResponse{Steps: steps})
 }
 
 func (s *Server) handleGetTaskSteps(conn net.Conn, req GetTaskStepsRequest) {
@@ -759,7 +759,7 @@ func (s *Server) handleGetTaskSteps(conn net.Conn, req GetTaskStepsRequest) {
 
 	wf := projCfg.GetTaskWorkflow(t.Workflow)
 	if wf == nil {
-		s.sendMessage(conn, MsgGetTaskSteps, GetTaskStepsResponse{Steps: nil})
+		_ = s.sendMessage(conn, MsgGetTaskSteps, GetTaskStepsResponse{Steps: nil})
 		return
 	}
 
@@ -799,7 +799,7 @@ func (s *Server) handleGetTaskSteps(conn net.Conn, req GetTaskStepsRequest) {
 		details = append(details, detail(step.Name, "", projCfg.StepAgentSlug(wf, step)))
 	}
 
-	s.sendMessage(conn, MsgGetTaskSteps, GetTaskStepsResponse{Steps: details})
+	_ = s.sendMessage(conn, MsgGetTaskSteps, GetTaskStepsResponse{Steps: details})
 }
 
 func (s *Server) handleUpdateStepContext(conn net.Conn, req UpdateStepContextRequest) {
@@ -812,7 +812,7 @@ func (s *Server) handleUpdateStepContext(conn net.Conn, req UpdateStepContextReq
 		return
 	}
 	s.broadcastTaskUpdate(req.TaskID)
-	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated", req.StepName)})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated", req.StepName)})
 }
 
 // handleUpdateActiveStepContext writes context for the task's currently-active
@@ -895,7 +895,7 @@ func (s *Server) handleUpdateActiveStepContext(conn net.Conn, req UpdateActiveSt
 	}
 
 	s.broadcastTaskUpdate(req.TaskID)
-	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated (%s)", req.StepName, mode)})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("step %q context updated (%s)", req.StepName, mode)})
 }
 
 // branchOfActiveGroup reports whether stepName is a branch of the parallel

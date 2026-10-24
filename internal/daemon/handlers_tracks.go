@@ -98,7 +98,7 @@ func (s *Server) handleCreateTrack(conn net.Conn, req CreateTrackRequest) {
 		return
 	}
 
-	s.sendMessage(conn, MsgCreateTrack, CreateTrackResponse{Track: s.trackToInfo(tr, true)})
+	_ = s.sendMessage(conn, MsgCreateTrack, CreateTrackResponse{Track: s.trackToInfo(tr, true)})
 }
 
 func (s *Server) handleGetTrack(conn net.Conn, req GetTrackRequest) {
@@ -129,7 +129,7 @@ func (s *Server) handleGetTrack(conn net.Conn, req GetTrackRequest) {
 		infos[i] = s.trackToInfo(c, true)
 	}
 
-	s.sendMessage(conn, MsgGetTrack, GetTrackResponse{
+	_ = s.sendMessage(conn, MsgGetTrack, GetTrackResponse{
 		Track:           s.trackToInfo(tr, true),
 		Chain:           infos,
 		RenderedContext: workflow.FormatTrackChain(chain),
@@ -169,7 +169,7 @@ func (s *Server) handleListTracks(conn net.Conn, req ListTracksRequest) {
 		infos[i] = info
 	}
 
-	s.sendMessage(conn, MsgListTracks, ListTracksResponse{Tracks: infos})
+	_ = s.sendMessage(conn, MsgListTracks, ListTracksResponse{Tracks: infos})
 }
 
 func (s *Server) handleSetTrackContext(conn net.Conn, req SetTrackContextRequest) {
@@ -200,7 +200,7 @@ func (s *Server) handleSetTrackContext(conn net.Conn, req SetTrackContextRequest
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track %q context updated (%s)", tr.Slug, mode)})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track %q context updated (%s)", tr.Slug, mode)})
 }
 
 // resolveOwnTrackID returns the track a task is allowed to write, mirroring
@@ -257,7 +257,7 @@ func (s *Server) handleUpdateTaskTrackContext(conn net.Conn, req UpdateTaskTrack
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track context updated (%s)", mode)})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track context updated (%s)", mode)})
 }
 
 // handleSetTrackDescription is the CLI-facing arbitrary-track description
@@ -284,7 +284,7 @@ func (s *Server) handleSetTrackDescription(conn net.Conn, req SetTrackDescriptio
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track %q description updated", tr.Slug)})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: fmt.Sprintf("track %q description updated", tr.Slug)})
 }
 
 // handleUpdateTaskTrackDescription is the own-track-only track description
@@ -306,7 +306,7 @@ func (s *Server) handleUpdateTaskTrackDescription(conn net.Conn, req UpdateTaskT
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: "track description updated"})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: "track description updated"})
 }
 
 // trackToInfo converts a *task.Track to its wire projection. includeContext

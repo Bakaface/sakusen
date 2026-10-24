@@ -83,7 +83,7 @@ func (s *Server) handleListPeriodics(conn net.Conn, req ListPeriodicsRequest) {
 	for _, d := range defs {
 		infos = append(infos, s.periodicToInfo(d))
 	}
-	s.sendMessage(conn, MsgListPeriodics, ListPeriodicsResponse{Periodics: infos})
+	_ = s.sendMessage(conn, MsgListPeriodics, ListPeriodicsResponse{Periodics: infos})
 }
 
 func (s *Server) handleGetPeriodic(conn net.Conn, req GetPeriodicRequest) {
@@ -92,7 +92,7 @@ func (s *Server) handleGetPeriodic(conn net.Conn, req GetPeriodicRequest) {
 		s.sendError(conn, fmt.Sprintf("failed to get periodic #%d: %v", req.ID, err))
 		return
 	}
-	s.sendMessage(conn, MsgGetPeriodic, GetPeriodicResponse{Periodic: s.periodicToInfo(d)})
+	_ = s.sendMessage(conn, MsgGetPeriodic, GetPeriodicResponse{Periodic: s.periodicToInfo(d)})
 }
 
 func (s *Server) handleSetPeriodicPaused(conn net.Conn, req SetPeriodicPausedRequest) {
@@ -105,7 +105,7 @@ func (s *Server) handleSetPeriodicPaused(conn net.Conn, req SetPeriodicPausedReq
 		s.sendError(conn, fmt.Sprintf("failed to reload periodic #%d: %v", req.ID, err))
 		return
 	}
-	s.sendMessage(conn, MsgSetPeriodicPaused, SetPeriodicPausedResponse{Periodic: s.periodicToInfo(d)})
+	_ = s.sendMessage(conn, MsgSetPeriodicPaused, SetPeriodicPausedResponse{Periodic: s.periodicToInfo(d)})
 }
 
 func (s *Server) handleListPeriodicRuns(conn net.Conn, req ListPeriodicRunsRequest) {
@@ -118,7 +118,7 @@ func (s *Server) handleListPeriodicRuns(conn net.Conn, req ListPeriodicRunsReque
 	for i, t := range tasks {
 		infos[i] = s.taskToInfo(t)
 	}
-	s.sendMessage(conn, MsgListPeriodicRuns, ListPeriodicRunsResponse{Tasks: infos})
+	_ = s.sendMessage(conn, MsgListPeriodicRuns, ListPeriodicRunsResponse{Tasks: infos})
 }
 
 // handleFirePeriodicNow materializes a one-shot fire using the same create path
@@ -144,5 +144,5 @@ func (s *Server) handleFirePeriodicNow(conn net.Conn, req FirePeriodicNowRequest
 		s.sendError(conn, fmt.Sprintf("failed to fire periodic #%d: %v", req.ID, err))
 		return
 	}
-	s.sendMessage(conn, MsgFirePeriodicNow, FirePeriodicNowResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgFirePeriodicNow, FirePeriodicNowResponse{Task: s.taskToInfo(t)})
 }

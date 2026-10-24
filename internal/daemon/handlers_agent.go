@@ -19,7 +19,7 @@ func (s *Server) handleListAgents(conn net.Conn) {
 		infos[i] = agentToInfo(a)
 	}
 
-	s.sendMessage(conn, MsgAgentList, AgentListResponse{Agents: infos})
+	_ = s.sendMessage(conn, MsgAgentList, AgentListResponse{Agents: infos})
 }
 
 func (s *Server) handleStartAgent(conn net.Conn, req StartAgentRequest) {
@@ -39,7 +39,7 @@ func (s *Server) handleStartAgent(conn net.Conn, req StartAgentRequest) {
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: "agent started"})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: "agent started"})
 }
 
 func (s *Server) handleStopAgent(conn net.Conn, req StopAgentRequest) {
@@ -48,7 +48,7 @@ func (s *Server) handleStopAgent(conn net.Conn, req StopAgentRequest) {
 		return
 	}
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: "agent stopped"})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: "agent stopped"})
 }
 
 func (s *Server) handleStopTask(conn net.Conn, req StopTaskRequest) {
@@ -64,7 +64,7 @@ func (s *Server) handleStopTask(conn net.Conn, req StopTaskRequest) {
 		return
 	}
 	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(t)})
-	s.sendMessage(conn, MsgStopTask, StopTaskResponse{Task: s.taskToInfo(t)})
+	_ = s.sendMessage(conn, MsgStopTask, StopTaskResponse{Task: s.taskToInfo(t)})
 }
 
 func (s *Server) handleGetOutput(conn net.Conn, req GetOutputRequest) {
@@ -84,7 +84,7 @@ func (s *Server) handleGetOutput(conn net.Conn, req GetOutputRequest) {
 		}
 	}
 
-	s.sendMessage(conn, MsgOutputChunk, OutputChunkResponse{
+	_ = s.sendMessage(conn, MsgOutputChunk, OutputChunkResponse{
 		AgentID:    req.AgentID,
 		Lines:      lines,
 		TotalLines: total,
@@ -96,7 +96,7 @@ func (s *Server) handleSubscribe(conn net.Conn) {
 	s.subscribers[conn] = true
 	s.mu.Unlock()
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: "subscribed"})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: "subscribed"})
 }
 
 func (s *Server) handleUnsubscribe(conn net.Conn) {
@@ -104,13 +104,13 @@ func (s *Server) handleUnsubscribe(conn net.Conn) {
 	delete(s.subscribers, conn)
 	s.mu.Unlock()
 
-	s.sendMessage(conn, MsgOK, OKResponse{Message: "unsubscribed"})
+	_ = s.sendMessage(conn, MsgOK, OKResponse{Message: "unsubscribed"})
 }
 
 func (s *Server) handleGetLogs(conn net.Conn, req GetLogsRequest) {
 	t, err := s.database.GetTask(req.TaskID)
 	if err != nil {
-		s.sendMessage(conn, MsgGetLogs, GetLogsResponse{
+		_ = s.sendMessage(conn, MsgGetLogs, GetLogsResponse{
 			TaskID: req.TaskID,
 			Lines:  []string{},
 		})
@@ -133,7 +133,7 @@ func (s *Server) handleGetLogs(conn net.Conn, req GetLogsRequest) {
 		allLines = allLines[len(allLines)-req.Tail:]
 	}
 
-	s.sendMessage(conn, MsgGetLogs, GetLogsResponse{
+	_ = s.sendMessage(conn, MsgGetLogs, GetLogsResponse{
 		TaskID:     req.TaskID,
 		Lines:      allLines,
 		TotalLines: totalLines,
@@ -145,7 +145,7 @@ func readLogFile(path string) []string {
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var lines []string
 	scanner := bufio.NewScanner(file)

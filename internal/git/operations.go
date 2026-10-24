@@ -158,7 +158,9 @@ func (r *Repo) RebaseBranch(worktreePath, baseBranch string) error {
 		// Abort the failed rebase to restore clean state
 		abortCmd := exec.Command("git", "rebase", "--abort")
 		abortCmd.Dir = worktreePath
-		abortCmd.Run() // best-effort
+		if abortErr := abortCmd.Run(); abortErr != nil {
+			return fmt.Errorf("git rebase %s failed: %w (stderr: %s); git rebase --abort also failed: %v", baseBranch, err, stderr.String(), abortErr)
+		}
 		return fmt.Errorf("git rebase %s failed: %w (stderr: %s)", baseBranch, err, stderr.String())
 	}
 

@@ -241,7 +241,7 @@ func (m Model) createTaskWithPrompt(title, slug, input, branchName string, workt
 
 func (m Model) handleEditorResult(path string) tea.Cmd {
 	return func() tea.Msg {
-		defer os.Remove(path)
+		defer func() { _ = os.Remove(path) }()
 
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -271,7 +271,7 @@ func (m Model) handleEditorResult(path string) tea.Cmd {
 
 func (m Model) handleFieldEditorResult(msg editorFieldFinishedMsg) tea.Cmd {
 	return func() tea.Msg {
-		defer os.Remove(msg.path)
+		defer func() { _ = os.Remove(msg.path) }()
 
 		data, err := os.ReadFile(msg.path)
 		if err != nil {
@@ -315,12 +315,15 @@ func (m Model) openEditorForPrompt() tea.Cmd {
 	// Pre-populate with current textarea content
 	if content := m.prompt.Value(); content != "" {
 		if _, err := f.WriteString(content); err != nil {
-			f.Close()
-			os.Remove(f.Name())
+			_ = f.Close()
+			_ = os.Remove(f.Name())
 			return func() tea.Msg { return errorMsg(fmt.Errorf("failed to write temp file: %w", err)) }
 		}
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return func() tea.Msg { return errorMsg(fmt.Errorf("failed to write temp file: %w", err)) }
+	}
 
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -331,7 +334,7 @@ func (m Model) openEditorForPrompt() tea.Cmd {
 	c := exec.Command(editor, path)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
-			os.Remove(path)
+			_ = os.Remove(path)
 			return errorMsg(fmt.Errorf("editor exited with error: %w", err))
 		}
 		return editorPromptFinishedMsg{path: path}
@@ -350,12 +353,15 @@ func (m Model) openEditorForStepContext(taskID int64, stepName, currentValue str
 
 	if currentValue != "" {
 		if _, err := f.WriteString(currentValue); err != nil {
-			f.Close()
-			os.Remove(f.Name())
+			_ = f.Close()
+			_ = os.Remove(f.Name())
 			return func() tea.Msg { return errorMsg(fmt.Errorf("failed to write temp file: %w", err)) }
 		}
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return func() tea.Msg { return errorMsg(fmt.Errorf("failed to write temp file: %w", err)) }
+	}
 
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -366,7 +372,7 @@ func (m Model) openEditorForStepContext(taskID int64, stepName, currentValue str
 	c := exec.Command(editor, path)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
-			os.Remove(path)
+			_ = os.Remove(path)
 			return errorMsg(fmt.Errorf("editor exited with error: %w", err))
 		}
 		return editorStepContextFinishedMsg{taskID: taskID, stepName: stepName, path: path}
@@ -375,7 +381,7 @@ func (m Model) openEditorForStepContext(taskID int64, stepName, currentValue str
 
 func (m Model) handleStepContextEditorResult(msg editorStepContextFinishedMsg) tea.Cmd {
 	return func() tea.Msg {
-		defer os.Remove(msg.path)
+		defer func() { _ = os.Remove(msg.path) }()
 
 		data, err := os.ReadFile(msg.path)
 		if err != nil {
@@ -403,12 +409,15 @@ func (m Model) openEditorForField(taskID int64, field, currentValue string) tea.
 
 	if currentValue != "" {
 		if _, err := f.WriteString(currentValue); err != nil {
-			f.Close()
-			os.Remove(f.Name())
+			_ = f.Close()
+			_ = os.Remove(f.Name())
 			return func() tea.Msg { return errorMsg(fmt.Errorf("failed to write temp file: %w", err)) }
 		}
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return func() tea.Msg { return errorMsg(fmt.Errorf("failed to write temp file: %w", err)) }
+	}
 
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -419,7 +428,7 @@ func (m Model) openEditorForField(taskID int64, field, currentValue string) tea.
 	c := exec.Command(editor, path)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
-			os.Remove(path)
+			_ = os.Remove(path)
 			return errorMsg(fmt.Errorf("editor exited with error: %w", err))
 		}
 		return editorFieldFinishedMsg{taskID: taskID, field: field, path: path}

@@ -178,7 +178,7 @@ func (c *Client) drainStaleSignalsLocked() {
 // a MsgOK in respChan and ambush the next caller.
 func (c *Client) reconnectLocked(skipResubscribe bool) error {
 	if c.conn != nil {
-		c.conn.Close()
+		_ = c.conn.Close()
 	}
 
 	c.drainStaleSignalsLocked()
@@ -349,6 +349,15 @@ func (c *Client) sendAndWaitWithHook(msgType daemon.MessageType, payload any, on
 	return resp, nil
 }
 
+// errorFromMsg converts a daemon MsgError reply into an error.
+func errorFromMsg(msg *daemon.Message) error {
+	var errResp daemon.ErrorResponse
+	if err := msg.DecodePayload(&errResp); err != nil {
+		return fmt.Errorf("decode daemon error reply: %w", err)
+	}
+	return errors.New(errResp.Message)
+}
+
 // request sends a message and waits for a non-error response.
 func (c *Client) request(msgType daemon.MessageType, payload any) (*daemon.Message, error) {
 	msg, err := c.sendAndWait(msgType, payload)
@@ -356,9 +365,7 @@ func (c *Client) request(msgType daemon.MessageType, payload any) (*daemon.Messa
 		return nil, err
 	}
 	if msg.Type == daemon.MsgError {
-		var errResp daemon.ErrorResponse
-		msg.DecodePayload(&errResp)
-		return nil, errors.New(errResp.Message)
+		return nil, errorFromMsg(msg)
 	}
 	return msg, nil
 }
@@ -453,9 +460,7 @@ func (c *Client) Subscribe() error {
 		return err
 	}
 	if msg.Type == daemon.MsgError {
-		var errResp daemon.ErrorResponse
-		msg.DecodePayload(&errResp)
-		return errors.New(errResp.Message)
+		return errorFromMsg(msg)
 	}
 	return nil
 }
@@ -468,9 +473,7 @@ func (c *Client) Unsubscribe() error {
 		return err
 	}
 	if msg.Type == daemon.MsgError {
-		var errResp daemon.ErrorResponse
-		msg.DecodePayload(&errResp)
-		return errors.New(errResp.Message)
+		return errorFromMsg(msg)
 	}
 	return nil
 }

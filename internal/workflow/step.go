@@ -145,7 +145,21 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	if err != nil {
 		return 1, "", "", fmt.Errorf("failed to open task log: %w", err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
+
+	// Only the first write failure is logged; later ones almost always share its cause.
+	var logMu sync.Mutex
+	logWriteFailed := false
+	writeLog := func(lines []string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		for _, line := range lines {
+			if _, err := logFile.WriteString(line + "\n"); err != nil && !logWriteFailed {
+				logWriteFailed = true
+				log.Printf("Warning: failed to write task log for task #%d: %v", t.ID, err)
+			}
+		}
+	}
 
 	// Write step header and prompt to log file and outputFn
 	iterSuffix := ""
@@ -163,9 +177,7 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	}
 	promptLines = append(promptLines, "")
 
-	for _, line := range promptLines {
-		logFile.WriteString(line + "\n")
-	}
+	writeLog(promptLines)
 	// The log file gets untagged lines (its region layout is what
 	// stepAgentOutput parses); only the shared live stream carries the tag.
 	emit := func(lines []string) {
@@ -177,14 +189,8 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	emit(promptLines)
 
 	// Compose OutputFunc: write to log file AND call the agent's outputFn
-	var logMu sync.Mutex
 	proc.OutputFunc = func(lines []string) {
-		logMu.Lock()
-		for _, line := range lines {
-			logFile.WriteString(line + "\n")
-		}
-		logMu.Unlock()
-
+		writeLog(lines)
 		emit(lines)
 	}
 
@@ -202,7 +208,9 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 	for {
 		select {
 		case <-ctx.Done():
-			proc.Stop()
+			if err := proc.Stop(); err != nil {
+				log.Printf("Warning: failed to stop agent for task #%d: %v", t.ID, err)
+			}
 			return 1, "", "", ctx.Err()
 		case <-ticker.C:
 			if proc.HasExited() {
@@ -212,9 +220,7 @@ func (e *Engine) runHeadlessAgent(ctx context.Context, t *task.Task, step config
 				// Write step footer
 				footer := fmt.Sprintf("[%s] === Step %s finished (exit=%d) ===",
 					time.Now().Format("15:04:05"), step.Name, exitCode)
-				logMu.Lock()
-				logFile.WriteString(footer + "\n")
-				logMu.Unlock()
+				writeLog([]string{footer})
 				emit([]string{footer})
 
 				var outputTail string
@@ -258,7 +264,7 @@ func readLastLines(path string, n int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var lines []string
 	scanner := bufio.NewScanner(file)
@@ -306,7 +312,9 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 
 	// Kill stale session if exists (handles retries)
 	if session.Exists() {
-		session.Kill()
+		if err := session.Kill(); err != nil {
+			log.Printf("Warning: failed to kill stale tmux session for task #%d: %v", t.ID, err)
+		}
 	}
 
 	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")
@@ -410,10 +418,13 @@ func writeTmuxLogMessage(logPath string, taskID int64, stepName, sessionName, ta
 		log.Printf("Warning: failed to write tmux log message: %v", err)
 		return lines
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	for _, line := range lines {
-		logFile.WriteString(line + "\n")
+		if _, err := logFile.WriteString(line + "\n"); err != nil {
+			log.Printf("Warning: failed to write tmux log message: %v", err)
+			break
+		}
 	}
 
 	return lines

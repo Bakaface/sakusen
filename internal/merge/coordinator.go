@@ -384,7 +384,9 @@ func (c *Coordinator) refreshFromBase(ctx context.Context, t *task.Task, baseBra
 	// directory.
 	defer func() {
 		if retErr != nil {
-			c.repo.AbortRebase(t.WorktreePath) // best-effort
+			if err := c.repo.AbortRebase(t.WorktreePath); err != nil {
+				log.Printf("Warning: task #%d: %v", t.ID, err)
+			}
 		}
 	}()
 
