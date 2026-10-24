@@ -50,7 +50,28 @@ func defaultConfig() *Config {
 		// mentions tmux: still gets bounded.
 		TmuxHibernateAfter:  4 * time.Hour,
 		TmuxMaxLiveSessions: 12,
+		GitVerifyTimeout:    DefaultGitVerifyTimeout,
 	}
+}
+
+// DefaultGitVerifyTimeout is the git.verify_timeout used when no tier sets it.
+const DefaultGitVerifyTimeout = 15 * time.Minute
+
+// applyGitVerifyTimeout merges one tier's git.verify_timeout into the resolved
+// config: a non-empty value overrides, "0" disables the limit.
+func applyGitVerifyTimeout(cfg *Config, timeout string) error {
+	if timeout == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(timeout)
+	if err != nil {
+		return fmt.Errorf("invalid git.verify_timeout %q: %w", timeout, err)
+	}
+	if d < 0 {
+		return fmt.Errorf("invalid git.verify_timeout %q: must not be negative", timeout)
+	}
+	cfg.GitVerifyTimeout = d
+	return nil
 }
 
 // applyTmuxConfig merges one tier's tmux: block into the resolved config.
@@ -375,6 +396,11 @@ func loadProjectConfig(path string, cfg *Config) error {
 	}
 	override(&cfg.Git.BaseBranch, proj.Git.BaseBranch)
 	override(&cfg.Git.BranchTemplate, proj.Git.BranchTemplate)
+	override(&cfg.Git.VerifyCommand, proj.Git.VerifyCommand)
+	override(&cfg.Git.VerifyTimeout, proj.Git.VerifyTimeout)
+	if err := applyGitVerifyTimeout(cfg, proj.Git.VerifyTimeout); err != nil {
+		return err
+	}
 	override(&cfg.OnComplete, proj.OnComplete)
 	override(&cfg.DefaultPriority, proj.DefaultPriority)
 	overrideFromPtr(&cfg.Verification, proj.Verification)

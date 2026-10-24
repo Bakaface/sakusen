@@ -114,6 +114,7 @@ agents:
 git:
   base_branch: main
   branch_template: sakusen/{{task_id}}-{{task_slug}}
+  verify_command: mise run check  # optional: must pass before on_complete: merge lands
 
 on_complete: merge                # commit | merge | none (per-workflow overridable)
 

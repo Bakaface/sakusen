@@ -354,6 +354,14 @@ type VerificationConfig struct {
 type GitConfig struct {
 	BaseBranch     string `yaml:"base_branch"`
 	BranchTemplate string `yaml:"branch_template"`
+	// VerifyCommand runs via the shell in the task worktree root before an
+	// on_complete: merge (and again after a rebase that moved the tip); a
+	// failure leaves the task merge-failed. Empty disables verification.
+	VerifyCommand string `yaml:"verify_command,omitempty"`
+	// VerifyTimeout bounds one VerifyCommand run. Parsed with
+	// time.ParseDuration; empty inherits the lower tier (default 15m), "0"
+	// disables the limit. The resolved value is Config.GitVerifyTimeout.
+	VerifyTimeout string `yaml:"verify_timeout,omitempty"`
 }
 
 // UnmarshalYAML decodes a GitConfig and rejects the removed `on_complete:` field
@@ -1329,6 +1337,9 @@ type Config struct {
 
 	// MergeIgnorePaths is the resolved merge.ignore_paths.
 	MergeIgnorePaths []string
+
+	// GitVerifyTimeout is the resolved git.verify_timeout (0 = no limit).
+	GitVerifyTimeout time.Duration
 
 	// From global config
 	Notifications            NotificationsConfig

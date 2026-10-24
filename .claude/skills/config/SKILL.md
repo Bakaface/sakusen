@@ -33,7 +33,7 @@ type ProjectConfig struct {
     DefaultPriority          string
     PollInterval             string                  // Daemon task poll cadence (e.g. "2s")
     Verification             *VerificationConfig
-    Git                      GitConfig               // BaseBranch, BranchTemplate
+    Git                      GitConfig               // BaseBranch, BranchTemplate, VerifyCommand, VerifyTimeout (resolved into Config.GitVerifyTimeout)
     Agents                   map[string]AgentConfig  // Project-tier agent registry (slug → record)
     DefaultAgent             string                  // Fallback agent slug; empty → "claude"
     Summarizer               *SummarizerConfig       // Utility LLM role block (summaries, titles)

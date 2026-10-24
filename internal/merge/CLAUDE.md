@@ -24,6 +24,10 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
 - **Conflict resolver is engine-supplied** — `ConflictResolver` is wired by the workflow engine
   (typically spawns a Claude agent to fix conflicts and stage). A nil resolver means conflicts
   abort the merge — never silently succeed.
+- **Only a verified tip is fast-forwarded** — when `Config.VerifyCommand` is set, `merge()` runs it
+  (`sh -c` in the worktree root, own process group, `Config.VerifyTimeout`) after the worktree commit
+  and again after every `refreshFromBase` that moved the task tip. Failure or timeout returns a wrapped
+  `ErrVerifyFailed` before any merge attempt; the daemon records it as `merge-failed`, worktree kept.
 - **Non-worktree mode short-circuits** — when `task.Worktree == false`, merge is replaced by
   `commit()` (or no-op if `OnComplete` is `none`).
 
@@ -32,7 +36,9 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
 | File | Purpose |
 |------|---------|
 | `coordinator.go` | `Coordinator`, `Config`, `Lock`, `Locks`, the `Finalize` pipeline, conflict-retry, `waitForReadyTarget`, commit-recorder hooks |
+| `verify.go` | Pre-merge verify command: `verify`, `runVerifyCommand`, `ErrVerifyFailed`, output tail capping |
 | `coordinator_test.go` | Unit tests for the pipeline + locking |
+| `verify_test.go` | Verify pass/fail/timeout and re-verify after rebase |
 
 ## Patterns
 

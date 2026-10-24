@@ -137,6 +137,8 @@ Configures the agent-driven merge-conflict resolver (`SAKUSEN_PURPOSE=merge_conf
 git:
   base_branch: main                              # Base branch for worktrees (default: system default)
   branch_template: "sakusen/{{task_id}}-{{task_slug}}"  # Branch naming template
+  verify_command: mise run check                 # Run before an on_complete: merge (default: none)
+  verify_timeout: 15m                            # Limit per verify run (default: 15m; "0" = no limit)
 ```
 
 > **Note:** `on_complete` is a **top-level** key (see "Finalization" below), not part of the `git:` section. The legacy `git.on_complete` location was removed — configs that still use it produce a migration error.
@@ -150,6 +152,19 @@ git:
 | `{{task.id}}` | Same as `{{task_id}}` |
 | `{{task.title}}` | Raw task title |
 | `{{task.slug}}` | Same as `{{task_slug}}` |
+
+### Verify Command
+
+When `verify_command` is set, an `on_complete: merge` runs it via `sh -c` in the task worktree
+root after the final commit and before the merge. If the merge has to rebase the task branch onto
+a base branch that moved (including after merge-conflict resolution), it runs again on the new
+tip, so the code that lands is the code that was verified. A non-zero exit or a timeout cancels
+the merge: the task becomes `merge-failed` with the worktree and branch kept, the output tail is
+written to the task log, and `error_message` names the failure with a shorter tail. Fix the cause
+and `retry_task` to re-run finalization. `on_complete: commit`/`none` never run it.
+
+Both keys merge per key across tiers like the other `git:` keys (`~/.sakusen.yml`, then the
+project). An unparseable or negative `verify_timeout` is a hard load error.
 
 ---
 

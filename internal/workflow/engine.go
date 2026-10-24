@@ -83,6 +83,8 @@ func NewEngine(cfg *config.Config, database taskStore, notifier *notify.Notifier
 		merge.Config{
 			CleanTargetTimeout: cfg.MergeCleanTargetTimeout,
 			IgnorePaths:        cfg.MergeIgnorePaths,
+			VerifyCommand:      cfg.Git.VerifyCommand,
+			VerifyTimeout:      cfg.GitVerifyTimeout,
 		},
 		e.bindConflictResolver(),
 		database.UpdateTaskStatus,

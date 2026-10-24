@@ -63,6 +63,15 @@ type Config struct {
 	// IgnorePaths are git glob pathspecs, relative to the repo root, whose
 	// changes do not count as a dirty target checkout.
 	IgnorePaths []string
+
+	// VerifyCommand, when set, runs via `sh -c` in the task worktree before
+	// the merge, and again whenever a rebase onto the base branch moved the
+	// task tip, so only a verified tip is ever fast-forwarded. A non-zero
+	// exit or timeout fails the merge with ErrVerifyFailed.
+	VerifyCommand string
+
+	// VerifyTimeout bounds one VerifyCommand run. Zero means no limit.
+	VerifyTimeout time.Duration
 }
 
 // ErrTargetDirtyTimeout is returned (wrapped) when the target checkout stays
@@ -273,6 +282,10 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 		return fmt.Errorf("commit failed: %w", err)
 	}
 
+	if err := c.verify(ctx, t, logf); err != nil {
+		return err
+	}
+
 	// Wait outside the lock so other tasks can keep merging meanwhile.
 	logf("Checking main checkout is clean and on %s...", baseBranch)
 	if err := c.waitForReadyTarget(ctx, t, baseBranch, logf); err != nil {
@@ -314,7 +327,7 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 		// Fast-forward failed because the base branch advanced past the
 		// task's fork point. Rebase the task branch onto the latest base
 		// (outside the lock) so the next attempt can fast-forward cleanly.
-		if err := c.refreshFromBase(ctx, t, baseBranch, logf); err != nil {
+		if err := c.refreshAndReverify(ctx, t, baseBranch, logf); err != nil {
 			return err
 		}
 	}
@@ -367,6 +380,23 @@ func (c *Coordinator) targetBlocker(baseBranch string) (string, []string, error)
 		return blockedDetail(paths), paths, nil
 	}
 	return "", nil, nil
+}
+
+// refreshAndReverify runs refreshFromBase and, when a verify command is
+// configured and the rebase moved the task tip, verifies the new tip.
+func (c *Coordinator) refreshAndReverify(ctx context.Context, t *task.Task, baseBranch string, logf LogFunc) error {
+	if c.cfg.VerifyCommand == "" {
+		return c.refreshFromBase(ctx, t, baseBranch, logf)
+	}
+	before, beforeErr := c.repo.GetLastCommitHash(t.WorktreePath)
+	if err := c.refreshFromBase(ctx, t, baseBranch, logf); err != nil {
+		return err
+	}
+	after, afterErr := c.repo.GetLastCommitHash(t.WorktreePath)
+	if beforeErr == nil && afterErr == nil && before == after {
+		return nil
+	}
+	return c.verify(ctx, t, logf)
 }
 
 // refreshFromBase rebases the task's worktree branch onto baseBranch,
