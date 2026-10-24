@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -1020,17 +1021,18 @@ func (s *Server) refineTaskTitle(taskID, projectID int64, branchName string, wor
 
 // promoteInitTaskToPending flips a freshly-refined task out of StatusInit.
 //
-// It re-reads the row first because a task can leave init while its title is
-// still being generated — most importantly via cascadeFailDependents, which
-// fails tasks whose blocker failed and does not spare ones still in init.
-// Writing `pending` over that would put the task straight back into the
-// unclaimable-forever state the cascade exists to end.
+// The write is conditional on the task still being in init because a task can
+// leave init while its title is still being generated — most importantly via
+// cascadeFailDependents, which fails tasks whose blocker failed and does not
+// spare ones still in init. Writing `pending` over that would put the task
+// straight back into the unclaimable-forever state the cascade exists to end.
 func (s *Server) promoteInitTaskToPending(taskID, projectID int64) {
-	if cur, err := s.database.GetTask(taskID); err == nil && cur.Status != task.StatusInit {
-		log.Printf("%sTask #%d left init as %s during title refinement; leaving its status alone", s.projectLogPrefix(projectID), taskID, cur.Status)
-		return
-	}
-	if err := s.database.UpdateTaskStatus(taskID, task.StatusPending); err != nil {
+	err := s.database.TransitionTaskStatus(taskID, task.StatusInit, task.StatusPending)
+	var terr *task.TransitionError
+	switch {
+	case errors.As(err, &terr):
+		log.Printf("%sTask #%d left init as %s during title refinement; leaving its status alone", s.projectLogPrefix(projectID), taskID, terr.From)
+	case err != nil:
 		log.Printf("%sFailed to transition task #%d to pending: %v", s.projectLogPrefix(projectID), taskID, err)
 	}
 }

@@ -163,7 +163,7 @@ func (s *Server) continuePausedTask(conn net.Conn, t *task.Task) {
 
 	origStatus := t.Status
 
-	if err := s.database.UpdateTaskStatus(t.ID, task.StatusRunning); err != nil {
+	if err := s.database.TransitionTaskStatus(t.ID, origStatus, task.StatusRunning); err != nil {
 		s.sendError(conn, fmt.Sprintf("failed to update task status: %v", err))
 		return
 	}
@@ -179,7 +179,7 @@ func (s *Server) continuePausedTask(conn net.Conn, t *task.Task) {
 			// would mark a running task as paused, and its completion would
 			// then be misread as an approval pause (task #220, 2026-07-13).
 			log.Printf("%sContinue for task #%d found an agent already tracked; leaving status running", s.projectLogPrefix(t.ProjectID), t.ID)
-		} else if rbErr := s.database.UpdateTaskStatus(t.ID, origStatus); rbErr != nil {
+		} else if rbErr := s.database.TransitionTaskStatus(t.ID, task.StatusRunning, origStatus); rbErr != nil {
 			log.Printf("%sWarning: failed to roll back task #%d status to %s: %v", s.projectLogPrefix(t.ProjectID), t.ID, origStatus, rbErr)
 		}
 		log.Printf("%sContinue failed for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
@@ -364,7 +364,7 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 		// run summarise_chat for the just-completed tmux step and then continue
 		// with the remaining workflow steps.
 		origStatus := t.Status
-		if err := s.database.UpdateTaskStatus(t.ID, task.StatusRunning); err != nil {
+		if err := s.database.TransitionTaskStatus(t.ID, origStatus, task.StatusRunning); err != nil {
 			return tmuxAdvanceOutcome{}, fmt.Errorf("failed to update task status: %v", err)
 		}
 		// Keep the in-memory struct in sync: ResumeAfterApproval summarizes
@@ -389,7 +389,7 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 				// mark a running task as paused, and its completion would then
 				// be misread as an approval pause (task #220, 2026-07-13).
 				log.Printf("%sAdvance for task #%d found an agent already tracked; leaving status running", s.projectLogPrefix(t.ProjectID), t.ID)
-			} else if rbErr := s.database.UpdateTaskStatus(t.ID, origStatus); rbErr != nil {
+			} else if rbErr := s.database.TransitionTaskStatus(t.ID, task.StatusRunning, origStatus); rbErr != nil {
 				log.Printf("%sWarning: failed to roll back task #%d status to %s: %v", s.projectLogPrefix(t.ProjectID), t.ID, origStatus, rbErr)
 			}
 			return tmuxAdvanceOutcome{}, fmt.Errorf("failed to start agent: %w", err)

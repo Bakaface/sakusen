@@ -118,16 +118,16 @@ func TestSetTaskHibernatedAtRoundTrip(t *testing.T) {
 // retried/failed task can never render as hibernated.
 func TestStatusChangeClearsHibernatedAt(t *testing.T) {
 	routes := map[string]func(*DB, int64) error{
-		"UpdateTaskStatus running":   func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusRunning) },
-		"UpdateTaskStatus completed": func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusCompleted) },
-		"UpdateTaskStatus failed":    func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusFailed) },
-		"UpdateTaskStatus pending":   func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusPending) },
-		"UpdateTaskError":            func(d *DB, id int64) error { return d.UpdateTaskError(id, "boom") },
-		"UpdateTaskStatusError":      func(d *DB, id int64) error { return d.UpdateTaskStatusError(id, task.StatusMergeFailed, "boom") },
-		"ResetTaskForRetry":          func(d *DB, id int64) error { return d.ResetTaskForRetry(id) },
-		"ResetTaskForRetryFromStep":  func(d *DB, id int64) error { return d.ResetTaskForRetryFromStep(id) },
-		"ResetTaskForRetryAtStep":    func(d *DB, id int64) error { return d.ResetTaskForRetryAtStep(id, 0, nil) },
-		"ResetTaskForContinue":       func(d *DB, id int64) error { return d.ResetTaskForContinue(id, "default", "") },
+		"UpdateTaskStatus running":    func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusRunning) },
+		"UpdateTaskStatus completed":  func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusCompleted) },
+		"UpdateTaskStatus failed":     func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusFailed) },
+		"UpdateTaskStatus finalizing": func(d *DB, id int64) error { return d.UpdateTaskStatus(id, task.StatusFinalizing) },
+		"UpdateTaskError":             func(d *DB, id int64) error { return d.UpdateTaskError(id, "boom") },
+		"UpdateTaskStatusError":       func(d *DB, id int64) error { return d.UpdateTaskStatusError(id, task.StatusMergeFailed, "boom") },
+		"ResetTaskForRetry":           func(d *DB, id int64) error { return d.ResetTaskForRetry(id) },
+		"ResetTaskForRetryFromStep":   func(d *DB, id int64) error { return d.ResetTaskForRetryFromStep(id) },
+		"ResetTaskForRetryAtStep":     func(d *DB, id int64) error { return d.ResetTaskForRetryAtStep(id, 0, nil) },
+		"ResetTaskForContinue":        func(d *DB, id int64) error { return d.ResetTaskForContinue(id, "default", "") },
 		"ResetTaskForContinue prompt": func(d *DB, id int64) error {
 			return d.ResetTaskForContinue(id, "default", "again")
 		},

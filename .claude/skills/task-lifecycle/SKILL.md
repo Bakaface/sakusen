@@ -95,6 +95,7 @@ func IsValidPriority(s string) bool    // Checks against valid list
 ## Patterns
 
 - Status transitions via `db.UpdateTaskStatus()`, not direct field assignment
+- The full allowed-transition table (and its rationale) is `transitions` in `internal/task/transitions.go`; the diagram above is the happy path only
 - `Worktree` defaults to `true`; when `false`, task runs in project root
 - `Context` stores summarizer output after workflow completion
 - `Images` is `[]string` stored as JSON in the database

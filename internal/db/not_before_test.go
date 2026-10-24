@@ -93,6 +93,7 @@ func TestGetClaimableTasks_NotBeforeAndBlocker(t *testing.T) {
 	if claimableIDs(t, database, now.Add(2*time.Hour))[tk.ID] {
 		t.Error("claimable with unfinished blocker after not_before")
 	}
+	mustClaim(t, database, blocker.ID)
 	if err := database.UpdateTaskStatus(blocker.ID, task.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}

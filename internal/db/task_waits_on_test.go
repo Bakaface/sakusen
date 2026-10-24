@@ -99,6 +99,7 @@ func TestAllWaitsOnTerminal(t *testing.T) {
 		t.Fatalf("none terminal: allDone=%v err=%v", allDone, err)
 	}
 
+	mustClaim(t, db, c1.ID)
 	if err := db.UpdateTaskStatus(c1.ID, task.StatusCompleted); err != nil {
 		t.Fatalf("update c1: %v", err)
 	}
@@ -146,6 +147,7 @@ func TestGetWaitsOnChildren(t *testing.T) {
 	db.AddTaskWaitsOn(parent.ID, c2.ID)
 	db.UpdateTaskContext(c1.ID, "child1 context")
 	db.UpdateTaskContext(c2.ID, "child2 context")
+	mustClaim(t, db, c1.ID)
 	db.UpdateTaskStatus(c1.ID, task.StatusCompleted)
 	db.UpdateTaskStatus(c2.ID, task.StatusFailed)
 
@@ -175,7 +177,9 @@ func TestGetTasksAwaitingChildren(t *testing.T) {
 	p2 := mustCreateTaskForWaits(t, db, projID, "p2")
 	_ = mustCreateTaskForWaits(t, db, projID, "p3") // stays pending
 
+	mustClaim(t, db, p1.ID)
 	db.UpdateTaskStatus(p1.ID, task.StatusAwaitingChildren)
+	mustClaim(t, db, p2.ID)
 	db.UpdateTaskStatus(p2.ID, task.StatusAwaitingChildren)
 
 	tasks, err := db.GetTasksAwaitingChildren()
@@ -285,6 +289,7 @@ func TestAllWaitsOnTerminal_CrossProject(t *testing.T) {
 		t.Fatalf("non-terminal cross-project children: allDone=%v err=%v", allDone, err)
 	}
 
+	mustClaim(t, db, c1.ID)
 	if err := db.UpdateTaskStatus(c1.ID, task.StatusCompleted); err != nil {
 		t.Fatalf("update c1: %v", err)
 	}
@@ -308,6 +313,7 @@ func TestGetWaitsOnChildren_CrossProject(t *testing.T) {
 	c2 := mustCreateTaskForWaits(t, db, projB, "xcc2")
 	db.AddTaskWaitsOn(parent.ID, c1.ID)
 	db.AddTaskWaitsOn(parent.ID, c2.ID)
+	mustClaim(t, db, c1.ID)
 	db.UpdateTaskStatus(c1.ID, task.StatusCompleted)
 	db.UpdateTaskStatus(c2.ID, task.StatusFailed)
 
@@ -354,5 +360,14 @@ func TestHasCircularWaitsOn_CrossProject(t *testing.T) {
 	}
 	if !got {
 		t.Errorf("expected cross-project cycle a → b → a to be detected")
+	}
+}
+
+// mustClaim moves a pending task to running, the only route by which a task
+// legally reaches the statuses these fixtures need.
+func mustClaim(t *testing.T, db *DB, id int64) {
+	t.Helper()
+	if ok, err := db.ClaimTask(id); err != nil || !ok {
+		t.Fatalf("ClaimTask(%d): ok=%v err=%v", id, ok, err)
 	}
 }

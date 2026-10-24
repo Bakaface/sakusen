@@ -52,6 +52,7 @@ type taskStore interface {
 
 	// Task field updates.
 	UpdateTaskStatus(id int64, status task.Status) error
+	TransitionTaskStatus(id int64, from, to task.Status) error
 	UpdateTaskWorktreePath(id int64, worktreePath string) error
 	SetTaskWorkdir(id int64, workdir string) error
 	ClearWorktreePath(id int64) error

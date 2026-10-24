@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/task"
@@ -122,7 +124,7 @@ func (db *DB) GetClaimableTasks(now time.Time) ([]*task.Task, error) {
 }
 
 func (db *DB) GetAllTasks() ([]*task.Task, error) {
-	rows, err := db.sqlDB.Query(fmt.Sprintf(`SELECT %s FROM tasks ORDER BY (status = 'tmux') DESC, id DESC`, taskColumns))
+	rows, err := db.sqlDB.Query(fmt.Sprintf(`SELECT %s FROM tasks ORDER BY (status = ?) DESC, id DESC`, taskColumns), task.StatusTmux)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +149,7 @@ func (db *DB) GetAllTasks() ([]*task.Task, error) {
 
 // GetTasksByProject returns all tasks for a specific project.
 func (db *DB) GetTasksByProject(projectID int64) ([]*task.Task, error) {
-	rows, err := db.sqlDB.Query(fmt.Sprintf(`SELECT %s FROM tasks WHERE project_id = ? ORDER BY (status = 'tmux') DESC, id DESC`, taskColumns), projectID)
+	rows, err := db.sqlDB.Query(fmt.Sprintf(`SELECT %s FROM tasks WHERE project_id = ? ORDER BY (status = ?) DESC, id DESC`, taskColumns), projectID, task.StatusTmux)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +173,7 @@ func (db *DB) GetTasksByProject(projectID int64) ([]*task.Task, error) {
 
 // GetTasksByProjectName returns all tasks for projects matching the given name.
 func (db *DB) GetTasksByProjectName(name string) ([]*task.Task, error) {
-	rows, err := db.sqlDB.Query(fmt.Sprintf(`SELECT %s FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE name = ?) ORDER BY (status = 'tmux') DESC, id DESC`, taskColumns), name)
+	rows, err := db.sqlDB.Query(fmt.Sprintf(`SELECT %s FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE name = ?) ORDER BY (status = ?) DESC, id DESC`, taskColumns), name, task.StatusTmux)
 	if err != nil {
 		return nil, err
 	}
@@ -237,11 +239,34 @@ func (db *DB) getTasksByStatus(status task.Status) ([]*task.Task, error) {
 // ClaimTask atomically transitions a task from pending to running.
 // Returns true if the claim succeeded, false if the task was not in pending state.
 func (db *DB) ClaimTask(id int64) (bool, error) {
-	now := time.Now()
-	result, err := db.sqlDB.Exec(
-		"UPDATE tasks SET status = ?, started_at = ?, updated_at = ? WHERE id = ? AND status = ?",
-		task.StatusRunning, now, now, id, task.StatusPending,
-	)
+	return writeStatus(db.sqlDB, id, task.StatusRunning, []task.Status{task.StatusPending}, "started_at = ?", time.Now())
+}
+
+// statusExecer is the Exec half of *sql.DB and *sql.Tx.
+type statusExecer interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+// writeStatus is the single statement behind every guarded status write: it
+// sets status (plus the extra SET fragment and its args) only while the row's
+// current status is one of from, so the check and the write are one atomic
+// step. It also clears hibernated_at, as does every other status-writing
+// statement in this file: the marker only means anything while a task sits in
+// tmux status, so leaving tmux by any route must drop it rather than leave a
+// stale timestamp for the TUI to render. Reports whether a row was written.
+func writeStatus(ex statusExecer, id int64, to task.Status, from []task.Status, set string, setArgs ...interface{}) (bool, error) {
+	query := "UPDATE tasks SET status = ?, updated_at = ?, hibernated_at = NULL"
+	args := []interface{}{to, time.Now()}
+	if set != "" {
+		query += ", " + set
+		args = append(args, setArgs...)
+	}
+	query += " WHERE id = ? AND status IN (?" + strings.Repeat(", ?", len(from)-1) + ")"
+	args = append(args, id)
+	for _, f := range from {
+		args = append(args, f)
+	}
+	result, err := ex.Exec(query, args...)
 	if err != nil {
 		return false, err
 	}
@@ -252,17 +277,38 @@ func (db *DB) ClaimTask(id int64) (bool, error) {
 	return rows > 0, nil
 }
 
-// UpdateTaskStatus writes a task's status. Every branch also clears
-// hibernated_at, as does every other status-writing statement in this file:
-// the marker only means anything while a task sits in 'tmux' status, so
-// leaving tmux by any route (advance, continue, retry, fail, finalize) must
-// drop it rather than leave a stale timestamp for the TUI to render.
-func (db *DB) UpdateTaskStatus(id int64, status task.Status) error {
-	now := time.Now()
-	var query string
-	var args []interface{}
+// guardedStatusWrite moves a task to `to` if task.CanTransition allows it from
+// the task's current DB status, and otherwise returns (and logs) a
+// *task.TransitionError. A missing task is a silent no-op.
+func (db *DB) guardedStatusWrite(id int64, to task.Status, set string, setArgs ...interface{}) error {
+	ok, err := writeStatus(db.sqlDB, id, to, task.AllowedFrom(to), set, setArgs...)
+	if err != nil || ok {
+		return err
+	}
+	return db.rejectTransition(id, "", to)
+}
 
-	switch status {
+// rejectTransition builds the error for a status write that matched no row.
+// from is the status the caller expected; when empty (or when the row has
+// since moved on) the current DB status is reported instead.
+func (db *DB) rejectTransition(id int64, from, to task.Status) error {
+	var cur task.Status
+	if err := db.sqlDB.QueryRow(`SELECT status FROM tasks WHERE id = ?`, id).Scan(&cur); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+	if from == "" || cur != from {
+		from = cur
+	}
+	log.Printf("Rejected status write for task #%d: %s -> %s", id, from, to)
+	return &task.TransitionError{TaskID: id, From: from, To: to}
+}
+
+// statusSet returns the extra columns a write to status `to` stamps.
+func statusSet(to task.Status) (string, []interface{}) {
+	switch to {
 	case task.StatusRunning:
 		// started_at is write-once. A task re-enters "running" many times
 		// during a single run — markSummarizingStep restores it after every
@@ -270,18 +316,37 @@ func (db *DB) UpdateTaskStatus(id int64, status task.Status) error {
 		// reports the task as having started at its last summarizer round
 		// trip instead of at its actual claim. ClaimTask sets the real start;
 		// the retry paths NULL the column out to re-arm it.
-		query = "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?), updated_at = ?, hibernated_at = NULL WHERE id = ?"
-		args = []interface{}{status, now, now, id}
+		return "started_at = COALESCE(started_at, ?)", []interface{}{time.Now()}
 	case task.StatusCompleted, task.StatusFailed:
-		query = "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?"
-		args = []interface{}{status, now, now, id}
+		return "completed_at = ?", []interface{}{time.Now()}
 	default:
-		query = "UPDATE tasks SET status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?"
-		args = []interface{}{status, now, id}
+		return "", nil
 	}
+}
 
-	_, err := db.sqlDB.Exec(query, args...)
-	return err
+// UpdateTaskStatus moves a task to status, provided the transition table in
+// internal/task allows it from the task's current status; otherwise it
+// returns a *task.TransitionError and leaves the row untouched.
+func (db *DB) UpdateTaskStatus(id int64, status task.Status) error {
+	set, args := statusSet(status)
+	return db.guardedStatusWrite(id, status, set, args...)
+}
+
+// TransitionTaskStatus is the compare-and-set form of UpdateTaskStatus: it
+// writes `to` only if the task is currently in `from` and the table allows
+// from -> to. When two writers race the same transition, exactly one wins;
+// the loser gets a *task.TransitionError carrying the status it lost to.
+func (db *DB) TransitionTaskStatus(id int64, from, to task.Status) error {
+	if !task.CanTransition(from, to) {
+		log.Printf("Rejected status write for task #%d: %s -> %s", id, from, to)
+		return &task.TransitionError{TaskID: id, From: from, To: to}
+	}
+	set, args := statusSet(to)
+	ok, err := writeStatus(db.sqlDB, id, to, []task.Status{from}, set, args...)
+	if err != nil || ok {
+		return err
+	}
+	return db.rejectTransition(id, from, to)
 }
 
 func (db *DB) UpdateTaskWorktreePath(id int64, worktreePath string) error {
@@ -324,12 +389,10 @@ func (db *DB) UpdateTaskExitCode(id int64, exitCode int, errorMessage string) er
 	return err
 }
 
+// UpdateTaskError fails a task with errMsg, subject to the same transition
+// check as UpdateTaskStatus.
 func (db *DB) UpdateTaskError(id int64, errMsg string) error {
-	_, err := db.sqlDB.Exec(
-		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?",
-		errMsg, task.StatusFailed, time.Now(), id,
-	)
-	return err
+	return db.guardedStatusWrite(id, task.StatusFailed, "error_message = ?", errMsg)
 }
 
 // SetTaskWorkdir records the agent start directory (relative to the task's
@@ -353,13 +416,10 @@ func (db *DB) SetTaskHibernatedAt(id int64, at *time.Time) error {
 
 // UpdateTaskStatusError records an error message alongside a caller-supplied
 // terminal status in a single write, so a poller can never observe the new
-// status without its reason (or vice versa).
+// status without its reason (or vice versa). Subject to the same transition
+// check as UpdateTaskStatus.
 func (db *DB) UpdateTaskStatusError(id int64, status task.Status, errMsg string) error {
-	_, err := db.sqlDB.Exec(
-		"UPDATE tasks SET error_message = ?, status = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?",
-		errMsg, status, time.Now(), id,
-	)
-	return err
+	return db.guardedStatusWrite(id, status, "error_message = ?", errMsg)
 }
 
 func (db *DB) UpdateTaskPriority(id int64, priority task.Priority) error {
@@ -420,6 +480,9 @@ func (db *DB) UpdateTaskLoopIteration(id int64, iteration int) error {
 	return err
 }
 
+// ResetTaskForRetry and the other ResetTaskFor* functions are the explicit
+// force paths back to pending (retry, continue, startup recovery): they
+// write regardless of the current status and bypass the transition table.
 func (db *DB) ResetTaskForRetry(id int64) error {
 	_, err := db.sqlDB.Exec(
 		`UPDATE tasks SET status = ?, step_index = 0, current_step = NULL, loop_iteration = 0,
@@ -712,9 +775,8 @@ func (db *DB) FailDependentTasks(blockerID int64) ([]int64, error) {
 			if d.status.IsTerminal() || d.status.IsActive() {
 				continue
 			}
-			if _, err := tx.Exec(
-				`UPDATE tasks SET status = ?, error_message = ?, completed_at = ?, updated_at = ?, hibernated_at = NULL WHERE id = ?`,
-				task.StatusFailed, fmt.Sprintf("blocker task #%d failed", current), now, now, d.id,
+			if _, err := writeStatus(tx, d.id, task.StatusFailed, task.AllowedFrom(task.StatusFailed),
+				"error_message = ?, completed_at = ?", fmt.Sprintf("blocker task #%d failed", current), now,
 			); err != nil {
 				return nil, err
 			}

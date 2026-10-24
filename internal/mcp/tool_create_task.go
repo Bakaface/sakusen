@@ -156,7 +156,7 @@ func waitForReady(ctx context.Context, c *client.Client, taskID int64, tmuxDirec
 // title+branch have been finalized and the status moved off "init". For
 // tmux_direct tasks the goroutine writes a "tmux" status instead.
 func isReady(t *daemon.TaskInfo, tmuxDirect bool) bool {
-	if t.Status == "init" {
+	if t.Status == string(task.StatusInit) {
 		return false
 	}
 	if tmuxDirect {

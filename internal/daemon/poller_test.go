@@ -319,7 +319,7 @@ func suspendedParentWithChildren(t *testing.T, s *Server, projA int64, stepIndex
 		name := fmt.Sprintf("child-%d", i)
 		c, err := s.database.CreateTaskWithPriority(
 			projB.ID, name, "child work", name, "", "", "branch-"+name, "", "",
-			task.StatusPending, task.PriorityMedium, false, nil, nil,
+			task.StatusRunning, task.PriorityMedium, false, nil, nil,
 		)
 		if err != nil {
 			t.Fatalf("create child %d: %v", i, err)

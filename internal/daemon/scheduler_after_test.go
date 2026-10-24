@@ -155,6 +155,9 @@ func TestAfterFire_UpstreamRunNowTriggers(t *testing.T) {
 		t.Fatalf("run-now: %v", err)
 	}
 	time.Sleep(150 * time.Millisecond)
+	if ok, err := database.ClaimTask(run.ID); err != nil || !ok {
+		t.Fatalf("claim run: ok=%v err=%v", ok, err)
+	}
 	if err := database.UpdateTaskStatus(run.ID, task.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
