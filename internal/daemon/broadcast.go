@@ -95,6 +95,10 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 		s.cascadeFailDependents(a.Task.ID)
 
 		s.checkProjectTasksDone(a.Task.ProjectID, eff.OnFailedOverridden && !eff.OnFailed)
+
+	case agent.StatePending, agent.StateStarting, agent.StateRunning, agent.StateStopped:
+		// Only the broadcast above: a non-terminal agent has no task-side
+		// effects yet, and a stop's task-side handling belongs to its caller.
 	}
 }
 

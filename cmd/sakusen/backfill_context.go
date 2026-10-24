@@ -179,7 +179,7 @@ func runBackfillContext(cmd *cobra.Command, args []string) error {
 // or nil for "all projects". An explicit --all-projects overrides --project.
 func resolveBackfillProjectFilter(database *db.DB) (*db.Project, error) {
 	if backfillContextAllowAll {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil project means all projects
 	}
 	if backfillContextProject != "" {
 		proj, err := database.GetProjectByPath(backfillContextProject)

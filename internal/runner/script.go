@@ -22,7 +22,7 @@ func BuildWrapperScript(command string, env map[string]string) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("export %s=%s\n", k, shellQuote(env[k])))
+		fmt.Fprintf(&b, "export %s=%s\n", k, shellQuote(env[k]))
 	}
 	b.WriteString(command)
 	b.WriteString("\nexec bash\n")

@@ -281,9 +281,10 @@ func TestUnsubscribe_DoesNotPoisonNextRequest(t *testing.T) {
 		case daemon.MsgGetTask:
 			resp, _ := daemon.NewMessage(daemon.MsgGetTask, daemon.GetTaskResponse{Task: daemon.TaskInfo{ID: 99, Title: "real"}})
 			return resp
+		default:
+			resp, _ := daemon.NewMessage(daemon.MsgError, daemon.ErrorResponse{Message: "unknown"})
+			return resp
 		}
-		resp, _ := daemon.NewMessage(daemon.MsgError, daemon.ErrorResponse{Message: "unknown"})
-		return resp
 	})
 
 	conn, err := net.Dial("unix", listener.Addr().String())
@@ -448,9 +449,10 @@ func TestClient_ReconnectAfterServerSideBreak(t *testing.T) {
 		case daemon.MsgPing:
 			resp, _ := daemon.NewMessage(daemon.MsgPong, nil)
 			return resp
+		default:
+			resp, _ := daemon.NewMessage(daemon.MsgError, daemon.ErrorResponse{Message: "unknown"})
+			return resp
 		}
-		resp, _ := daemon.NewMessage(daemon.MsgError, daemon.ErrorResponse{Message: "unknown"})
-		return resp
 	})
 	defer srv.close()
 
@@ -569,9 +571,10 @@ func TestClient_SubscriptionPreservedAcrossReconnect(t *testing.T) {
 		case daemon.MsgPing:
 			resp, _ := daemon.NewMessage(daemon.MsgPong, nil)
 			return resp
+		default:
+			resp, _ := daemon.NewMessage(daemon.MsgError, daemon.ErrorResponse{Message: "unknown"})
+			return resp
 		}
-		resp, _ := daemon.NewMessage(daemon.MsgError, daemon.ErrorResponse{Message: "unknown"})
-		return resp
 	})
 	defer srv.close()
 

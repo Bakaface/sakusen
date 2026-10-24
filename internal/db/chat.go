@@ -61,7 +61,7 @@ func (db *DB) GetLatestChat(taskID int64) (*Chat, error) {
 	).Scan(&c.ID, &c.TaskID, &c.SessionID, &tmuxSessionName, &stepName, &c.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, nil //nolint:nilnil // nil chat means none exists
 		}
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (db *DB) GetLatestChat(taskID int64) (*Chat, error) {
 // from "some conversation exists for this task".
 func (db *DB) GetLatestChatForSteps(taskID int64, stepNames []string) (*Chat, error) {
 	if len(stepNames) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil chat means none exists
 	}
 	placeholders := make([]string, len(stepNames))
 	args := make([]any, 0, len(stepNames)+1)
@@ -103,7 +103,7 @@ func (db *DB) GetLatestChatForSteps(taskID int64, stepNames []string) (*Chat, er
 	err := db.sqlDB.QueryRow(query, args...).Scan(&c.ID, &c.TaskID, &c.SessionID, &tmuxSessionName, &stepName, &c.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, nil //nolint:nilnil // nil chat means none exists
 		}
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (db *DB) GetChatByStep(taskID int64, stepName string) (*Chat, error) {
 	).Scan(&c.ID, &c.TaskID, &c.SessionID, &tmuxSessionName, &sn, &c.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, nil //nolint:nilnil // nil chat means none exists
 		}
 		return nil, err
 	}

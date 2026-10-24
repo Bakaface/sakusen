@@ -71,7 +71,7 @@ func TestCreateTaskWithoutImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if task.Images != nil && len(task.Images) != 0 {
+	if len(task.Images) != 0 {
 		t.Fatalf("expected no images, got %v", task.Images)
 	}
 
@@ -81,7 +81,7 @@ func TestCreateTaskWithoutImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if retrieved.Images != nil && len(retrieved.Images) != 0 {
+	if len(retrieved.Images) != 0 {
 		t.Fatalf("expected no images on retrieved task, got %v", retrieved.Images)
 	}
 }
@@ -105,7 +105,7 @@ func TestCreateTaskWithEmptyImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if task.Images != nil && len(task.Images) != 0 {
+	if len(task.Images) != 0 {
 		t.Fatalf("expected no images, got %v", task.Images)
 	}
 }

@@ -303,8 +303,8 @@ func execActionVerb(m Model, rawArgs string) (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, nil
 	}
-	if v, ok := parsed.(action.Args); ok {
-		if err := v.Validate(); err != nil {
+	if parsed != nil {
+		if err := parsed.Validate(); err != nil {
 			m.err = err
 			return m, nil
 		}

@@ -143,6 +143,8 @@ func DiagnoseFileOnly(path string) ([]Diagnostic, error) {
 // globalWorkflowPool. Returns nil (no global pool) when no global config
 // exists or when skipPath matches the global path (avoiding self-recursion
 // when the validation target IS the global config).
+//
+//nolint:nilnil,nilerr // a nil pool with nil error means "no global pool"
 func loadGlobalPoolForValidation(skipPath string) (*globalWorkflowPool, error) {
 	globalYml := getGlobalSakusenYmlPath()
 	if globalYml == "" {

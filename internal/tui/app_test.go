@@ -2322,8 +2322,7 @@ func TestSetNumber_HidesLineNumbersInView(t *testing.T) {
 			// With line numbers off, the header should start closer to the left
 			// (no gutter space padding)
 			if strings.HasPrefix(line, "    ") {
-				// Check it doesn't have the extra gutter space
-				// The gutter with numbers would be at least 4 spaces wider
+				t.Errorf("header still has the line-number gutter: %q", line)
 			}
 			break
 		}

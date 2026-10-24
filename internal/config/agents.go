@@ -971,7 +971,7 @@ var removedProjectKeys = map[string]string{
 func checkRemovedProjectKeys(data []byte) error {
 	var node yaml.Node
 	if err := yaml.Unmarshal(data, &node); err != nil {
-		return nil // surface the parse error from the main decode path
+		return nil //nolint:nilerr // surface the parse error from the main decode path
 	}
 	root := &node
 	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {

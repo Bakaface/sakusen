@@ -169,7 +169,7 @@ func (db *DB) ListAfterPeriodics() ([]*PeriodicDef, error) {
 func (db *DB) upstreamLastTaskID(projectID int64, name string) (*int64, error) {
 	up, err := db.GetPeriodicByName(projectID, name)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, nil //nolint:nilnil // absent periodic has no last task
 	}
 	if err != nil {
 		return nil, err

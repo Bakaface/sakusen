@@ -714,8 +714,7 @@ func TestMCP_GetTask_OmitsSectionsWhenNotRequested(t *testing.T) {
 	}
 
 	for _, mt := range fake.requestTypes() {
-		switch mt {
-		case daemon.MsgGetTaskSteps, daemon.MsgGetStepContexts, daemon.MsgGetOutput, daemon.MsgGetLogs:
+		if mt == daemon.MsgGetTaskSteps || mt == daemon.MsgGetStepContexts || mt == daemon.MsgGetOutput || mt == daemon.MsgGetLogs {
 			t.Errorf("did not expect optional request %s when flags off", mt)
 		}
 	}

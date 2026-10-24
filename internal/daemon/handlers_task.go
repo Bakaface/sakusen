@@ -1179,13 +1179,13 @@ func (s *Server) validateTaskRefs(value string, projectID, selfID int64, fieldLa
 		if ref.ProjectID != projectID {
 			return nil, fmt.Errorf("task #%d referenced in %s belongs to another project", r.ID, fieldLabel)
 		}
-		switch {
-		case ref.Status == task.StatusFailed, ref.Status == task.StatusMergeFailed:
+		switch ref.Status {
+		case task.StatusFailed, task.StatusMergeFailed:
 			// Terminal without a landed result: auto-adding these as deps would
 			// deadlock the referencing task forever, since GetClaimableTasks
 			// only unblocks on a `completed` blocker.
 			return nil, fmt.Errorf("task #%d referenced in %s is %s", r.ID, fieldLabel, ref.Status)
-		case ref.Status == task.StatusCompleted:
+		case task.StatusCompleted:
 			// Already resolved — value will be available at run time.
 		default:
 			// Active (pending, init, running, awaiting-approval, tmux,

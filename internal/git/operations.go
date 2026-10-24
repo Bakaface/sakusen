@@ -274,7 +274,7 @@ func (r *Repo) HasMeaningfulChanges(workDir string, excludeFiles []string) (bool
 		var logOut bytes.Buffer
 		logCmd.Stdout = &logOut
 		if logErr := logCmd.Run(); logErr != nil {
-			return false, nil
+			return false, nil //nolint:nilerr // no commits at all: nothing to report
 		}
 		// If there's at least one commit, consider it has changes
 		return strings.TrimSpace(logOut.String()) != "", nil
@@ -309,7 +309,7 @@ func (r *Repo) DiffStat(workDir, baseBranch string) (string, error) {
 		var diffOut bytes.Buffer
 		diffCmd.Stdout = &diffOut
 		if diffErr := diffCmd.Run(); diffErr != nil {
-			return "", nil
+			return "", nil //nolint:nilerr // no diff available
 		}
 		return strings.TrimSpace(diffOut.String()), nil
 	}

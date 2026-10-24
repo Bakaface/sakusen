@@ -128,7 +128,7 @@ func TestCommitsNilForNewTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if task.Commits != nil && len(task.Commits) != 0 {
+	if len(task.Commits) != 0 {
 		t.Fatalf("expected no commits on new task, got %v", task.Commits)
 	}
 }

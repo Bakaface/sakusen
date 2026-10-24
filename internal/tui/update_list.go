@@ -488,6 +488,8 @@ func (m Model) handleSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSelectorChoice()
 	case selCancelled:
 		return m.handleSelectorCancel()
+	case selNone:
+		// Key consumed by the selector; nothing to dispatch.
 	}
 	return m, nil
 }
@@ -520,6 +522,9 @@ func (m Model) handleSelectorChoice() (tea.Model, tea.Cmd) {
 
 	case selectorWorkflow:
 		return m.launchWorkflow(item)
+
+	case selectorNone:
+		// No selector was open; nothing to apply.
 	}
 
 	return m, nil

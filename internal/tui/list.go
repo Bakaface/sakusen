@@ -647,6 +647,9 @@ func (l *listView) statusText(task daemon.TaskInfo) string {
 		default:
 			statusLabel = "waiting on children"
 		}
+	case taskpkg.StatusInit, taskpkg.StatusTmux, taskpkg.StatusFinalizing, taskpkg.StatusSummarizing,
+		taskpkg.StatusCompleted, taskpkg.StatusMergeFailed:
+		// The bare status is the label.
 	}
 	if task.LoopIteration > 0 {
 		statusLabel += fmt.Sprintf(" [L%d]", task.LoopIteration)
@@ -860,8 +863,7 @@ func (l *listView) hasFailedBlocker(task daemon.TaskInfo) bool {
 			if t.ID != blockerID {
 				continue
 			}
-			switch taskpkg.Status(t.Status) {
-			case taskpkg.StatusFailed, taskpkg.StatusMergeFailed:
+			if s := taskpkg.Status(t.Status); s == taskpkg.StatusFailed || s == taskpkg.StatusMergeFailed {
 				return true
 			}
 		}

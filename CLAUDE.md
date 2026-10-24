@@ -54,10 +54,11 @@ All shortcuts are in `mise.toml` — prefer `mise run <task>` over raw `go` comm
 |------|---------|-------|
 | Build everything (no install) | `go build ./...` | Compiles every package. |
 | Build the `sakusen` binary | `mise run build` (alias `b`) | Installs to `~/bin/sakusen`. |
-| Unit tests | `mise run test` → `go test ./...` | Excludes `integration`- and `e2e`-tagged files. |
+| Unit tests | `mise run test` → `go test -race ./...` | Race detector on. Excludes `integration`- and `e2e`-tagged files. |
 | Integration tests | `mise run test:integration` (alias `ti`) → `go test -tags integration ./...` | Only `internal/runner/process_test.go` is tagged today. |
 | End-to-end tests | `mise run test:e2e` → `go test -tags=e2e ./tests/e2e/...` | **Not picked up by `go test ./...`** — the build tag gates compilation. See [tests/e2e/README.md](tests/e2e/README.md). |
-| Lint | `mise run lint` → `go vet ./...` + `gofmt -l .` check | No `golangci-lint` is configured. |
+| Lint | `mise run lint` → `golangci-lint run ./...` + `gofmt -l .` check | Linters in `.golangci.yml` (govet, staticcheck, nilerr, nilnil, exhaustive, contextcheck, bodyclose); `golangci-lint` is pinned in `mise.toml` `[tools]`. Silence a deliberate finding with `//nolint:<linter> // reason`. |
+| Pre-merge gate | `mise run check` | Runs `lint` + `test`. |
 
 ### Canonical "what to run after a change" rule
 
@@ -70,7 +71,7 @@ Before reporting work complete:
 
 If a test command fails or hangs, surface the failure — never silently skip a layer.
 
-> **Do not invent commands.** There is no `make test`, no `Makefile`, no `justfile`, no `golangci-lint`. The full set of test/build/lint commands is the table above.
+> **Do not invent commands.** There is no `make test`, no `Makefile`, no `justfile`. The full set of test/build/lint commands is the table above.
 
 ## Domain Context
 

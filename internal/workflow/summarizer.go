@@ -242,12 +242,12 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 	} else if len(stepContexts) > 0 {
 		// Build default prompt with all step contexts
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Summarize the progress made on task #%d: %s\n\n", t.ID, t.Title))
+		fmt.Fprintf(&sb, "Summarize the progress made on task #%d: %s\n\n", t.ID, t.Title)
 		sb.WriteString("Use the context from the following task step contexts:\n\n")
 		var contextNames []string
 		for _, name := range stepNames {
 			if content, ok := stepContexts[name]; ok {
-				sb.WriteString(fmt.Sprintf("### %s\n\n%s\n\n", name, content))
+				fmt.Fprintf(&sb, "### %s\n\n%s\n\n", name, content)
 				contextNames = append(contextNames, name)
 			}
 		}
@@ -293,7 +293,7 @@ func (e *Engine) runSummarizer(ctx context.Context, t *task.Task, wf *config.Wor
 // exact prompt shape used by live finalization.
 func BuildDiffStatSummaryPrompt(taskID int64, title, input, diffStat string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Summarize the progress made on task #%d: %s\n\n", taskID, title))
+	fmt.Fprintf(&sb, "Summarize the progress made on task #%d: %s\n\n", taskID, title)
 	sb.WriteString("The task input was:\n")
 	sb.WriteString(input)
 	sb.WriteString("\n\nThe following files were changed:\n\n```\n")

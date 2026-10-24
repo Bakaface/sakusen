@@ -57,7 +57,6 @@ func (v *taskInfoView) recalcViewport() {
 
 	if !v.ready {
 		v.viewport = viewport.New(v.width-4, vpHeight)
-		v.viewport.HighPerformanceRendering = false
 		v.ready = true
 	} else {
 		v.viewport.Width = v.width - 4
@@ -383,19 +382,19 @@ func branchRowStyle(status string) lipgloss.Style {
 }
 
 func (v *taskInfoView) ScrollUp() {
-	v.viewport.LineUp(1)
+	v.viewport.ScrollUp(1)
 }
 
 func (v *taskInfoView) ScrollDown() {
-	v.viewport.LineDown(1)
+	v.viewport.ScrollDown(1)
 }
 
 func (v *taskInfoView) PageUp() {
-	v.viewport.HalfViewUp()
+	v.viewport.HalfPageUp()
 }
 
 func (v *taskInfoView) PageDown() {
-	v.viewport.HalfViewDown()
+	v.viewport.HalfPageDown()
 }
 
 func (v *taskInfoView) GotoTop() {

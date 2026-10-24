@@ -48,9 +48,6 @@ Exit codes: 0 = a task matched, 2 = timed out, 1 = error.`,
 // runWait performs the wait and writes the JSON result to out, returning the
 // process exit code for a non-error outcome.
 func runWait(ctx context.Context, out io.Writer, cfg *config.Config, args, statusNames []string, timeout time.Duration) (int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ids := make([]int64, 0, len(args))
 	for _, a := range args {
 		id, err := strconv.ParseInt(a, 10, 64)

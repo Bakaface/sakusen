@@ -1,3 +1,6 @@
+[tools]
+golangci-lint = "2.12"
+
 [tasks.build]
 alias = "b"
 description = "Build + install the sakusen binary into GOBIN (first on PATH, so `sakusen ...` runs this build)"
@@ -23,8 +26,8 @@ description = "Launch the TUI"
 run = "sakusen tui"
 
 [tasks.test]
-description = "Run unit tests (excludes integration- and e2e-tagged files)"
-run = "go test ./..."
+description = "Run unit tests with the race detector (excludes integration- and e2e-tagged files)"
+run = "go test -race ./..."
 
 [tasks."test:integration"]
 alias = "ti"
@@ -36,11 +39,15 @@ description = "Run end-to-end tests against the stubbed claude binary (-tags=e2e
 run = "go test -tags=e2e ./tests/e2e/..."
 
 [tasks.lint]
-description = "Run go vet + gofmt check (no formatting, just reports unformatted files). No golangci-lint is configured."
+description = "Run golangci-lint (.golangci.yml) + gofmt check (no formatting, just reports unformatted files)"
 run = '''
-go vet ./... && \
-test -z "$(gofmt -l .)" || (echo "gofmt: the following files need formatting:" && gofmt -l . && exit 1)
+golangci-lint run ./... && \
+(test -z "$(gofmt -l .)" || (echo "gofmt: the following files need formatting:" && gofmt -l . && exit 1))
 '''
+
+[tasks.check]
+description = "Pre-merge gate: lint + race-enabled unit tests"
+depends = ["lint", "test"]
 
 [tasks.e2e-test]
 description = "Drive an e2e via the Claude Code /e2e-test slash command (NOT the Go e2e suite — use 'mise run test:e2e' for that)."

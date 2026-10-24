@@ -42,7 +42,6 @@ func (v *artifactViewState) recalcViewport() {
 
 	if !v.ready {
 		v.viewport = viewport.New(v.width-4, vpHeight)
-		v.viewport.HighPerformanceRendering = false
 		v.ready = true
 	} else {
 		v.viewport.Width = v.width - 4
@@ -60,10 +59,10 @@ func (v *artifactViewState) SetContent(name, content string) {
 	v.viewport.GotoTop()
 }
 
-func (v *artifactViewState) ScrollUp()   { v.viewport.LineUp(1) }
-func (v *artifactViewState) ScrollDown() { v.viewport.LineDown(1) }
-func (v *artifactViewState) PageUp()     { v.viewport.HalfViewUp() }
-func (v *artifactViewState) PageDown()   { v.viewport.HalfViewDown() }
+func (v *artifactViewState) ScrollUp()   { v.viewport.ScrollUp(1) }
+func (v *artifactViewState) ScrollDown() { v.viewport.ScrollDown(1) }
+func (v *artifactViewState) PageUp()     { v.viewport.HalfPageUp() }
+func (v *artifactViewState) PageDown()   { v.viewport.HalfPageDown() }
 func (v *artifactViewState) GotoTop()    { v.viewport.GotoTop() }
 func (v *artifactViewState) GotoBottom() { v.viewport.GotoBottom() }
 

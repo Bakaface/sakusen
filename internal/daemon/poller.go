@@ -89,6 +89,8 @@ func (s *Server) checkPendingTasks() {
 // for it, or nil. Only worktree:false tasks whose workflow sets
 // exclusive_workdir wait; any other active worktree:false task of the same
 // project holds the project root, whether or not it opted in.
+//
+//nolint:nilnil,nilerr // a nil holder with nil error means "no need to wait"
 func (s *Server) workdirHolder(t *task.Task) (*task.Task, error) {
 	if t.Worktree {
 		return nil, nil
@@ -314,6 +316,9 @@ func (s *Server) recoverOrphanedTasks() error {
 				continue
 			}
 			tmuxTasksToRestore = append(tmuxTasksToRestore, t)
+		case task.StatusPending, task.StatusCompleted, task.StatusFailed, task.StatusMergeFailed:
+			// Nothing in flight: the poller claims pending tasks as usual and
+			// terminal ones need no recovery.
 		}
 	}
 

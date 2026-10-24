@@ -157,7 +157,6 @@ func (d *detailView) recalcViewport() {
 
 	if !d.ready {
 		d.viewport = viewport.New(d.width-4, vpHeight)
-		d.viewport.HighPerformanceRendering = false
 		d.ready = true
 	} else {
 		d.viewport.Width = d.width - 4
@@ -189,19 +188,19 @@ func (d *detailView) setViewportContent(content string) {
 }
 
 func (d *detailView) ScrollUp() {
-	d.viewport.LineUp(1)
+	d.viewport.ScrollUp(1)
 }
 
 func (d *detailView) ScrollDown() {
-	d.viewport.LineDown(1)
+	d.viewport.ScrollDown(1)
 }
 
 func (d *detailView) PageUp() {
-	d.viewport.HalfViewUp()
+	d.viewport.HalfPageUp()
 }
 
 func (d *detailView) PageDown() {
-	d.viewport.HalfViewDown()
+	d.viewport.HalfPageDown()
 }
 
 func (d *detailView) GotoTop() {

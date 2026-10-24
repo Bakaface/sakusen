@@ -1,0 +1,21 @@
+version: "2"
+
+run:
+  # Also lint the integration- and e2e-tagged test files.
+  build-tags:
+    - integration
+    - e2e
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - nilerr
+    - nilnil
+    - exhaustive
+    - contextcheck
+    - bodyclose
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true

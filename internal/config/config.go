@@ -194,6 +194,8 @@ func Load() (*Config, error) {
 			cfg.ProjectConfigFound = true
 		case ProjectRootGitToplevel:
 			cfg.ProjectDir = root
+		case ProjectRootNone:
+			// Outside any project: ProjectDir stays empty.
 		}
 	}
 
@@ -728,7 +730,7 @@ func appendTrackWorkflows(cfg *Config, projectBaseDir string) error {
 func assertNoNameField(data []byte) error {
 	var node yaml.Node
 	if err := yaml.Unmarshal(data, &node); err != nil {
-		return nil // surface the parse error from the main decode path
+		return nil //nolint:nilerr // surface the parse error from the main decode path
 	}
 	// The top of a document is a DocumentNode containing one MappingNode.
 	root := &node

@@ -78,7 +78,7 @@ func (f *fakeTaskStore) UpdateTaskContext(id int64, taskContext string) error {
 }
 
 // Unused by promoteSingleStepContextToTask; stubbed to satisfy taskStore.
-func (f *fakeTaskStore) GetTask(id int64) (*task.Task, error)                { return nil, nil }
+func (f *fakeTaskStore) GetTask(id int64) (*task.Task, error)                { return nil, nil } //nolint:nilnil // unused stub
 func (f *fakeTaskStore) UpdateTaskStatus(id int64, status task.Status) error { return nil }
 func (f *fakeTaskStore) UpdateTaskStatusError(id int64, status task.Status, errMsg string) error {
 	return nil

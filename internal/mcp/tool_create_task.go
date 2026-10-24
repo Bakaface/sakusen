@@ -164,7 +164,7 @@ func isReady(t *daemon.TaskInfo, tmuxDirect bool) bool {
 	}
 	// Non-worktree tasks legitimately end up with an empty branch, so don't
 	// gate on Branch != "" alone.
-	return t.Worktree == false || t.Branch != "" || t.CheckoutBranch != ""
+	return !t.Worktree || t.Branch != "" || t.CheckoutBranch != ""
 }
 
 // jsonResult marshals v as pretty JSON and wraps it as a text tool result.

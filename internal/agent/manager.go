@@ -138,7 +138,7 @@ func (m *Manager) startAgentLocked(agent *Agent, runner func(ctx context.Context
 		delete(m.knownTasks, agent.Task.ID)
 
 		newState := agent.GetState()
-		queueTransitions := m.processQueueLocked()
+		queueTransitions := m.processQueueLocked() //nolint:contextcheck // a queued agent must not inherit the finished agent's context
 
 		m.mu.Unlock()
 

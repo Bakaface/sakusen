@@ -853,8 +853,7 @@ func TestRunTaskDoesNotCallExecuteOnComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get task: %v", err)
 	}
-	switch refreshed.Status {
-	case task.StatusSummarizing, task.StatusCompleted, task.StatusFinalizing:
+	if s := refreshed.Status; s == task.StatusSummarizing || s == task.StatusCompleted || s == task.StatusFinalizing {
 		t.Errorf("RunTask should not change task status to %s — daemon handles finalization", refreshed.Status)
 	}
 }

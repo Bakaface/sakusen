@@ -42,7 +42,7 @@ func TestBuildWrapperScript_SortedKeysAreDeterministic(t *testing.T) {
 	stepIdx := strings.Index(first, "SAKUSEN_STEP")
 	taskIdx := strings.Index(first, "SAKUSEN_TASK_ID")
 	wtIdx := strings.Index(first, "SAKUSEN_WORKTREE")
-	if !(stepIdx < taskIdx && taskIdx < wtIdx) {
+	if stepIdx >= taskIdx || taskIdx >= wtIdx {
 		t.Errorf("env exports should be in sorted key order, got:\n%s", first)
 	}
 }

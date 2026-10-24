@@ -214,7 +214,7 @@ func TestResolveTemplate_ChildrenSummary_DeterministicOrder(t *testing.T) {
 	if !strings.Contains(got, "## Child task #11") {
 		t.Errorf("summary missing #11:\n%s", got)
 	}
-	if i3, i11 := strings.Index(got, "#3"), strings.Index(got, "#11"); !(i3 < i11) {
+	if i3, i11 := strings.Index(got, "#3"), strings.Index(got, "#11"); i3 >= i11 {
 		t.Errorf("expected #3 to precede #11 in summary:\n%s", got)
 	}
 	if !strings.Contains(got, "alpha") || !strings.Contains(got, "beta") {

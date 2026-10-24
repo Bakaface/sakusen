@@ -1036,20 +1036,22 @@ func Status(cfg *config.Config) (bool, int, error) {
 		return false, 0, err
 	}
 
+	// An unreadable PID or a process that cannot be signalled means the
+	// daemon is not running, not that the status query failed.
 	pid, err := strconv.Atoi(string(data))
 	if err != nil {
-		return false, 0, nil
+		return false, 0, nil //nolint:nilerr // corrupt PID file
 	}
 
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return false, 0, nil
+		return false, 0, nil //nolint:nilerr // no such process
 	}
 
 	err = process.Signal(syscall.Signal(0))
 	if err != nil {
 		os.Remove(cfg.PidFile)
-		return false, 0, nil
+		return false, 0, nil //nolint:nilerr // stale PID file
 	}
 
 	return true, pid, nil
