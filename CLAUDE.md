@@ -59,7 +59,7 @@ All shortcuts are in `mise.toml` — prefer `mise run <task>` over raw `go` comm
 | Unit tests | `mise run test` → `go test -race ./...` | Race detector on. Excludes `integration`- and `e2e`-tagged files. |
 | Integration tests | `mise run test:integration` (alias `ti`) → `go test -tags integration ./...` | Only `internal/runner/process_test.go` is tagged today. |
 | End-to-end tests | `mise run test:e2e` → `go test -tags=e2e ./tests/e2e/...` | **Not picked up by `go test ./...`** — the build tag gates compilation. See [tests/e2e/README.md](tests/e2e/README.md). |
-| Lint | `mise run lint` → `golangci-lint run ./...` + `gofmt -l .` check | Linters in `.golangci.yml` (govet, staticcheck, nilerr, nilnil, exhaustive, contextcheck, bodyclose, errcheck; errcheck skips `_test.go`); `golangci-lint` is pinned in `mise.toml` `[tools]`. Silence a deliberate finding with `//nolint:<linter> // reason`. |
+| Lint | `mise run lint` → `golangci-lint run ./...` + `gofmt -l .` check | Linters in `.golangci.yml` (govet, staticcheck, nilerr, nilnil, exhaustive, contextcheck, bodyclose, errcheck; errcheck skips `_test.go`); `golangci-lint` is pinned in `mise.toml` `[tools]`; its cache is per checkout (`GOLANGCI_LINT_CACHE` under `git rev-parse --absolute-git-dir`), so a deleted worktree's entries can't leak into another's results. Silence a deliberate finding with `//nolint:<linter> // reason`. |
 | Pre-merge gate | `mise run check` | Runs `lint` + `test`. |
 
 ### Canonical "what to run after a change" rule

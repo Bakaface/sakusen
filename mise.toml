@@ -40,7 +40,10 @@ run = "go test -tags=e2e ./tests/e2e/..."
 
 [tasks.lint]
 description = "Run golangci-lint (.golangci.yml) + gofmt check (no formatting, just reports unformatted files)"
+# Per-checkout cache: the shared user cache is content-keyed, so a hit can replay another
+# worktree's issues under its paths, and once that worktree is deleted they can't be nolint-filtered.
 run = '''
+export GOLANGCI_LINT_CACHE="$(git rev-parse --absolute-git-dir)/golangci-lint" && \
 golangci-lint run ./... && \
 (test -z "$(gofmt -l .)" || (echo "gofmt: the following files need formatting:" && gofmt -l . && exit 1))
 '''
