@@ -375,7 +375,7 @@ When the user describes what they want, follow this:
 2. **"Review before completing"** → Add a step with `human: true`
 3. **"Interactive tmux session"** → Point the step (or workflow) at a tmux-mode agent, e.g. `agent: claude-tmux`. Headless steps just use a headless agent (the scaffolded default).
 4. **"Multi-step pipeline"** → Multiple steps with step context passing results between steps
-5. **"Iterative review loop"** → Use `loop` config on a fix step pointing back to review; prefer an affirmative exit: `step_context_contains` + `marker`, or a `command` whose exit status decides (0 exit, 1 continue, else fail)
+5. **"Iterative review loop"** → Use `loop` config on a fix step pointing back to review; prefer an affirmative exit: `step_context_contains` + `marker`, or a `command` whose exit status decides (0 exit, 1 continue, else fail); add `on_max_iterations: fail` when the workflow auto-merges, so hitting the cap fails the task instead of merging unfinished work
 6. **"Predefined maintenance job (no user prompt)"** → Pin all fields (`input`, `worktree`, `branch`, `target`) so the New Task screen is skipped
 7. **"Bootstrap from PRD (run immediately)"** → Same as above — pin all fields so the task is created immediately
 8. **"Share files/dirs across worktrees"** ("symlink X into worktrees", ".env should be available", "docs/configs visible to agents") → Use `worktree-sync-paths` (`link:` for shared/synced files, `copy:` for per-worktree isolated copies). Note this is hard-link, not symlink.
@@ -435,7 +435,7 @@ sakusen validate path/to/.sakusen.yml   # validates an explicit file
 - **Unknown top-level fields** (catches typos like `worktree_sync_paths` for `worktree-sync-paths`)
 - **Removed keys** (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`, and `tmux:`/`print:` on a workflow or step) — migration errors pointing at the `agents:`/`summarizer:` replacements
 - **Agent record shapes** (invalid slug, missing `command`, invalid `mode`, `resume_command`/`chat_log_command` on a headless agent). By default the file is merged with the global tier (`~/.sakusen.yml`, `~/.sakusen/workflows/`, track workflows) like the daemon does, so unknown `agent:`/`default_agent:` refs, alias targets and stacked variant compositions are reported; `sakusen validate --file-only` checks the single file without resolving them.
-- Workflow loop validity (forward `goto`, self-reference, missing target step, `max_iterations < 1`, overlapping ranges, `human: true` on a loop step)
+- Workflow loop validity (forward `goto`, self-reference, missing target step, `max_iterations < 1`, bad `on_max_iterations` or `fail` without `exit_condition`, overlapping ranges, `human: true` on a loop step)
 - Invalid `summarization_strategy` values
 - Invalid `on_complete` — top-level or per-workflow (must be `commit`, `merge`, or `none`); the removed `git.on_complete` location produces a migration error
 - Invalid `default_priority` (must be `low`, `medium`, `high`, or `urgent`)

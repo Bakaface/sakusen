@@ -535,6 +535,7 @@ Loops allow iterative refinement (e.g. implement → review → fix → review a
 loop:
   goto: "step-name"      # must reference an EARLIER step
   max_iterations: 3      # >= 1
+  on_max_iterations: fail  # optional: fail | continue (default); fail requires exit_condition
   exit_condition:                       # set any combination (exit as soon as one matches)
     step_context_contains: "step-name"    # affirmative: exit when that step's context contains marker
     marker: "LOOP-EXIT"                   # required with step_context_contains; literal, case-sensitive
@@ -554,7 +555,8 @@ leaves it absent and the loop keeps going, bounded by `max_iterations`. Use
 **`command` lets a program make the decision** instead of a substring match on free text —
 e.g. a sweep loop that ends once `grep -rl old_api src` finds nothing, or a classifier CLI
 that reads a decider step's verdict on stdin. It is evaluated after the loop step's context
-is captured (only while the loop would otherwise continue), via `bash -c` in the task's
+is captured (only while the loop would otherwise continue, or on the last pass under
+`on_max_iterations: fail`), via `bash -c` in the task's
 workdir (worktree or main checkout, honouring `workdir`), with the step env contract
 (`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH`,
 `SAKUSEN_TRACK_ID` when tracked) plus `SAKUSEN_LOOP_ITERATION` (same value as
@@ -576,6 +578,15 @@ loop:
   exit_condition:
     command: 'test "$(grep -rl old_api src | wc -l)" -eq 0'
 ```
+
+**`on_max_iterations` decides what the cap means.** With `continue` (the default) a loop that
+reaches `max_iterations` simply ends and the workflow moves on to the next step, even though
+its exit condition was never met. With `fail` the exit conditions are still evaluated on that
+last pass; if one matches the loop exits normally, otherwise the task fails with
+`loop on step "<step>" reached max_iterations (N) without meeting its exit condition`.
+**Recommend `fail` for autonomous loops in workflows that auto-merge** (`on_complete: merge`)
+— otherwise a half-done sweep is reviewed and merged as if finished. No shell gate step
+comparing `{{loop.iteration}}` with `{{loop.max_iterations}}` is needed.
 
 The marker has to actually reach the referenced step's *context*, so instruct the producing
 step to emit it:
@@ -617,6 +628,7 @@ steps:
 
 - `goto` must reference a step that appears BEFORE the loop step; no self-reference
 - `max_iterations` must be >= 1
+- `on_max_iterations`, when present, must be `fail` or `continue`; `fail` requires an `exit_condition`
 - `exit_condition`, when present, must set `step_context_empty`, `step_context_contains` or `command`
 - `marker` is required with `step_context_contains`, and is rejected without it
 - `step_context_empty`, `step_context_contains` and `stdin_from` must name steps that exist

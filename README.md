@@ -247,6 +247,18 @@ sakusen routines pause|resume <name>  # triggered (cadence/after) routines only
 
 Prefer an affirmative form (`step_context_contains` or `command`): `step_context_empty` cannot tell "done" from "the step crashed or published nothing".
 
+`on_max_iterations` decides what happens when the loop reaches `max_iterations` without its exit condition matching. `continue` (the default) ends the loop and moves on to the next step. `fail` still evaluates the exit conditions on that last pass and fails the task if none matches (`loop on step "<step>" reached max_iterations (N) without meeting its exit condition`). `fail` requires an `exit_condition`. Use `fail` for autonomous loops in workflows that auto-merge (`on_complete: merge`), so an unfinished loop is never reviewed and merged as if it were done:
+
+```yaml
+    loop:
+      goto: batch
+      max_iterations: 30
+      on_max_iterations: fail
+      exit_condition:
+        command: roomba-gate
+        stdin_from: inventory
+```
+
 Loops must point to an earlier step, can't be `human:` or resolve to a tmux-mode agent, and can't overlap with other loops.
 
 ### Template variables

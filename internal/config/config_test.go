@@ -452,6 +452,56 @@ func TestValidateLoopsMaxIterationsZero(t *testing.T) {
 	}
 }
 
+func TestValidateLoopsOnMaxIterations(t *testing.T) {
+	ec := &LoopExitCondition{StepContextContains: "plan", Marker: "LOOP-EXIT"}
+	tests := []struct {
+		name    string
+		onMax   string
+		ec      *LoopExitCondition
+		wantErr string
+	}{
+		{name: "unset"},
+		{name: "continue without exit_condition", onMax: "continue"},
+		{name: "fail with exit_condition", onMax: "fail", ec: ec},
+		{name: "fail without exit_condition", onMax: "fail", wantErr: "requires an exit_condition"},
+		{name: "unknown value", onMax: "abort", ec: ec, wantErr: `must be "fail" or "continue"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wf := &WorkflowConfig{
+				Name: "test",
+				Steps: []StepConfig{
+					{Name: "plan", Prompt: "Plan"},
+					{
+						Name:   "implement",
+						Prompt: "Implement",
+						Loop: &LoopConfig{
+							Goto:            "plan",
+							MaxIterations:   3,
+							OnMaxIterations: tt.onMax,
+							ExitCondition:   tt.ec,
+						},
+					},
+				},
+			}
+			err := wf.ValidateLoops()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected valid config to pass, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !containsString(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestValidateLoopsHumanStep(t *testing.T) {
 	wf := &WorkflowConfig{
 		Name: "test",

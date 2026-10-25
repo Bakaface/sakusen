@@ -723,12 +723,12 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 
 	// Evaluate loop condition
 	if step.Loop != nil {
-		shouldLoop := true
-
-		// Check max iterations
-		if t.LoopIteration >= step.Loop.MaxIterations {
-			shouldLoop = false
-		}
+		// At the cap the loop ends, unless on_max_iterations: fail — then the
+		// exit conditions still run on this pass and the task fails if none
+		// matches.
+		atCap := t.LoopIteration >= step.Loop.MaxIterations
+		failAtCap := atCap && step.Loop.OnMaxIterations == config.LoopOnMaxIterationsFail
+		shouldLoop := !atCap || failAtCap
 
 		// Check exit conditions. Several forms may be configured; the loop
 		// exits as soon as one matches.
@@ -755,6 +755,15 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 				}
 				shouldLoop = !exit
 			}
+		}
+
+		if failAtCap && shouldLoop {
+			errMsg := fmt.Sprintf("loop on step %q reached max_iterations (%d) without meeting its exit condition", step.Name, step.Loop.MaxIterations)
+			log.Printf("Task #%d %s", t.ID, errMsg)
+			e.appendTaskLog(t.ID, "=== Loop %q reached max_iterations (%d) without meeting its exit condition ===",
+				step.Name, step.Loop.MaxIterations)
+			e.recordExitCode(t.ID, 1, errMsg)
+			return stepOutcome{}, errors.New(errMsg)
 		}
 
 		if shouldLoop {

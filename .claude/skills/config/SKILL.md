@@ -352,9 +352,10 @@ A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor s
 
 ```go
 type LoopConfig struct {
-    Goto          string             // Target step name to jump back to
-    MaxIterations int                // Required, must be >= 1
-    ExitCondition *LoopExitCondition // Optional early exit condition
+    Goto            string             // Target step name to jump back to
+    MaxIterations   int                // Required, must be >= 1
+    OnMaxIterations string             // "" / "continue" (fall through at the cap) or "fail"
+    ExitCondition   *LoopExitCondition // Optional early exit condition
 }
 
 type LoopExitCondition struct {
@@ -369,9 +370,11 @@ type LoopExitCondition struct {
 
 Any combination of forms may be set; the loop exits as soon as one matches. The engine evaluates `Command` last, and only while the loop would still continue (`internal/workflow/loopexit.go`).
 
+`OnMaxIterations` (constants `LoopOnMaxIterationsContinue` / `LoopOnMaxIterationsFail`): with `continue` (the default) the loop ends at `MaxIterations` without evaluating the exit conditions. With `fail` the exit conditions are still evaluated on that pass; a match exits normally, otherwise the task fails with `loop on step "<step>" reached max_iterations (N) without meeting its exit condition`. Recommend `fail` for autonomous loops in auto-merging workflows.
+
 **Prefer an affirmative form (`StepContextContains` or `Command`).** `StepContextEmpty` exits on an *absence*, so it cannot tell "the step decided the work is done" from "the step crashed, timed out, or forgot to publish" — each of those silently ends the loop and ships whatever is on the branch. A marker requires the step to make a positive statement; a step that fails to run leaves it absent and the loop keeps going, bounded by `max_iterations`.
 
-Validation: `StepContextContains` requires a non-blank `Marker`, `Marker` requires `StepContextContains`, `StepContextEmpty`/`StepContextContains`/`StdinFrom` must name real steps, `Command` must not be blank, `StdinFrom` and `Timeout` require `Command`, `Timeout` must parse and be > 0, and an `exit_condition` block setting none of the three forms is a load-time error.
+Validation: `StepContextContains` requires a non-blank `Marker`, `Marker` requires `StepContextContains`, `StepContextEmpty`/`StepContextContains`/`StdinFrom` must name real steps, `Command` must not be blank, `StdinFrom` and `Timeout` require `Command`, `Timeout` must parse and be > 0, an `exit_condition` block setting none of the three forms is a load-time error, `OnMaxIterations` must be empty, `continue` or `fail`, and `fail` requires an `ExitCondition`.
 
 ## Worktree Sync Paths
 

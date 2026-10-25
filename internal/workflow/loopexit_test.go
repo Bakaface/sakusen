@@ -155,3 +155,112 @@ func TestLoopExitCommand(t *testing.T) {
 		}
 	})
 }
+
+func loopCapWorkflow(onMax string, ec *config.LoopExitCondition) config.WorkflowConfig {
+	return config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{
+			{Name: "plan", Prompt: "plan the next unit"},
+			{
+				Name:   "implement",
+				Prompt: "implement: {{steps.plan.context}}",
+				Loop: &config.LoopConfig{
+					Goto:            "plan",
+					MaxIterations:   2,
+					OnMaxIterations: onMax,
+					ExitCondition:   ec,
+				},
+			},
+			{Name: "review", Prompt: "review"},
+		},
+	}
+}
+
+func TestLoopOnMaxIterations(t *testing.T) {
+	marker := &config.LoopExitCondition{StepContextContains: "plan", Marker: "LOOP-EXIT"}
+	const capReason = `loop on step "implement" reached max_iterations (2) without meeting its exit condition`
+
+	passCases := []struct {
+		name  string
+		onMax string
+		ec    *config.LoopExitCondition
+		plans []string
+	}{
+		{name: "default continues past the cap", onMax: "", ec: marker},
+		{name: "explicit continue continues past the cap", onMax: config.LoopOnMaxIterationsContinue, ec: marker},
+		{
+			name:  "fail with marker met on the last pass exits normally",
+			onMax: config.LoopOnMaxIterationsFail,
+			ec:    marker,
+			plans: []string{"not yet", "not yet", "LOOP-EXIT"},
+		},
+		{
+			name:  "fail with command exiting 0 on the last pass exits normally",
+			onMax: config.LoopOnMaxIterationsFail,
+			ec:    &config.LoopExitCondition{Command: `test "$SAKUSEN_LOOP_ITERATION" -ge 2`},
+		},
+	}
+	for _, tc := range passCases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, tk, runner, _ := newFakeRunnerTestEngine(t, loopCapWorkflow(tc.onMax, tc.ec))
+			for _, text := range tc.plans {
+				runner.script("plan", fakeAgentResult{resultText: text})
+			}
+			if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+				t.Fatalf("RunTask: %v", err)
+			}
+			if got := len(runner.callsFor("plan")); got != 3 {
+				t.Errorf("plan ran %d times, want 3", got)
+			}
+			if got := len(runner.callsFor("review")); got != 1 {
+				t.Errorf("review ran %d times, want 1", got)
+			}
+		})
+	}
+
+	failCases := []struct {
+		name    string
+		ec      *config.LoopExitCondition
+		wantErr string
+	}{
+		{name: "marker never met fails the task", ec: marker, wantErr: capReason},
+		{name: "command exiting 1 on the last pass fails the task", ec: &config.LoopExitCondition{Command: "exit 1"}, wantErr: capReason},
+		{
+			name:    "command exiting 2 on the last pass fails the task",
+			ec:      &config.LoopExitCondition{Command: `test "$SAKUSEN_LOOP_ITERATION" -ge 2 && exit 2; exit 1`},
+			wantErr: "exited 2",
+		},
+	}
+	for _, tc := range failCases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, tk, runner, database := newFakeRunnerTestEngine(t, loopCapWorkflow(config.LoopOnMaxIterationsFail, tc.ec))
+			err := engine.RunTask(context.Background(), tk, nil)
+			if err == nil {
+				t.Fatal("RunTask succeeded, want the task to fail at the iteration cap")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %q, want it to contain %q", err, tc.wantErr)
+			}
+			if got := len(runner.callsFor("plan")); got != 3 {
+				t.Errorf("plan ran %d times, want 3", got)
+			}
+			if got := len(runner.callsFor("review")); got != 0 {
+				t.Errorf("review ran %d times, want 0 (no fall-through)", got)
+			}
+			stored, err := database.GetTask(tk.ID)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			if !strings.Contains(stored.ErrorMessage, tc.wantErr) {
+				t.Errorf("failure reason = %q, want it to contain %q", stored.ErrorMessage, tc.wantErr)
+			}
+			logged, err := os.ReadFile(ProjectLogPath(engine.dataDir, tk.ID))
+			if err != nil {
+				t.Fatalf("read task log: %v", err)
+			}
+			if tc.wantErr == capReason && !strings.Contains(string(logged), `=== Loop "implement" reached max_iterations (2) without meeting its exit condition ===`) {
+				t.Errorf("task log is missing the cap failure:\n%s", logged)
+			}
+		})
+	}
+}

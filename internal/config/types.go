@@ -728,10 +728,21 @@ func checkRemovedMappingKey(node *yaml.Node, keyName, errMsg string) error {
 
 // LoopConfig defines a closed-loop jump back to an earlier step.
 type LoopConfig struct {
-	Goto          string             `yaml:"goto"`
-	MaxIterations int                `yaml:"max_iterations"`
-	ExitCondition *LoopExitCondition `yaml:"exit_condition,omitempty"`
+	Goto          string `yaml:"goto"`
+	MaxIterations int    `yaml:"max_iterations"`
+	// OnMaxIterations decides what happens when the loop reaches
+	// MaxIterations: LoopOnMaxIterationsContinue (default) falls through to
+	// the next step; LoopOnMaxIterationsFail still evaluates ExitCondition on
+	// that pass and fails the task when it is not met.
+	OnMaxIterations string             `yaml:"on_max_iterations,omitempty"`
+	ExitCondition   *LoopExitCondition `yaml:"exit_condition,omitempty"`
 }
+
+// Values of LoopConfig.OnMaxIterations.
+const (
+	LoopOnMaxIterationsContinue = "continue"
+	LoopOnMaxIterationsFail     = "fail"
+)
 
 // LoopExitCondition defines when a loop should exit early. Any combination of
 // the forms may be set; the loop exits as soon as one matches.
@@ -989,6 +1000,16 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 		// max_iterations is required and must be >= 1
 		if step.Loop.MaxIterations < 1 {
 			return fmt.Errorf("step %q: loop max_iterations must be >= 1", step.Name)
+		}
+
+		switch step.Loop.OnMaxIterations {
+		case "", LoopOnMaxIterationsContinue:
+		case LoopOnMaxIterationsFail:
+			if step.Loop.ExitCondition == nil {
+				return fmt.Errorf("step %q: loop on_max_iterations %q requires an exit_condition", step.Name, LoopOnMaxIterationsFail)
+			}
+		default:
+			return fmt.Errorf("step %q: loop on_max_iterations must be %q or %q (got %q)", step.Name, LoopOnMaxIterationsFail, LoopOnMaxIterationsContinue, step.Loop.OnMaxIterations)
 		}
 
 		// A step with loop cannot have human (the tmux-mode constraint is
