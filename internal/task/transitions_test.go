@@ -45,7 +45,7 @@ func allowedTransitions() map[[2]Status]bool {
 		add(p, terminal...)
 	}
 	add(StatusCompleted, StatusTmux)
-	add(StatusMergeFailed, StatusTmux)
+	add(StatusMergeFailed, StatusTmux, StatusFinalizing)
 	return want
 }
 
@@ -90,13 +90,15 @@ func TestCanTransitionRejections(t *testing.T) {
 	}
 }
 
-func TestTerminalStatusesOnlyLeaveForTmux(t *testing.T) {
+// Besides an interactive tmux session, the only way out of a terminal status
+// through an ordinary write is a merge-failed task retrying its merge.
+func TestTerminalStatusesOnlyLeaveForTmuxOrMergeRetry(t *testing.T) {
 	for _, from := range allStatuses {
 		if !from.IsTerminal() {
 			continue
 		}
 		for _, to := range allStatuses {
-			if to == from || to == StatusTmux {
+			if to == from || to == StatusTmux || (from == StatusMergeFailed && to == StatusFinalizing) {
 				continue
 			}
 			if CanTransition(from, to) {

@@ -1,4 +1,4 @@
-// Package action centralizes the 13 user-facing task verbs that Sakusen's
+// Package action centralizes the 14 user-facing task verbs that Sakusen's
 // three surfaces (Cobra CLI, TUI palette, TUI keybindings) share. Each verb
 // has a typed Args struct, a Validate() method, and a Run<Verb> entry point
 // that returns a uniform Result. The CLI and TUI become thin adapters that
@@ -23,10 +23,11 @@ type Ctx struct {
 
 // ClientAPI is the narrow daemon-facing interface actions depend on.
 // *client.Client satisfies it implicitly. Tests pass a hand-rolled fake.
-// The method set is the union of every daemon call the 13 verbs need.
+// The method set is the union of every daemon call the 14 verbs need.
 type ClientAPI interface {
 	StopTask(id int64) (*daemon.TaskInfo, error)
 	RetryTask(id int64, stepName string) (*daemon.TaskInfo, error)
+	RetryMerge(id int64) (*daemon.TaskInfo, error)
 	RevertTask(id int64) (*daemon.TaskInfo, error)
 	DeleteTask(id int64) error
 	ContinueTask(id int64, workflow, prompt string) (*daemon.TaskInfo, error)

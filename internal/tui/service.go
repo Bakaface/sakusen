@@ -6,7 +6,7 @@ import (
 )
 
 // TaskService is the complete daemon-facing surface the TUI depends on. It
-// embeds action.ClientAPI — the 13 user-facing verbs shared with the CLI and
+// embeds action.ClientAPI — the 14 user-facing verbs shared with the CLI and
 // the TUI command palette — and adds the TUI-only reads and
 // connection-lifecycle calls that never went through the action package:
 // task listing for the list view, log streaming, step-context reads, and

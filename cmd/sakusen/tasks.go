@@ -340,6 +340,23 @@ var retryCmd = &cobra.Command{
 	},
 }
 
+var retryMergeCmd = &cobra.Command{
+	Use:               "retry-merge <task_id>",
+	Short:             "Retry only the merge of a merge-failed task",
+	Long:              "Re-run finalization (verify, merge, summarize, cleanup) for a merge-failed task without re-running any workflow step. A repeat failure leaves the task merge-failed with the new error.",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTaskIDs(task.StatusMergeFailed),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		taskID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid task ID: %s", args[0])
+		}
+		return runAction(cmd, func(actx action.Ctx) (action.Result, error) {
+			return action.RunRetryMerge(actx, action.RetryMergeArgs{ID: taskID})
+		})
+	},
+}
+
 var revertCmd = &cobra.Command{
 	Use:               "revert <task_id>",
 	Short:             "Revert all commits made by a task",

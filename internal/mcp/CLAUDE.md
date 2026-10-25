@@ -6,15 +6,17 @@ irrecoverably destructive operations**.
 
 ## Critical Invariants
 
-- **No irrecoverable operations**: the 17-tool surface is `create_task`,
+- **No irrecoverable operations**: the 20-tool surface is `create_task`,
   `create_tasks_and_wait`, `wait_for_tasks`, `wait_for_task_status`, `get_task`,
-  `list_tasks`, `list_workflows`, `retry_task`, `advance_task`, `stop_task`, `continue_task`,
-  `update_task`, `update_step_context`, `create_track`, `get_track`, `update_track`,
-  `list_tracks`. Do not add `delete_task`, `revert_task`, or `cleanup` here without an
-  explicit design decision — every exposed mutation must be recoverable (re-editable DB
+  `list_tasks`, `list_workflows`, `list_routines`, `run_routine`, `retry_task`,
+  `retry_merge`, `advance_task`, `stop_task`, `continue_task`, `update_task`,
+  `update_step_context`, `create_track`, `get_track`, `update_track`, `list_tracks`. Do not
+  add `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision — every exposed mutation must be recoverable (re-editable DB
   state or a re-queued task; `retry_task` stops only the task's own agent and preserves worktree/branch).
-  `update_step_context` is admitted because the daemon enforces that it can only write to
-  the calling task's currently-active step (see `handleUpdateActiveStepContext`).
+  `retry_merge` is admitted because the daemon accepts it only for `merge-failed` tasks and
+  it runs the same finalization the task would have run anyway; a repeat failure keeps the
+  worktree and branch. `update_step_context` is admitted because the daemon enforces that it
+  can only write to the calling task's currently-active step (see `handleUpdateActiveStepContext`).
   `advance_task` is admitted because the daemon only accepts it for tasks in tmux state and
   a premature advance is recoverable via `retry_task`. `stop_task` is admitted on the same
   grounds as `retry_task`: it stops only the task's own agent and deletes nothing (the task
@@ -62,6 +64,7 @@ irrecoverably destructive operations**.
 | `tool_list_tasks.go` | `list_tasks` tool — project-scoped or global compact summaries, status/track filters, newest-first limit |
 | `tool_list_workflows.go` | `list_workflows` tool definition + handler |
 | `tool_retry_task.go` | `retry_task` tool — full or from-step retry |
+| `tool_retry_merge.go` | `retry_merge` tool — re-run only finalization of a merge-failed task |
 | `tool_advance_task.go` | `advance_task` tool — mark a tmux step done (next step or finalize) |
 | `tool_stop_task.go` | `stop_task` tool — stop the task's own agent, status unchanged |
 | `tool_continue_task.go` | `continue_task` tool — re-run a terminal task under a required workflow (always `terminal_only`) |

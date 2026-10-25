@@ -1053,6 +1053,7 @@ and self-advance.
 | `update_task_input` | Replace a task's input (re-validates `{{tasks.<id>.<field>}}` refs, auto-adds blockers). |
 | `update_task_dependencies` | Add/remove `blocked_by` edges. Removals apply before additions; cycles rejected. |
 | `retry_task` | Re-run a task from the start or from a named step, preserving earlier step contexts. |
+| `retry_merge` | Re-run only finalization (verify, merge, summarize, cleanup) of a `merge-failed` task; no agent step re-runs. |
 | `create_track` | Create a track. |
 | `update_track_context` | Append/replace the calling task's own track context. |
 | `update_track_description` | Set the calling task's own track description (replace-only). |

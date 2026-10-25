@@ -37,6 +37,7 @@ var (
 //	phase              → any active status (restore / next phase), any terminal
 //	completed          → tmux (interactive continue session)
 //	merge-failed       → tmux (interactive continue session)
+//	                     finalizing (retry merge)
 //	failed             → (none)
 //
 // where phase = finalizing | summarizing | summarizing_step | merge-blocked |
@@ -74,7 +75,7 @@ func buildTransitions() map[Status]map[Status]bool {
 	}
 
 	allow(StatusCompleted, StatusTmux)
-	allow(StatusMergeFailed, StatusTmux)
+	allow(StatusMergeFailed, StatusTmux, StatusFinalizing)
 	return t
 }
 

@@ -160,7 +160,8 @@ a base branch that moved (including after merge-conflict resolution), it runs ag
 tip, so the code that lands is the code that was verified. A non-zero exit or a timeout cancels
 the merge: the task becomes `merge-failed` with the worktree and branch kept, the output tail is
 written to the task log, and `error_message` names the failure with a shorter tail. Fix the cause
-and `retry_task` to re-run finalization. `on_complete: commit`/`none` never run it.
+and `retry_merge` (TUI `M`, CLI `sakusen retry-merge <id>`) to re-run only finalization, with no
+agent step re-run. `on_complete: commit`/`none` never run it.
 
 Both keys merge per key across tiers like the other `git:` keys (`~/.sakusen.yml`, then the
 project). An unparseable or negative `verify_timeout` is a hard load error.

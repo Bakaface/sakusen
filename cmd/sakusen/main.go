@@ -108,6 +108,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(retryCmd)
+	rootCmd.AddCommand(retryMergeCmd)
 	rootCmd.AddCommand(revertCmd)
 	rootCmd.AddCommand(continueCmd)
 	rootCmd.AddCommand(logsCmd)

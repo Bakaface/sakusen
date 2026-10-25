@@ -422,6 +422,20 @@ func (db *DB) UpdateTaskStatusError(id int64, status task.Status, errMsg string)
 	return db.guardedStatusWrite(id, status, "error_message = ?", errMsg)
 }
 
+// StartMergeRetry moves a merge-failed task back to finalizing and clears the
+// previous failure's error message, compare-and-set against merge-failed.
+func (db *DB) StartMergeRetry(id int64) error {
+	from, to := task.StatusMergeFailed, task.StatusFinalizing
+	if !task.CanTransition(from, to) {
+		return &task.TransitionError{TaskID: id, From: from, To: to}
+	}
+	ok, err := writeStatus(db.sqlDB, id, to, []task.Status{from}, "error_message = NULL")
+	if err != nil || ok {
+		return err
+	}
+	return db.rejectTransition(id, from, to)
+}
+
 func (db *DB) UpdateTaskPriority(id int64, priority task.Priority) error {
 	_, err := db.sqlDB.Exec(
 		"UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?",

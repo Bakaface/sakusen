@@ -17,6 +17,7 @@ func TestSingleIDArgs_Validate(t *testing.T) {
 		args action.Args
 	}{
 		{"retry", action.RetryArgs{ID: 0}},
+		{"retry-merge", action.RetryMergeArgs{ID: 0}},
 		{"revert", action.RevertArgs{ID: 0}},
 		{"delete", action.DeleteArgs{ID: 0}},
 		{"detach", action.DetachArgs{ID: 0}},
@@ -41,6 +42,24 @@ func TestRunRetry_Success(t *testing.T) {
 	}
 	if res.Task != want {
 		t.Fatal("Task not propagated")
+	}
+}
+
+func TestRunRetryMerge(t *testing.T) {
+	want := &daemon.TaskInfo{ID: 5, Status: "finalizing"}
+	var gotID int64
+	fc := &fakeClient{retryMerge: func(id int64) (*daemon.TaskInfo, error) { gotID = id; return want, nil }}
+	res, err := action.RunRetryMerge(action.Ctx{Client: fc}, action.RetryMergeArgs{ID: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotID != 5 || res.Task != want {
+		t.Fatalf("got id %d task %+v, want id 5 and the daemon's task", gotID, res.Task)
+	}
+
+	fc.retryMerge = func(int64) (*daemon.TaskInfo, error) { return nil, errors.New("task is not merge-failed") }
+	if _, err := action.RunRetryMerge(action.Ctx{Client: fc}, action.RetryMergeArgs{ID: 5}); err == nil || !strings.Contains(err.Error(), "not merge-failed") {
+		t.Fatalf("daemon rejection should surface, got %v", err)
 	}
 }
 
@@ -182,7 +201,7 @@ func TestRunLogs_EmptyMessage(t *testing.T) {
 
 func TestRegistry_HasAllVerbs(t *testing.T) {
 	want := []string{
-		"stop", "retry", "revert", "delete", "continue", "detach", "attach-branch",
+		"stop", "retry", "retry-merge", "revert", "delete", "continue", "detach", "attach-branch",
 		"depends-on", "edit", "create", "cleanup", "logs", "validate",
 	}
 	for _, v := range want {

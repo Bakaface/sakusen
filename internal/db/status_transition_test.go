@@ -171,3 +171,37 @@ func TestTransitionTaskStatusRaceHasOneWinner(t *testing.T) {
 		}
 	}
 }
+
+func TestStartMergeRetry(t *testing.T) {
+	database := openTestDB(t)
+	proj := mustProject(t, database, t.TempDir())
+
+	tk := mustCreateTask(t, database, proj, "t", task.StatusFinalizing)
+	if err := database.UpdateTaskStatusError(tk.ID, task.StatusMergeFailed, "verify failed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.StartMergeRetry(tk.ID); err != nil {
+		t.Fatalf("StartMergeRetry: %v", err)
+	}
+	got, err := database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.StatusFinalizing || got.ErrorMessage != "" {
+		t.Errorf("status=%s error=%q, want finalizing with the old error cleared", got.Status, got.ErrorMessage)
+	}
+
+	for _, from := range []task.Status{task.StatusCompleted, task.StatusFailed, task.StatusRunning} {
+		other := mustCreateTask(t, database, proj, "t", from)
+		err := database.StartMergeRetry(other.ID)
+		var terr *task.TransitionError
+		if !errors.As(err, &terr) || terr.From != from {
+			t.Errorf("StartMergeRetry from %s: want *task.TransitionError from %s, got %v", from, from, err)
+		}
+		if got, err := database.GetTask(other.ID); err != nil {
+			t.Fatal(err)
+		} else if got.Status != from {
+			t.Errorf("rejected retry changed status %s to %s", from, got.Status)
+		}
+	}
+}

@@ -643,6 +643,14 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 		}
 		s.handleRetryTask(conn, req)
 
+	case MsgRetryMerge:
+		var req RetryMergeRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleRetryMerge(conn, req)
+
 	case MsgGetLogs:
 		var req GetLogsRequest
 		if err := msg.DecodePayload(&req); err != nil {

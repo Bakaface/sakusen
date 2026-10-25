@@ -533,6 +533,20 @@ func (c *Client) RetryTask(id int64, stepName string) (*daemon.TaskInfo, error) 
 	return &resp.Task, nil
 }
 
+// RetryMerge re-runs only finalization (verify, merge, summarize, cleanup)
+// for a merge-failed task. The daemon rejects any other status.
+func (c *Client) RetryMerge(id int64) (*daemon.TaskInfo, error) {
+	msg, err := c.request(daemon.MsgRetryMerge, daemon.RetryMergeRequest{TaskID: id})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.RetryMergeResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp.Task, nil
+}
+
 func (c *Client) CreateTask(input, workflow, branchName, projectPath string, worktree bool, images []string) (*daemon.TaskInfo, error) {
 	msg, err := c.request(daemon.MsgCreateTask, daemon.CreateTaskRequest{
 		Input:       input,

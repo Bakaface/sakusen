@@ -178,7 +178,7 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 	}
 	for _, want := range []string{
 		"create_task", "create_tasks_and_wait", "wait_for_tasks", "list_workflows",
-		"get_task", "list_tasks", "retry_task", "advance_task", "stop_task",
+		"get_task", "list_tasks", "retry_task", "retry_merge", "advance_task", "stop_task",
 		"continue_task", "update_task", "update_step_context",
 		"create_track", "get_track", "update_track", "list_tracks",
 		"wait_for_task_status",
@@ -197,8 +197,8 @@ func TestMCP_ListsToolsAdvertisedToClients(t *testing.T) {
 			t.Errorf("removed tool %q is still advertised", gone)
 		}
 	}
-	if len(resp.Tools) != 19 {
-		t.Errorf("tool count: got %d, want 19 — %v", len(resp.Tools), got)
+	if len(resp.Tools) != 20 {
+		t.Errorf("tool count: got %d, want 20 — %v", len(resp.Tools), got)
 	}
 }
 
@@ -935,6 +935,71 @@ func TestMCP_RetryTask_RejectsInvalidID(t *testing.T) {
 	res, err := c.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "retry_task",
+			Arguments: map[string]any{"task_id": 0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected error for task_id=0")
+	}
+	if len(fake.requestTypes()) != 0 {
+		t.Errorf("daemon should not be contacted for invalid id; got %v", fake.requestTypes())
+	}
+}
+
+func TestMCP_RetryMerge_ForwardsTaskID(t *testing.T) {
+	fake := newFakeDaemon(t)
+
+	var captured daemon.RetryMergeRequest
+	fake.handle(daemon.MsgRetryMerge, func(msg *daemon.Message) *daemon.Message {
+		_ = msg.DecodePayload(&captured)
+		resp, _ := daemon.NewMessage(daemon.MsgRetryMerge, daemon.RetryMergeResponse{
+			Task: daemon.TaskInfo{ID: 42, Title: "demo", Status: "finalizing"},
+		})
+		return resp
+	})
+
+	c := startMCPServer(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "retry_merge",
+			Arguments: map[string]any{"task_id": 42},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool returned error: %v", textOf(res))
+	}
+	if captured.TaskID != 42 {
+		t.Errorf("TaskID: %d, want 42", captured.TaskID)
+	}
+
+	var out daemon.TaskInfo
+	if err := json.Unmarshal([]byte(textOf(res)), &out); err != nil {
+		t.Fatalf("unmarshal task: %v", err)
+	}
+	if out.ID != 42 || out.Status != "finalizing" {
+		t.Errorf("returned task: %+v", out)
+	}
+}
+
+func TestMCP_RetryMerge_RejectsInvalidID(t *testing.T) {
+	fake := newFakeDaemon(t)
+	c := startMCPServer(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "retry_merge",
 			Arguments: map[string]any{"task_id": 0},
 		},
 	})

@@ -144,6 +144,17 @@ func (m Model) retryTask(taskID int64, stepName string) tea.Cmd {
 	})
 }
 
+// confirmRetryMerge is the confirmAction value for retrying a merge-failed
+// task's merge; it doubles as the "Retry merge task #N?" prompt text.
+const confirmRetryMerge = "retry merge"
+
+// retryMerge re-runs only finalization for a merge-failed task.
+func (m Model) retryMerge(taskID int64) tea.Cmd {
+	return m.runTaskAction(func(ctx action.Ctx) (action.Result, error) {
+		return action.RunRetryMerge(ctx, action.RetryMergeArgs{ID: taskID})
+	})
+}
+
 func (m Model) revertTask(taskID int64) tea.Cmd {
 	return m.runTaskAction(func(ctx action.Ctx) (action.Result, error) {
 		return action.RunRevert(ctx, action.RevertArgs{ID: taskID})

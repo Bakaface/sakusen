@@ -53,7 +53,7 @@ type Model struct {
 	blockingTaskID int64 // when non-zero, the newly created task will block this task
 
 	// Confirmation state
-	confirmAction string // "continue", "advance", "finalize", "delete", "revert", or "stop"; empty if no confirmation pending
+	confirmAction string // "continue", "advance", "finalize", "delete", "revert", "stop" or confirmRetryMerge; empty if no confirmation pending
 	confirmTaskID int64
 
 	// Chord sequence state — first key of a pending two-key chord (e.g. "d" for dd, "o" for oa).

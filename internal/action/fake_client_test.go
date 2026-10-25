@@ -12,6 +12,7 @@ import (
 type fakeClient struct {
 	stopTask       func(int64) (*daemon.TaskInfo, error)
 	retryTask      func(int64, string) (*daemon.TaskInfo, error)
+	retryMerge     func(int64) (*daemon.TaskInfo, error)
 	revertTask     func(int64) (*daemon.TaskInfo, error)
 	deleteTask     func(int64) error
 	continueTask   func(int64, string, string) (*daemon.TaskInfo, error)
@@ -40,6 +41,13 @@ func (f *fakeClient) RetryTask(id int64, stepName string) (*daemon.TaskInfo, err
 		return nil, errNotStubbed
 	}
 	return f.retryTask(id, stepName)
+}
+
+func (f *fakeClient) RetryMerge(id int64) (*daemon.TaskInfo, error) {
+	if f.retryMerge == nil {
+		return nil, errNotStubbed
+	}
+	return f.retryMerge(id)
 }
 
 func (f *fakeClient) RevertTask(id int64) (*daemon.TaskInfo, error) {

@@ -16,6 +16,7 @@ import (
 type fakeTaskService struct {
 	stopTask       func(int64) (*daemon.TaskInfo, error)
 	retryTask      func(int64, string) (*daemon.TaskInfo, error)
+	retryMerge     func(int64) (*daemon.TaskInfo, error)
 	revertTask     func(int64) (*daemon.TaskInfo, error)
 	deleteTask     func(int64) error
 	continueTask   func(int64, string, string) (*daemon.TaskInfo, error)
@@ -59,6 +60,13 @@ func (f *fakeTaskService) RetryTask(id int64, stepName string) (*daemon.TaskInfo
 		return nil, errNotStubbedTUI
 	}
 	return f.retryTask(id, stepName)
+}
+
+func (f *fakeTaskService) RetryMerge(id int64) (*daemon.TaskInfo, error) {
+	if f.retryMerge == nil {
+		return nil, errNotStubbedTUI
+	}
+	return f.retryMerge(id)
 }
 
 func (f *fakeTaskService) RevertTask(id int64) (*daemon.TaskInfo, error) {

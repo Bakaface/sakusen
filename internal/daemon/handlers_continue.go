@@ -460,6 +460,56 @@ func (s *Server) runFinalization(t *task.Task, pc *projectContext) {
 	log.Printf("%sTask #%d finalized from tmux continue session", s.projectLogPrefix(t.ProjectID), t.ID)
 }
 
+// handleRetryMerge re-runs finalization (verify, merge, summarize, cleanup)
+// for a merge-failed task without re-running any workflow step. A repeat
+// failure lands the task back in merge-failed with the new error.
+func (s *Server) handleRetryMerge(conn net.Conn, req RetryMergeRequest) {
+	t, pc, err := s.startMergeRetry(req.TaskID)
+	if err != nil {
+		log.Printf("Retry merge failed for task #%d: %v", req.TaskID, err)
+		s.sendError(conn, err.Error())
+		return
+	}
+	s.broadcastTaskUpdate(t.ID)
+	go s.runFinalization(t, pc)
+
+	refreshed, err := s.database.GetTask(t.ID)
+	if err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to load task after retry merge: %v", err))
+		return
+	}
+	_ = s.sendMessage(conn, MsgRetryMerge, RetryMergeResponse{Task: s.taskToInfo(refreshed)})
+}
+
+// startMergeRetry moves a merge-failed task to finalizing under its flow lock
+// and returns the task and project context finalization should run with.
+func (s *Server) startMergeRetry(taskID int64) (*task.Task, *projectContext, error) {
+	mu := s.taskFlowLock(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	t, err := s.database.GetTask(taskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get task: %v", err)
+	}
+	if t.Status != task.StatusMergeFailed {
+		return nil, nil, fmt.Errorf("task is not merge-failed (status: %s); only merge-failed tasks can retry their merge", t.Status)
+	}
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get project context: %v", err)
+	}
+	if err := s.database.StartMergeRetry(t.ID); err != nil {
+		return nil, nil, fmt.Errorf("failed to set finalizing status: %v", err)
+	}
+	// The merge coordinator restores t.Status after transient phases
+	// (merge-blocked, resolving-conflicts), so it must not be stale.
+	t.Status = task.StatusFinalizing
+	t.ErrorMessage = ""
+	log.Printf("%sTask #%d retrying merge", s.projectLogPrefix(t.ProjectID), t.ID)
+	return t, pc, nil
+}
+
 // ensureWorktree ensures a task's worktree exists, creating it if needed —
 // e.g. because it was cleaned up (cleanupWorktreeAndBranch) since it was last
 // recorded and the task is now being resumed. The create/checkout + branch

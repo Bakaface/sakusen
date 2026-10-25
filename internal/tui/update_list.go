@@ -155,6 +155,16 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case key.Matches(msg, m.keys.RetryMerge):
+		if task := m.list.Selected(); task != nil && m.client != nil {
+			if taskpkg.Status(task.Status) == taskpkg.StatusMergeFailed {
+				m.confirmAction = confirmRetryMerge
+				m.confirmTaskID = task.ID
+				return m, nil
+			}
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.Routines):
 		if m.client != nil && m.projectPath != "" {
 			m.view = viewRoutineList
@@ -689,6 +699,8 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.revertTask(taskID)
 		case "stop":
 			return m, m.stopTask(taskID)
+		case confirmRetryMerge:
+			return m, m.retryMerge(taskID)
 		default:
 			return m, nil
 		}

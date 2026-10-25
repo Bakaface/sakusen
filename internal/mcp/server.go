@@ -81,6 +81,11 @@ func Serve(cfg *config.Config) error {
 // so recovery is retry_task — or a daemon restart, whose orphan recovery
 // resets a stranded running task to pending.
 //
+// retry_merge re-runs only finalization for a merge-failed task. The daemon
+// accepts nothing but merge-failed, no step state changes, and a repeat
+// failure keeps the worktree and branch — the same merge the task would have
+// made had finalization succeeded the first time.
+//
 // continue_task re-runs a TERMINAL task under a named workflow. It always
 // sets terminal_only on the daemon request, which makes the daemon reject any
 // non-terminal task before its awaiting-approval/tmux routing — that same
@@ -129,6 +134,7 @@ func registerTools(s *server.MCPServer, c *client.Client, cfg *config.Config) {
 	registerGetTask(s, c)
 	registerListTasks(s, c)
 	registerRetryTask(s, c)
+	registerRetryMerge(s, c)
 	registerAdvanceTask(s, c)
 	registerStopTask(s, c)
 	registerContinueTask(s, c)

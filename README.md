@@ -351,6 +351,7 @@ Common keys (full help with `ctrl+h`):
 | `c` | Continue an awaiting-approval / completed / failed task |
 | `s` | Stop the running step |
 | `r` / `R` | Retry / revert |
+| `M` | Retry only the merge of a `merge-failed` task (verify → merge → summarize → cleanup, no agent step re-runs) |
 | `t` | Attach to the task's tmux session |
 | `b` / `alt+b` | Branch a new task off this one / toggle branch tree view |
 | `D` / `A` | Detach branch from worktree / reattach |
@@ -471,6 +472,7 @@ sakusen delete <id> [-y]
 sakusen start <id>             # manually kick off a pending task
 sakusen stop <id>              # stop a running task
 sakusen retry <id> [--from-step name]  # restart workflow (default) or jump to a specific step
+sakusen retry-merge <id>       # re-run only finalization (verify, merge, summarize, cleanup) of a merge-failed task
 sakusen revert <id>            # revert all commits made by a completed task
 sakusen continue <id>          # resume an awaiting-approval / completed / failed task
 sakusen logs <id> [step] [-n N]

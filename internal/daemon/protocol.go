@@ -19,6 +19,7 @@ const (
 	MsgGetOutput               MessageType = "get_output"
 	MsgGetTask                 MessageType = "get_task"
 	MsgRetryTask               MessageType = "retry_task"
+	MsgRetryMerge              MessageType = "retry_merge"
 	MsgGetLogs                 MessageType = "get_logs"
 	MsgCreateTask              MessageType = "create_task"
 	MsgContinueTask            MessageType = "continue_task"
@@ -142,6 +143,12 @@ type RetryTaskRequest struct {
 	// available for later steps' templates). When empty, the task is restarted
 	// from the beginning (step_index 0, all step records wiped).
 	StepName string `json:"step_name,omitempty"`
+}
+
+// RetryMergeRequest re-runs only finalization (verify, merge, summarize,
+// cleanup) for a merge-failed task; no workflow step runs again.
+type RetryMergeRequest struct {
+	TaskID int64 `json:"task_id"`
 }
 
 type GetLogsRequest struct {
@@ -377,11 +384,16 @@ type StopTaskResponse struct {
 	Task TaskInfo `json:"task"`
 }
 
-// RetryTaskResponse, RevertTaskResponse, ContinueTaskResponse,
-// UpdatePriorityResponse, UpdateFieldResponse, AttachBranchResponse,
-// DetachBranchResponse, UpdateDependencyResponse all return the post-mutation
-// task so the TUI can update its list row in place without re-fetching.
+// RetryTaskResponse, RetryMergeResponse, RevertTaskResponse,
+// ContinueTaskResponse, UpdatePriorityResponse, UpdateFieldResponse,
+// AttachBranchResponse, DetachBranchResponse, UpdateDependencyResponse all
+// return the post-mutation task so the TUI can update its list row in place
+// without re-fetching.
 type RetryTaskResponse struct {
+	Task TaskInfo `json:"task"`
+}
+
+type RetryMergeResponse struct {
 	Task TaskInfo `json:"task"`
 }
 
