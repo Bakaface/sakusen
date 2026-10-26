@@ -10,10 +10,10 @@ import (
 // resolveProjectPath returns an absolute root for the project the caller is
 // targeting. If explicit is non-empty it's normalized to an absolute,
 // symlink-resolved path (the daemon does its own GetOrCreateProject from
-// there). Otherwise the caller's cwd is walked up to the nearest ancestor holding a .sakusen.yml — bounded by
-// the git toplevel, which is the fallback when no marker is found — the same
-// resolution the TUI and the CLI use, ensuring tasks land on the same project
-// row.
+// there). Otherwise the caller's cwd is walked up to the nearest ancestor
+// holding a .sakusen.yml — bounded by the git toplevel, which is the fallback
+// when no marker is found — the same resolution the TUI and the CLI use,
+// ensuring tasks land on the same project row.
 func resolveProjectPath(explicit string) (string, error) {
 	if explicit != "" {
 		abs, err := config.CanonicalPath(explicit)
