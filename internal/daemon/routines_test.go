@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net"
 	"os"
@@ -569,5 +570,47 @@ routines:
 
 	if got := runsFor(t, database, d, 1)[0]; got.Workdir != "apps/api" {
 		t.Errorf("workdir = %q, want the routine's pin", got.Workdir)
+	}
+}
+
+// One .sakusen.yml reached through two project rows (the real path and a
+// symlink to it) must still fire its routine once: each row otherwise gets its
+// own periodic_definitions row and fires its own task.
+func TestRoutine_SymlinkedProjectAliasFiresOnce(t *testing.T) {
+	s, database, proj := newSchedulerTestServer(t)
+
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(proj.Path, alias); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	raw, err := sql.Open("sqlite", database.Path())
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`INSERT INTO projects (path, name) VALUES (?, ?)`, alias, "alias"); err != nil {
+		t.Fatalf("insert alias project: %v", err)
+	}
+
+	s.reconcileAllPeriodics()
+	if _, err := raw.Exec(`UPDATE periodic_definitions SET next_fire_at = ? WHERE name = 'nightly' AND deleted_at IS NULL`, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("make nightly due: %v", err)
+	}
+	s.fireDuePeriodics()
+	time.Sleep(200 * time.Millisecond)
+
+	var tasks int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM tasks WHERE periodic_id IS NOT NULL`).Scan(&tasks); err != nil {
+		t.Fatal(err)
+	}
+	if tasks != 1 {
+		t.Errorf("expected 1 task, got %d", tasks)
+	}
+	var defs int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM periodic_definitions WHERE name = 'nightly' AND deleted_at IS NULL`).Scan(&defs); err != nil {
+		t.Fatal(err)
+	}
+	if defs != 1 {
+		t.Errorf("expected 1 nightly routine row, got %d", defs)
 	}
 }

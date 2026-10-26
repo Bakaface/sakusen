@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,5 +168,60 @@ periodic:
 	}
 	if !strings.Contains(out, "routines:") {
 		t.Fatalf("expected the migration error naming routines:, got:\n%s", out)
+	}
+}
+
+// TestRoutineSymlinkAliasSpawnsOneAgent registers the same project twice — its
+// real path and a symlink to it — and checks that a due routine still spawns a
+// single task and a single agent process.
+func TestRoutineSymlinkAliasSpawnsOneAgent(t *testing.T) {
+	e := setupE2E(t, "routines")
+	e.WriteSakusenYAML(fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
+poll_interval: 100ms
+git:
+  base_branch: main
+workflows:
+  - name: refresh
+    steps:
+      - name: refreshing
+        prompt: "Refresh"
+routines:
+  - name: relocation-us
+    cadence: "0 9 * * 1"
+    workflow: refresh
+    worktree: false
+`, e.StubPath))
+	e.MustSakusen("routines", "list")
+
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(e.ProjectDir, alias); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if _, err := e.DB().Exec(`INSERT INTO projects (path, name) VALUES (?, ?)`, alias, "alias"); err != nil {
+		t.Fatalf("insert alias project: %v", err)
+	}
+	e.RestartDaemon()
+
+	if _, err := e.DB().Exec(`UPDATE periodic_definitions SET next_fire_at = ? WHERE name = 'relocation-us' AND deleted_at IS NULL`, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("make routine due: %v", err)
+	}
+	e.RestartDaemon()
+
+	const routineTasks = `SELECT COUNT(*) FROM tasks WHERE periodic_id IN (SELECT id FROM periodic_definitions WHERE name = 'relocation-us')`
+	e.Eventually(20*time.Second, "routine task reaches a terminal status", func() bool {
+		return e.DBQueryInt(routineTasks+` AND status IN ('completed', 'failed')`) > 0
+	})
+	// Give a second fire time to show up.
+	time.Sleep(2 * time.Second)
+
+	if got := len(stubStepCallsFor(e, "refreshing")); got != 1 {
+		t.Errorf("expected 1 refreshing agent spawn, got %d", got)
+	}
+	if got := e.DBQueryInt(routineTasks); got != 1 {
+		t.Errorf("expected 1 routine task, got %d", got)
 	}
 }
