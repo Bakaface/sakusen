@@ -53,7 +53,10 @@ func TestResolveProjectMode_SubdirectoryMarkerOwnsProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	wantPath := filepath.Dir(cwd)
+	wantPath, err := filepath.EvalSymlinks(filepath.Dir(cwd))
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
 
 	projectID, projectPath, projectName, globalMode, _, _, _ := resolveProjectMode(false)
 	if globalMode {
@@ -138,4 +141,34 @@ func gitToplevel(dir string) (string, error) {
 		return "", err
 	}
 	return string(out[:len(out)-1]), nil
+}
+
+func TestResolveProjectMode_SymlinkedCwdMatchesRealDir(t *testing.T) {
+	repo := setupTUIRepo(t)
+	sub := tuiMkdir(t, filepath.Join(repo, "sub"))
+	if err := os.WriteFile(filepath.Join(sub, ".sakusen.yml"), []byte("workflows: []\n"), 0644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	t.Chdir(sub)
+	realID, realPath, realName, _, _, _, _ := resolveProjectMode(false)
+	t.Chdir(link)
+	linkID, linkPath, linkName, globalMode, _, _, _ := resolveProjectMode(false)
+
+	if globalMode {
+		t.Fatal("globalMode = true, want false")
+	}
+	if linkID != realID {
+		t.Errorf("projectID = %d via symlink, %d via real dir", linkID, realID)
+	}
+	if linkPath != realPath {
+		t.Errorf("projectPath = %q via symlink, %q via real dir", linkPath, realPath)
+	}
+	if linkName != realName {
+		t.Errorf("projectName = %q via symlink, %q via real dir", linkName, realName)
+	}
 }

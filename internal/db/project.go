@@ -3,7 +3,6 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -23,14 +22,14 @@ type Project struct {
 
 // GetOrCreateProject returns the project for the given path, creating it if needed.
 func (db *DB) GetOrCreateProject(projectPath string) (*Project, error) {
-	// Normalize path
-	absPath, err := filepath.Abs(projectPath)
+	// Normalize to the symlink-resolved path so aliases of one directory
+	// share a row.
+	canon, err := config.CanonicalPath(projectPath)
 	if err != nil {
-		absPath = projectPath
+		canon = projectPath
 	}
 
-	// Try to find existing
-	p, err := db.GetProjectByPath(absPath)
+	p, err := db.GetProjectByPath(canon)
 	if err == nil {
 		return p, nil
 	}
@@ -38,17 +37,29 @@ func (db *DB) GetOrCreateProject(projectPath string) (*Project, error) {
 		return nil, fmt.Errorf("failed to query project: %w", err)
 	}
 
+	// A row stored before paths were canonicalized may hold an alias of canon;
+	// the lowest id wins.
+	projects, err := db.ListProjects()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list projects: %w", err)
+	}
+	for _, row := range projects {
+		if rowCanon, err := config.CanonicalPath(row.Path); err == nil && rowCanon == canon {
+			return row, nil
+		}
+	}
+
 	// Create new project — derive canonical name from path. Must match the
 	// name TUI/clients use to look up tasks, otherwise filtering will silently
 	// return nothing (see ProjectNameFromPath docstring).
-	name := config.ProjectNameFromPath(absPath)
+	name := config.ProjectNameFromPath(canon)
 	result, err := db.sqlDB.Exec(
 		`INSERT INTO projects (path, name) VALUES (?, ?)`,
-		absPath, name,
+		canon, name,
 	)
 	if err != nil {
 		// Race condition: another goroutine may have created it
-		p, err2 := db.GetProjectByPath(absPath)
+		p, err2 := db.GetProjectByPath(canon)
 		if err2 == nil {
 			return p, nil
 		}
@@ -62,7 +73,7 @@ func (db *DB) GetOrCreateProject(projectPath string) (*Project, error) {
 
 	return &Project{
 		ID:              id,
-		Path:            absPath,
+		Path:            canon,
 		Name:            name,
 		DefaultPriority: task.PriorityMedium,
 		DefaultWorktree: true,

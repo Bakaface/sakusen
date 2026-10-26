@@ -21,6 +21,22 @@ const (
 	ProjectRootGitToplevel
 )
 
+// CanonicalPath returns p as an absolute, symlink-resolved path, falling back
+// to the absolute path when it cannot be resolved (e.g. it does not exist).
+// os.Getwd returns $PWD, so without this a symlinked cwd would register a
+// second project row for the same directory. The only error is a failure to
+// make p absolute.
+func CanonicalPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	return abs, nil
+}
+
 // FindProjectRoot resolves the project root for start (normally os.Getwd()):
 // the nearest ancestor of start containing a .sakusen.yml, with the walk
 // bounded by the git toplevel (which is itself checked), falling back to the
@@ -32,9 +48,10 @@ const (
 // same reason.
 //
 // Git errors are not surfaced — "not a git repository" is a normal outcome.
-// The only error returned is a failure to make start absolute.
+// The only error returned is a failure to make start absolute. The returned
+// root is symlink-resolved (see CanonicalPath).
 func FindProjectRoot(start string) (root string, kind ProjectRootKind, err error) {
-	abs, err := filepath.Abs(start)
+	abs, err := CanonicalPath(start)
 	if err != nil {
 		return "", ProjectRootNone, err
 	}

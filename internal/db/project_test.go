@@ -608,3 +608,123 @@ func TestProjectDefaults_UpdateAll(t *testing.T) {
 		t.Errorf("expected empty default_workflow, got %q", proj3.DefaultWorkflow)
 	}
 }
+
+// symlinkedDir returns a real directory, a symlink to it, and the real
+// directory's symlink-resolved path.
+func symlinkedDir(t *testing.T) (real, link, canon string) {
+	t.Helper()
+	real = filepath.Join(t.TempDir(), "real")
+	if err := os.Mkdir(real, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	link = filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	canon, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+	return real, link, canon
+}
+
+func openProjectTestDB(t *testing.T) *DB {
+	t.Helper()
+	database, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	return database
+}
+
+func insertRawProject(t *testing.T, database *DB, path string) int64 {
+	t.Helper()
+	res, err := database.sqlDB.Exec(`INSERT INTO projects (path, name) VALUES (?, ?)`, path, config.ProjectNameFromPath(path))
+	if err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("last insert id: %v", err)
+	}
+	return id
+}
+
+func TestGetOrCreateProject_SymlinkAliasSharesRow(t *testing.T) {
+	database := openProjectTestDB(t)
+	real, link, canon := symlinkedDir(t)
+
+	viaReal, err := database.GetOrCreateProject(real)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject(real): %v", err)
+	}
+	viaLink, err := database.GetOrCreateProject(link)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject(link): %v", err)
+	}
+	if viaLink.ID != viaReal.ID {
+		t.Errorf("symlink got project %d, real got %d", viaLink.ID, viaReal.ID)
+	}
+	if viaReal.Path != canon {
+		t.Errorf("Path = %q, want %q", viaReal.Path, canon)
+	}
+}
+
+func TestGetOrCreateProject_MatchesLegacyAliasRow(t *testing.T) {
+	database := openProjectTestDB(t)
+	_, link, canon := symlinkedDir(t)
+	legacyID := insertRawProject(t, database, link)
+
+	proj, err := database.GetOrCreateProject(canon)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject: %v", err)
+	}
+	if proj.ID != legacyID {
+		t.Errorf("ID = %d, want legacy row %d", proj.ID, legacyID)
+	}
+	projects, err := database.ListProjects()
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Errorf("got %d project rows, want 1", len(projects))
+	}
+}
+
+func TestGetOrCreateProject_LegacyAliasesLowestIDWins(t *testing.T) {
+	database := openProjectTestDB(t)
+	real, link, canon := symlinkedDir(t)
+	link2 := filepath.Join(t.TempDir(), "link2")
+	if err := os.Symlink(real, link2); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	firstID := insertRawProject(t, database, link)
+	insertRawProject(t, database, link2)
+
+	proj, err := database.GetOrCreateProject(canon)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject: %v", err)
+	}
+	if proj.ID != firstID {
+		t.Errorf("ID = %d, want lowest id %d", proj.ID, firstID)
+	}
+}
+
+func TestGetOrCreateProject_MissingPathStoresAbs(t *testing.T) {
+	database := openProjectTestDB(t)
+	t.Chdir(t.TempDir())
+	rel := filepath.Join("no", "such", "project")
+	want, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+
+	proj, err := database.GetOrCreateProject(rel)
+	if err != nil {
+		t.Fatalf("GetOrCreateProject: %v", err)
+	}
+	if proj.Path != want {
+		t.Errorf("Path = %q, want %q", proj.Path, want)
+	}
+}

@@ -59,7 +59,10 @@ func TestResolveProjectPath_ImplicitSubdirectoryMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	want := filepath.Dir(cwd)
+	want, err := filepath.EvalSymlinks(filepath.Dir(cwd))
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
 
 	got, err := resolveProjectPath("")
 	if err != nil {
@@ -100,5 +103,25 @@ func TestResolveProjectPath_ImplicitOutsideRepoErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "project_path") {
 		t.Errorf("error %q does not mention project_path", err)
+	}
+}
+
+func TestResolveProjectPath_ExplicitSymlinkResolves(t *testing.T) {
+	target := mcpMkdir(t, filepath.Join(t.TempDir(), "real"))
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+
+	got, err := resolveProjectPath(link)
+	if err != nil {
+		t.Fatalf("resolveProjectPath: %v", err)
+	}
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

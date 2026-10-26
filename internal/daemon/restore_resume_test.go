@@ -67,6 +67,12 @@ func setupRestoreProject(t *testing.T, sakusenYML string) (*Server, string, *tas
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// The project row stores the symlink-resolved path (macOS temp dirs sit
+	// under /var -> /private/var), so callers compare against that.
+	projectDir, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(projectDir, ".sakusen.yml"), []byte(sakusenYML), 0644); err != nil {
 		t.Fatal(err)
 	}
