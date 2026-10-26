@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -752,4 +753,43 @@ func TestReconcileAllPeriodics_AliasDisableIsIdempotentAndUngated(t *testing.T) 
 	}
 	s.reconcileAllPeriodics()
 	assertAliasDisabled(t, database, low, high)
+}
+
+// Regression guard: startup catch-up and the scheduler tick racing on one due
+// routine must fire it once — ClaimPeriodicFire serializes them per definition.
+func TestFireDuePeriodics_CatchupAndTickConcurrentFireOnce(t *testing.T) {
+	s, database, proj := newSchedulerTestServer(t)
+
+	s.reconcileAllPeriodics()
+	raw, err := sql.Open("sqlite", database.Path())
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`UPDATE periodic_definitions SET next_fire_at = ? WHERE name = 'nightly' AND deleted_at IS NULL`, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("make nightly due: %v", err)
+	}
+	d, err := database.GetPeriodicByName(proj.ID, "nightly")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if i%2 == 1 {
+				s.checkPeriodicCatchup()
+			} else {
+				s.fireDuePeriodics()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	runsFor(t, database, d, 1)
 }
