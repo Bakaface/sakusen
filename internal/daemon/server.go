@@ -110,12 +110,15 @@ type Server struct {
 	workdirMu    sync.Mutex
 	workdirWaits map[int64]int64
 
-	// periodicMu guards periodicReconciled.
+	// periodicMu guards periodicReconciled and periodicAliasLogged.
 	periodicMu sync.Mutex
 	// periodicReconciled maps projectID → the .sakusen.yml mod-time at the last
 	// successful routine reconcile. The scheduler uses it to skip reconciling
 	// projects whose config has not changed since the previous pass.
 	periodicReconciled map[int64]time.Time
+	// periodicAliasLogged records alias project rows already reported, so the
+	// "routines disabled" log fires once per alias rather than every tick.
+	periodicAliasLogged map[int64]bool
 
 	// periodicReconcileMu serializes the reconcile body itself. The scheduler
 	// loop and handleListPeriodics can both call reconcilePeriodicsForProject
@@ -173,23 +176,24 @@ func NewServer(cfg *config.Config, database taskStore) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	notifier := notify.New(&cfg.Notifications)
 	return &Server{
-		cfg:                cfg,
-		database:           database,
-		manager:            agent.NewManager(cfg.MaxWorkers, config.DefaultOutputBufferLines),
-		notifier:           notifier,
-		projects:           make(map[int64]*projectContext),
-		mergeLocks:         merge.NewLocks(),
-		clients:            make(map[net.Conn]bool),
-		subscribers:        make(map[net.Conn]bool),
-		tmuxActivity:       make(map[int64]string),
-		tmuxAutoState:      make(map[int64]*tmuxAutoEntry),
-		enginePaused:       make(map[int64]bool),
-		taskFlowLocks:      make(map[int64]*sync.Mutex),
-		periodicReconciled: make(map[int64]time.Time),
-		workdirWaits:       make(map[int64]int64),
-		ctx:                ctx,
-		cancel:             cancel,
-		shutdownDone:       make(chan struct{}),
+		cfg:                 cfg,
+		database:            database,
+		manager:             agent.NewManager(cfg.MaxWorkers, config.DefaultOutputBufferLines),
+		notifier:            notifier,
+		projects:            make(map[int64]*projectContext),
+		mergeLocks:          merge.NewLocks(),
+		clients:             make(map[net.Conn]bool),
+		subscribers:         make(map[net.Conn]bool),
+		tmuxActivity:        make(map[int64]string),
+		tmuxAutoState:       make(map[int64]*tmuxAutoEntry),
+		enginePaused:        make(map[int64]bool),
+		taskFlowLocks:       make(map[int64]*sync.Mutex),
+		periodicReconciled:  make(map[int64]time.Time),
+		periodicAliasLogged: make(map[int64]bool),
+		workdirWaits:        make(map[int64]int64),
+		ctx:                 ctx,
+		cancel:              cancel,
+		shutdownDone:        make(chan struct{}),
 	}
 }
 

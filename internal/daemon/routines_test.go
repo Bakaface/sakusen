@@ -614,3 +614,142 @@ func TestRoutine_SymlinkedProjectAliasFiresOnce(t *testing.T) {
 		t.Errorf("expected 1 nightly routine row, got %d", defs)
 	}
 }
+
+func TestCanonicalProjectWinners_CanonicalPathBeatsLowerID(t *testing.T) {
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := []*db.Project{
+		{ID: 1, Path: alias},
+		{ID: 2, Path: real},
+		{ID: 3, Path: other},
+	}
+
+	winners, aliases := canonicalProjectWinners(projects)
+
+	if len(winners) != 2 || winners[0].ID != 2 || winners[1].ID != 3 {
+		t.Fatalf("expected winners [2 3], got %v", projectIDs(winners))
+	}
+	if w := aliases[1]; w == nil || w.ID != 2 || len(aliases) != 1 {
+		t.Fatalf("expected only project 1 aliased to 2, got %v", aliases)
+	}
+}
+
+func projectIDs(ps []*db.Project) []int64 {
+	ids := make([]int64, len(ps))
+	for i, p := range ps {
+		ids[i] = p.ID
+	}
+	return ids
+}
+
+// aliasPairServer registers two project rows for two symlinks of one directory,
+// so neither stored path is canonical. The higher-id row is seeded with a live
+// routine definition and a task fired from it.
+func aliasPairServer(t *testing.T) (s *Server, database *db.DB, raw *sql.DB, low, high int64, cfgPath string) {
+	t.Helper()
+	s, database, proj := newSchedulerTestServer(t)
+	links := t.TempDir()
+	var ids [2]int64
+	raw, err := sql.Open("sqlite", database.Path())
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	t.Cleanup(func() { raw.Close() })
+	for i, name := range []string{"a", "b"} {
+		link := filepath.Join(links, name)
+		if err := os.Symlink(proj.Path, link); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		res, err := raw.Exec(`INSERT INTO projects (path, name) VALUES (?, ?)`, link, name)
+		if err != nil {
+			t.Fatalf("insert alias project: %v", err)
+		}
+		if ids[i], err = res.LastInsertId(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`DELETE FROM projects WHERE id = ?`, proj.ID); err != nil {
+		t.Fatalf("delete canonical project: %v", err)
+	}
+
+	d := dueRoutine(t, database, ids[1], "nightly", "@every 5m", "default", "the input", "")
+	tk, err := database.CreateTask(ids[1], "earlier run", "the input", "", "default", "", task.StatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := database.SetTaskPeriodicID(tk.ID, d.ID); err != nil {
+		t.Fatalf("link task: %v", err)
+	}
+	return s, database, raw, ids[0], ids[1], filepath.Join(proj.Path, ".sakusen.yml")
+}
+
+func assertAliasDisabled(t *testing.T, database *db.DB, low, high int64) {
+	t.Helper()
+	if d, err := database.GetPeriodicByName(low, "nightly"); err != nil || d.DeletedAt != nil {
+		t.Fatalf("expected live nightly on winner %d, got %+v (err %v)", low, d, err)
+	}
+	d, err := database.GetPeriodicByName(high, "nightly")
+	if err != nil {
+		t.Fatalf("alias nightly row: %v", err)
+	}
+	if d.DeletedAt == nil {
+		t.Fatalf("expected alias %d nightly soft-deleted", high)
+	}
+	runsFor(t, database, d, 1)
+}
+
+func countPeriodicDefs(t *testing.T, raw *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM periodic_definitions`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestReconcileAllPeriodics_AliasWinnerLowestIDWhenNoneCanonical(t *testing.T) {
+	s, database, _, low, high, _ := aliasPairServer(t)
+
+	s.reconcileAllPeriodics()
+
+	assertAliasDisabled(t, database, low, high)
+}
+
+func TestReconcileAllPeriodics_AliasDisableIsIdempotentAndUngated(t *testing.T) {
+	s, database, raw, low, high, cfgPath := aliasPairServer(t)
+	s.reconcileAllPeriodics()
+	want := countPeriodicDefs(t, raw)
+
+	s.reconcileAllPeriodics()
+	assertAliasDisabled(t, database, low, high)
+	if got := countPeriodicDefs(t, raw); got != want {
+		t.Fatalf("expected %d definition rows after second pass, got %d", want, got)
+	}
+
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(cfgPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	s.reconcileAllPeriodics()
+	assertAliasDisabled(t, database, low, high)
+	if got := countPeriodicDefs(t, raw); got != want {
+		t.Fatalf("expected %d definition rows after config touch, got %d", want, got)
+	}
+
+	// A live alias row reappearing with the config unchanged is still disabled.
+	if _, err := raw.Exec(`UPDATE periodic_definitions SET deleted_at = NULL WHERE project_id = ?`, high); err != nil {
+		t.Fatal(err)
+	}
+	s.reconcileAllPeriodics()
+	assertAliasDisabled(t, database, low, high)
+}

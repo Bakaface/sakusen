@@ -57,6 +57,12 @@ func (s *Server) checkPeriodicCatchup() {
 // state cheap: most 30s ticks do no DB writes at all and only fireDuePeriodics
 // runs.
 //
+// Projects whose paths resolve (through symlinks) to the same directory are
+// aliases of one project: only the winner chosen by canonicalProjectWinners is
+// reconciled, and every alias has its live definitions soft-deleted on every
+// pass, independent of the mod-time gate, so the same routine is never
+// scheduled twice.
+//
 // Note: only projects already registered in the DB are walked — a project
 // whose .sakusen.yml has a routines: section but which has never been touched
 // by any sakusen command does not fire. `sakusen routines list` (or any task
@@ -67,7 +73,13 @@ func (s *Server) reconcileAllPeriodics() {
 		log.Printf("routines: failed to list projects: %v", err)
 		return
 	}
+	winners, aliases := canonicalProjectWinners(projects)
 	for _, proj := range projects {
+		if winner, ok := aliases[proj.ID]; ok {
+			s.disableAliasPeriodics(proj, winner)
+		}
+	}
+	for _, proj := range winners {
 		pc, err := s.getProjectContext(proj.ID)
 		if err != nil {
 			continue
@@ -80,6 +92,61 @@ func (s *Server) reconcileAllPeriodics() {
 			continue
 		}
 		s.markPeriodicReconciled(proj.ID, pc.configModTime)
+	}
+}
+
+// canonicalProjectWinners groups projects by symlink-resolved path and picks
+// one winner per group: the row whose stored path is already canonical, else
+// the lowest id. This matches the row GetOrCreateProject resolves a path to.
+// aliases maps every losing project's id to its group's winner. Winners keep
+// the input order.
+func canonicalProjectWinners(projects []*db.Project) (winners []*db.Project, aliases map[int64]*db.Project) {
+	keys := make(map[int64]string, len(projects))
+	best := make(map[string]*db.Project)
+	for _, p := range projects {
+		key, err := config.CanonicalPath(p.Path)
+		if err != nil {
+			key = p.Path
+		}
+		keys[p.ID] = key
+		if cur, ok := best[key]; !ok || (cur.Path != key && (p.Path == key || p.ID < cur.ID)) {
+			best[key] = p
+		}
+	}
+	aliases = make(map[int64]*db.Project)
+	for _, p := range projects {
+		w := best[keys[p.ID]]
+		if w.ID == p.ID {
+			winners = append(winners, p)
+		} else {
+			aliases[p.ID] = w
+		}
+	}
+	return winners, aliases
+}
+
+// disableAliasPeriodics soft-deletes every live routine definition of an alias
+// project row, preserving its run history.
+func (s *Server) disableAliasPeriodics(alias, winner *db.Project) {
+	s.periodicMu.Lock()
+	first := !s.periodicAliasLogged[alias.ID]
+	s.periodicAliasLogged[alias.ID] = true
+	s.periodicMu.Unlock()
+	if first {
+		log.Printf("routines: project %d (%s) is an alias of project %d (%s); its routines are disabled", alias.ID, alias.Path, winner.ID, winner.Path)
+	}
+
+	s.periodicReconcileMu.Lock()
+	defer s.periodicReconcileMu.Unlock()
+	defs, err := s.database.ListPeriodicsForProject(alias.ID)
+	if err != nil {
+		log.Printf("routines: failed to list definitions of alias project %d: %v", alias.ID, err)
+		return
+	}
+	for _, d := range defs {
+		if err := s.database.SoftDeletePeriodicDef(alias.ID, d.Name); err != nil {
+			log.Printf("routines: alias project %d routine %q: failed to soft-delete: %v", alias.ID, d.Name, err)
+		}
 	}
 }
 
