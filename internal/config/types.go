@@ -992,9 +992,9 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 			return fmt.Errorf("step %q: loop goto references unknown step %q", step.Name, step.Loop.Goto)
 		}
 
-		// goto must be an earlier step (no forward jumps, no self-reference)
-		if targetIdx >= i {
-			return fmt.Errorf("step %q: loop goto must reference an earlier step (got %q at index %d, current at %d)", step.Name, step.Loop.Goto, targetIdx, i)
+		// goto must be an earlier step or the step itself (no forward jumps)
+		if targetIdx > i {
+			return fmt.Errorf("step %q: loop goto must reference an earlier step or itself (got %q at index %d, current at %d)", step.Name, step.Loop.Goto, targetIdx, i)
 		}
 
 		// max_iterations is required and must be >= 1
@@ -1071,7 +1071,10 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 			// Overlapping if one range starts inside the other
 			if (newRange.from > existing.from && newRange.from < existing.to) ||
 				(newRange.to > existing.from && newRange.to < existing.to) ||
-				(existing.from > newRange.from && existing.from < newRange.to) {
+				(existing.from > newRange.from && existing.from < newRange.to) ||
+				// A self-loop's step inside another loop's body nests two
+				// loops on the one shared iteration counter.
+				(existing.from == existing.to && existing.to >= newRange.from) {
 				return fmt.Errorf("step %q: loop range [%d..%d] overlaps with step %q range [%d..%d]",
 					step.Name, newRange.from, newRange.to,
 					existing.stepName, existing.from, existing.to)

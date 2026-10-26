@@ -383,7 +383,7 @@ steps:
     summarization_strategy: summarize_chat   # how this step's context is captured
     summarization_prompt: "..."              # prompt fed to the summarizer for THIS step
     require_context: false # true = fail the task if summarize_chat context can't be captured
-    loop: {...}            # jump back to an earlier step (see Loops)
+    loop: {...}            # jump back to an earlier step or repeat this one (see Loops)
     parallel: {...}        # fan out to concurrent branches instead of running a prompt (see Parallel Groups)
 ```
 
@@ -533,7 +533,7 @@ Loops allow iterative refinement (e.g. implement → review → fix → review a
 
 ```yaml
 loop:
-  goto: "step-name"      # must reference an EARLIER step
+  goto: "step-name"      # an EARLIER step, or this step itself to repeat it
   max_iterations: 3      # >= 1
   on_max_iterations: fail  # optional: fail | continue (default); fail requires exit_condition
   exit_condition:                       # set any combination (exit as soon as one matches)
@@ -626,7 +626,8 @@ steps:
 
 **Validation rules:**
 
-- `goto` must reference a step that appears BEFORE the loop step; no self-reference
+- `goto` must reference a step that appears BEFORE the loop step, or the loop step itself (a
+  self-loop repeats that one step until its exit condition holds); no forward jumps
 - `max_iterations` must be >= 1
 - `on_max_iterations`, when present, must be `fail` or `continue`; `fail` requires an `exit_condition`
 - `exit_condition`, when present, must set `step_context_empty`, `step_context_contains` or `command`

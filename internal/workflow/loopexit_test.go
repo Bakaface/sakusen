@@ -264,3 +264,87 @@ func TestLoopOnMaxIterations(t *testing.T) {
 		})
 	}
 }
+
+func selfLoopWorkflow(onMax string, ec *config.LoopExitCondition) config.WorkflowConfig {
+	return config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{
+			{
+				Name:   "batch",
+				Prompt: "batch pass {{loop.iteration}}/{{loop.max_iterations}}",
+				Loop: &config.LoopConfig{
+					Goto:            "batch",
+					MaxIterations:   2,
+					OnMaxIterations: onMax,
+					ExitCondition:   ec,
+				},
+			},
+			{Name: "review", Prompt: "review"},
+		},
+	}
+}
+
+func TestSelfLoop(t *testing.T) {
+	t.Run("repeats until the exit command exits 0", func(t *testing.T) {
+		engine, tk, runner, _ := newFakeRunnerTestEngine(t, selfLoopWorkflow(config.LoopOnMaxIterationsFail, &config.LoopExitCondition{
+			Command: `test "$SAKUSEN_LOOP_ITERATION" -ge 1`,
+		}))
+		if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+			t.Fatalf("RunTask: %v", err)
+		}
+		calls := runner.callsFor("batch")
+		if len(calls) != 2 {
+			t.Fatalf("batch ran %d times, want 2", len(calls))
+		}
+		for i, c := range calls {
+			if want := fmt.Sprintf("batch pass %d/2", i); !strings.Contains(c.prompt, want) {
+				t.Errorf("batch call %d prompt = %q, want it to contain %q", i, c.prompt, want)
+			}
+		}
+		if got := len(runner.callsFor("review")); got != 1 {
+			t.Errorf("review ran %d times, want 1", got)
+		}
+		logged, err := os.ReadFile(ProjectLogPath(engine.dataDir, tk.ID))
+		if err != nil {
+			t.Fatalf("read task log: %v", err)
+		}
+		if !strings.Contains(string(logged), `=== Loop "batch" completed after 1 iteration(s) (max 2) ===`) {
+			t.Errorf("task log is missing the loop completion:\n%s", logged)
+		}
+	})
+
+	t.Run("fail at the cap fails the task", func(t *testing.T) {
+		engine, tk, runner, database := newFakeRunnerTestEngine(t, selfLoopWorkflow(config.LoopOnMaxIterationsFail, &config.LoopExitCondition{Command: "exit 1"}))
+		err := engine.RunTask(context.Background(), tk, nil)
+		const capReason = `loop on step "batch" reached max_iterations (2) without meeting its exit condition`
+		if err == nil || !strings.Contains(err.Error(), capReason) {
+			t.Fatalf("RunTask error = %v, want it to contain %q", err, capReason)
+		}
+		if got := len(runner.callsFor("batch")); got != 3 {
+			t.Errorf("batch ran %d times, want 3", got)
+		}
+		if got := len(runner.callsFor("review")); got != 0 {
+			t.Errorf("review ran %d times, want 0 (no fall-through)", got)
+		}
+		stored, err := database.GetTask(tk.ID)
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if !strings.Contains(stored.ErrorMessage, capReason) {
+			t.Errorf("failure reason = %q, want it to contain %q", stored.ErrorMessage, capReason)
+		}
+	})
+
+	t.Run("continue at the cap falls through", func(t *testing.T) {
+		engine, tk, runner, _ := newFakeRunnerTestEngine(t, selfLoopWorkflow(config.LoopOnMaxIterationsContinue, &config.LoopExitCondition{Command: "exit 1"}))
+		if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+			t.Fatalf("RunTask: %v", err)
+		}
+		if got := len(runner.callsFor("batch")); got != 3 {
+			t.Errorf("batch ran %d times, want 3", got)
+		}
+		if got := len(runner.callsFor("review")); got != 1 {
+			t.Errorf("review ran %d times, want 1", got)
+		}
+	})
+}

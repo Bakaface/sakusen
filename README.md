@@ -217,7 +217,7 @@ sakusen routines pause|resume <name>  # triggered (cadence/after) routines only
 | `timeout` | duration | e.g. `30m`. Default: 30 minutes. |
 | `human` | bool | Pause and wait for explicit approval in the TUI. |
 | `summarization_strategy` | enum | `last_message`, `summarize_chat` (default; runs your `summarizer:` command over the chat log), or `none` (no context captured). |
-| `loop` | object | Jump back to an earlier step. See below. |
+| `loop` | object | Jump back to an earlier step, or repeat this one. See below. |
 
 ### Loops
 
@@ -259,7 +259,7 @@ Prefer an affirmative form (`step_context_contains` or `command`): `step_context
         stdin_from: inventory
 ```
 
-Loops must point to an earlier step, can't be `human:` or resolve to a tmux-mode agent, and can't overlap with other loops.
+`goto` may name an earlier step or the loop step itself; a self-loop (`goto: batch` on the `batch` step) repeats that one step until its exit condition holds. Loops can't jump forward, can't be `human:` or resolve to a tmux-mode agent, and can't overlap with or nest inside other loops.
 
 ### Template variables
 

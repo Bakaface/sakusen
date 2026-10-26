@@ -418,12 +418,78 @@ func TestValidateLoopsSelfReference(t *testing.T) {
 		},
 	}
 
-	err := wf.ValidateLoops()
-	if err == nil {
-		t.Error("expected error for self-reference")
+	if err := wf.ValidateLoops(); err != nil {
+		t.Errorf("expected self-loop to validate, got: %v", err)
 	}
-	if err != nil && !containsString(err.Error(), "earlier step") {
-		t.Errorf("expected error about earlier step, got: %v", err)
+}
+
+func TestValidateLoopsSelfReferenceRequiresMaxIterations(t *testing.T) {
+	wf := &WorkflowConfig{
+		Name: "test",
+		Steps: []StepConfig{
+			{
+				Name:   "plan",
+				Prompt: "Plan",
+				Loop:   &LoopConfig{Goto: "plan"},
+			},
+		},
+	}
+
+	err := wf.ValidateLoops()
+	if err == nil || !containsString(err.Error(), "must be >= 1") {
+		t.Errorf("expected error about max_iterations >= 1, got: %v", err)
+	}
+}
+
+func TestValidateLoopsSelfLoopInsideLoop(t *testing.T) {
+	wf := &WorkflowConfig{
+		Name: "test",
+		Steps: []StepConfig{
+			{Name: "plan", Prompt: "Plan"},
+			{
+				Name:   "implement",
+				Prompt: "Implement",
+				Loop:   &LoopConfig{Goto: "implement", MaxIterations: 2},
+			},
+			{
+				Name:   "review",
+				Prompt: "Review",
+				Loop:   &LoopConfig{Goto: "implement", MaxIterations: 2},
+			},
+		},
+	}
+
+	err := wf.ValidateLoops()
+	if err == nil || !containsString(err.Error(), "overlaps") {
+		t.Errorf("expected error about overlapping loops, got: %v", err)
+	}
+
+	wf.Steps[2].Loop.Goto = "plan"
+	err = wf.ValidateLoops()
+	if err == nil || !containsString(err.Error(), "overlaps") {
+		t.Errorf("expected error about overlapping loops, got: %v", err)
+	}
+}
+
+func TestValidateLoopsSelfLoopsInSequence(t *testing.T) {
+	wf := &WorkflowConfig{
+		Name: "test",
+		Steps: []StepConfig{
+			{
+				Name:   "plan",
+				Prompt: "Plan",
+				Loop:   &LoopConfig{Goto: "plan", MaxIterations: 2},
+			},
+			{
+				Name:   "implement",
+				Prompt: "Implement",
+				Loop:   &LoopConfig{Goto: "implement", MaxIterations: 2},
+			},
+		},
+	}
+
+	if err := wf.ValidateLoops(); err != nil {
+		t.Errorf("expected consecutive self-loops to validate, got: %v", err)
 	}
 }
 

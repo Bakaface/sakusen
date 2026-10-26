@@ -406,7 +406,7 @@ This lists every YAML field name the binary will accept. Cross-reference unknown
 - Step `name` values must be unique within a workflow
 - Agent slugs must be kebab-case; `command` is required; `resume_command`/`chat_log_command` are only valid on tmux-mode agents
 - Explicit `agent:` / `default_agent:` references must name a slug that exists under `agents:`
-- Loop `goto` must reference an earlier step (no forward jumps, no self-reference)
+- Loop `goto` must reference an earlier step or the loop step itself (no forward jumps); a self-loop repeats one step until its exit condition holds
 - Loop steps cannot have `human: true`, and cannot resolve to a tmux-mode agent — use a headless agent on the loop step (or its workflow)
 - Loop ranges cannot overlap
 - `advance: explicit` (tmux step advances only via `advance_task` or the user; not an approval gate) needs a step that resolves to a tmux-mode agent, cannot be combined with `human: true`, and is not allowed on a parallel group or branch
@@ -435,7 +435,7 @@ sakusen validate path/to/.sakusen.yml   # validates an explicit file
 - **Unknown top-level fields** (catches typos like `worktree_sync_paths` for `worktree-sync-paths`)
 - **Removed keys** (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`, and `tmux:`/`print:` on a workflow or step) — migration errors pointing at the `agents:`/`summarizer:` replacements
 - **Agent record shapes** (invalid slug, missing `command`, invalid `mode`, `resume_command`/`chat_log_command` on a headless agent). By default the file is merged with the global tier (`~/.sakusen.yml`, `~/.sakusen/workflows/`, track workflows) like the daemon does, so unknown `agent:`/`default_agent:` refs, alias targets and stacked variant compositions are reported; `sakusen validate --file-only` checks the single file without resolving them.
-- Workflow loop validity (forward `goto`, self-reference, missing target step, `max_iterations < 1`, bad `on_max_iterations` or `fail` without `exit_condition`, overlapping ranges, `human: true` on a loop step)
+- Workflow loop validity (forward `goto`, missing target step, `max_iterations < 1`, bad `on_max_iterations` or `fail` without `exit_condition`, overlapping ranges, `human: true` on a loop step)
 - Invalid `summarization_strategy` values
 - Invalid `on_complete` — top-level or per-workflow (must be `commit`, `merge`, or `none`); the removed `git.on_complete` location produces a migration error
 - Invalid `default_priority` (must be `low`, `medium`, `high`, or `urgent`)

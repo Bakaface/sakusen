@@ -344,7 +344,7 @@ A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor s
 - `validateAgentRefs` (production load only): every branch's EFFECTIVE agent must be headless — the join is synchronous, so a tmux branch could never complete. `collectAgentRefs`, `validatePromptIncludes` and the routine input guard all walk branches too.
 - `validateRoutines`: each `routines:` entry declares at most one of `cadence:` (cron) or `after: <routine-name>` (event trigger: fires when that same-project routine's latest run reaches `completed`); `validateRoutineAfter` rejects unknown names, self-references and cycles.
 
-**Loop validation**: goto must reference earlier step, max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges; a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
+**Loop validation**: goto must reference an earlier step or the loop step itself (self-loop; forward jumps rejected), max_iterations >= 1, no `human: true` on looped steps, no overlapping ranges (a self-loop step inside another loop's range counts as overlap); a loop step must not resolve to a tmux-mode agent (checked in `validateAgents` after tiers merge).
 
 **Advance validation**: `advance` must be `""`, `auto` or `explicit` and `explicit` cannot be combined with `human: true` (`ValidateSteps`); an `advance: explicit` step must not resolve to a headless agent (`validateAgentRefs`, skipped when an implicit slug does not resolve).
 
@@ -352,7 +352,7 @@ A step entry carrying `parallel:` is a GROUP: no prompt of its own, one cursor s
 
 ```go
 type LoopConfig struct {
-    Goto            string             // Target step name to jump back to
+    Goto            string             // Target step: an earlier step, or this step itself
     MaxIterations   int                // Required, must be >= 1
     OnMaxIterations string             // "" / "continue" (fall through at the cap) or "fail"
     ExitCondition   *LoopExitCondition // Optional early exit condition
