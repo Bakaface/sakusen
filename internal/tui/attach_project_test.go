@@ -23,8 +23,18 @@ func TestTmuxProjectNameFor_UsesTaskProjectNotCwd(t *testing.T) {
 		t.Fatalf("project name = %q, want %q (the task's project, not cwd's)", got, "nexus")
 	}
 
-	if got := tmux.NewSession(m.tmuxProjectNameFor(task), "455", "").Name; got != "nexus-455" {
+	if got := tmux.NewSession(m.tmuxProjectNameFor(task), "455", "", "").Name; got != "nexus-455" {
 		t.Errorf("session name = %q, want %q", got, "nexus-455")
+	}
+}
+
+// With no live session, a slugged task resolves to its full session name.
+func TestAttachSessionName_UsesSlug(t *testing.T) {
+	m := Model{cfg: &config.Config{}}
+	task := daemon.TaskInfo{ID: 455, ProjectName: "nexus", Slug: "fix-login"}
+
+	if got := tmux.FindSession(m.tmuxProjectNameFor(task), "455", task.Slug, "").Name; got != "nexus-455-fix-login" {
+		t.Errorf("session name = %q, want %q", got, "nexus-455-fix-login")
 	}
 }
 

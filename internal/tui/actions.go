@@ -502,7 +502,7 @@ func (m Model) tmuxProjectNameFor(t daemon.TaskInfo) string {
 func (m Model) attachTmuxSession(t daemon.TaskInfo) tea.Cmd {
 	taskID := t.ID
 	taskIDStr := fmt.Sprintf("%d", taskID)
-	session := tmux.NewSession(m.tmuxProjectNameFor(t), taskIDStr, "")
+	session := tmux.FindSession(m.tmuxProjectNameFor(t), taskIDStr, t.Slug, "")
 	sessionName := session.Name
 
 	behavior := ""

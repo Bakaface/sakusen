@@ -461,7 +461,7 @@ func (s *Server) restoreTmuxSession(t *task.Task) (bool, error) {
 		return false, fmt.Errorf("worktree path does not exist: %s", t.WorktreePath)
 	}
 
-	session := tmux.NewSession(projectName, fmt.Sprintf("%d", t.ID), t.WorktreePath)
+	session := tmux.FindSession(projectName, fmt.Sprintf("%d", t.ID), t.Slug, t.WorktreePath)
 	if session.Exists() {
 		log.Printf("%sTmux session already exists for task #%d, skipping restore", s.projectLogPrefix(t.ProjectID), t.ID)
 		return false, nil

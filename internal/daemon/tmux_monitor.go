@@ -55,7 +55,7 @@ func (s *Server) checkTmuxActivity(monitor *tmux.Monitor) {
 		}
 
 		taskID := fmt.Sprintf("%d", t.ID)
-		session := tmux.NewSession(pc.cfg.Project.Name, taskID, t.WorktreePath)
+		session := tmux.FindSession(pc.cfg.Project.Name, taskID, t.Slug, t.WorktreePath)
 		activeSessions[session.Name] = true
 
 		if !session.Exists() {
@@ -275,7 +275,7 @@ func (s *Server) eligibleForHibernation(t *task.Task) bool {
 		return false
 	}
 
-	session := tmux.NewSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.WorktreePath)
+	session := tmux.FindSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.Slug, t.WorktreePath)
 	attached, err := session.Attached()
 	if err != nil {
 		log.Printf("%sWarning: failed to check tmux clients for task #%d, not hibernating: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
@@ -315,7 +315,7 @@ func (s *Server) hibernateTmuxTask(t *task.Task, reason string) bool {
 
 	// Kill directly rather than via tmux.KillSessionsForTask: a failed kill
 	// must be told apart from a session that is already gone.
-	session := tmux.NewSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.WorktreePath)
+	session := tmux.FindSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.Slug, t.WorktreePath)
 	if err := session.Kill(); err != nil {
 		log.Printf("%sWarning: failed to kill tmux session for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 		// Marking a task hibernated while its agent is still running would

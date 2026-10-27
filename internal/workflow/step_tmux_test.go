@@ -76,8 +76,7 @@ func newTmuxStepEngine(t *testing.T, tmuxSetupCommand string) (*Engine, *task.Ta
 	engine := NewEngine(cfg, database, nil, dir)
 
 	t.Cleanup(func() {
-		session := tmux.NewSession(cfg.Project.Name, fmt.Sprintf("%d", tk.ID), dir)
-		session.Kill()
+		tmux.KillSessionsForTask(cfg.Project.Name, fmt.Sprintf("%d", tk.ID), tk.Slug)
 	})
 
 	return engine, tk, dir

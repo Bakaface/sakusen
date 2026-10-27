@@ -84,12 +84,10 @@ func (s *Server) spawnInteractiveSession(pc *projectContext, t *task.Task, opts 
 	if err != nil {
 		return false, err
 	}
-	session := tmux.NewSession(projectName, taskID, startDir)
+	session := tmux.NewSession(projectName, taskID, t.Slug, startDir)
 	session.RootDir = t.WorktreePath
-	if session.Exists() {
-		if err := session.Kill(); err != nil {
-			log.Printf("Warning: failed to kill stale tmux session for task #%s: %v", taskID, err)
-		}
+	if err := tmux.KillSessionsForTask(projectName, taskID, t.Slug); err != nil {
+		log.Printf("Warning: failed to kill stale tmux session for task #%s: %v", taskID, err)
 	}
 
 	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")

@@ -2,11 +2,14 @@ package tmux
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // SanitizeName replaces characters that tmux does not allow in session
@@ -48,11 +51,38 @@ type Session struct {
 	RootDir string
 }
 
-func NewSession(projectName, taskID, workDir string) *Session {
+// SessionName returns the task's session name,
+// <sanitizedProject>-<taskID>-<slug>, with the slug passed through
+// task.Slugify. A slug that cleans to empty yields <sanitizedProject>-<taskID>.
+func SessionName(projectName, taskID, slug string) string {
+	name := SessionPrefix(projectName) + taskID
+	if s := task.Slugify(slug); s != "" {
+		name += "-" + s
+	}
+	return name
+}
+
+func NewSession(projectName, taskID, slug, workDir string) *Session {
 	return &Session{
-		Name:    SessionPrefix(projectName) + taskID,
+		Name:    SessionName(projectName, taskID, slug),
 		WorkDir: workDir,
 	}
+}
+
+// FindSession returns the task's live session: the slugged name if it exists,
+// else the legacy bare <sanitizedProject>-<taskID> session from before slugs
+// were part of the name, else the slugged name (for callers that create it).
+// Both checks are exact-name; no prefix matching.
+func FindSession(projectName, taskID, slug, workDir string) *Session {
+	s := NewSession(projectName, taskID, slug, workDir)
+	if s.Exists() || task.Slugify(slug) == "" {
+		return s
+	}
+	legacy := NewSession(projectName, taskID, "", workDir)
+	if legacy.Exists() {
+		return legacy
+	}
+	return s
 }
 
 // IsAvailable checks if the tmux binary exists in PATH.
@@ -347,8 +377,7 @@ func ExtractTaskID(projectName, sessionName string) string {
 		return sessionName
 	}
 	rest := sessionName[len(prefix):]
-	// rest is "<taskID>" — task IDs are numeric
-	// If there's a dash (legacy format), return only the numeric part
+	// rest is "<taskID>-<slug>", or "<taskID>" when the slug is empty
 	if idx := strings.Index(rest, "-"); idx > 0 {
 		return rest[:idx]
 	}
@@ -368,15 +397,24 @@ func (s *Session) PipePane(logFile string) error {
 	return nil
 }
 
-// KillSessionsForTask kills the task's session, named exactly
-// <projectName>-<taskID>; sessions of tasks sharing the ID as a prefix
-// (e.g. 560 for 56) are never touched. A missing session is not an error.
-func KillSessionsForTask(projectName, taskID string) error {
-	s := NewSession(projectName, taskID, "")
-	if !s.Exists() {
-		return nil
+// KillSessionsForTask kills the task's session under both its slugged name and
+// the legacy bare <projectName>-<taskID> name, each matched exactly; sessions
+// of tasks sharing the ID as a prefix (e.g. 560 for 56) are never touched. A
+// missing session is not an error.
+func KillSessionsForTask(projectName, taskID, slug string) error {
+	sessions := []*Session{NewSession(projectName, taskID, slug, "")}
+	if legacy := NewSession(projectName, taskID, "", ""); legacy.Name != sessions[0].Name {
+		sessions = append(sessions, legacy)
 	}
-	return s.Kill()
+	var errs []error
+	for _, s := range sessions {
+		if s.Exists() {
+			if err := s.Kill(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func AttachCommand(sessionName string) *exec.Cmd {

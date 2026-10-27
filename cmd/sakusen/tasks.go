@@ -482,14 +482,16 @@ var attachCmd = &cobra.Command{
 		c := client.New(cfg)
 		projectName := cfg.Project.Name
 		taskStatus := ""
+		slug := ""
 		if info, err := c.GetTask(id); err == nil {
 			if info.ProjectName != "" {
 				projectName = info.ProjectName
 			}
 			taskStatus = info.Status
+			slug = info.Slug
 		}
 
-		session := tmux.NewSession(projectName, taskID, "")
+		session := tmux.FindSession(projectName, taskID, slug, "")
 		if !session.Exists() {
 			// A tmux task with no session is hibernated (or lost its session
 			// some other way): ask the daemon to bring it back rather than

@@ -99,7 +99,7 @@ func setupRestoreProject(t *testing.T, sakusenYML string) (*Server, string, *tas
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		tmux.NewSession(config.ProjectNameFromPath(projectDir), fmt.Sprintf("%d", tk.ID), projectDir).Kill()
+		tmux.KillSessionsForTask(config.ProjectNameFromPath(projectDir), fmt.Sprintf("%d", tk.ID), tk.Slug)
 	})
 	return s, projectDir, tk
 }
@@ -351,7 +351,7 @@ func TestRestoreTmuxSession_SkipsWhenSessionExists(t *testing.T) {
 
 	// Pre-create the session under the exact name a restore would use.
 	// setupRestoreProject's cleanup kills it.
-	session := tmux.NewSession(config.ProjectNameFromPath(projectDir), fmt.Sprintf("%d", tk.ID), projectDir)
+	session := tmux.NewSession(config.ProjectNameFromPath(projectDir), fmt.Sprintf("%d", tk.ID), tk.Slug, projectDir)
 	if err := session.Create(""); err != nil {
 		t.Fatalf("failed to pre-create tmux session: %v", err)
 	}

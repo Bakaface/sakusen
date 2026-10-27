@@ -122,7 +122,7 @@ func TestAttachTmuxSession_WakesMissingSession(t *testing.T) {
 		Status:      "tmux",
 		ProjectName: fmt.Sprintf("sakusen-wake-test-%d", time.Now().UnixNano()),
 	}
-	if tmux.NewSession(info.ProjectName, "42", "").Exists() {
+	if tmux.NewSession(info.ProjectName, "42", "", "").Exists() {
 		t.Skip("a tmux session already occupies the generated test name")
 	}
 
@@ -156,7 +156,7 @@ func TestAttachTmuxSession_SurfacesWakeError(t *testing.T) {
 		Status:      "tmux",
 		ProjectName: fmt.Sprintf("sakusen-wake-test-%d", time.Now().UnixNano()),
 	}
-	if tmux.NewSession(info.ProjectName, "43", "").Exists() {
+	if tmux.NewSession(info.ProjectName, "43", "", "").Exists() {
 		t.Skip("a tmux session already occupies the generated test name")
 	}
 
@@ -185,7 +185,7 @@ func TestAttachTmuxSession_NonTmuxTaskDoesNotWake(t *testing.T) {
 		Status:      "running",
 		ProjectName: fmt.Sprintf("sakusen-wake-test-%d", time.Now().UnixNano()),
 	}
-	if tmux.NewSession(info.ProjectName, "44", "").Exists() {
+	if tmux.NewSession(info.ProjectName, "44", "", "").Exists() {
 		t.Skip("a tmux session already occupies the generated test name")
 	}
 

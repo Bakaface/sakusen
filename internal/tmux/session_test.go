@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -53,17 +55,62 @@ func TestSessionPrefix(t *testing.T) {
 }
 
 func TestNewSession(t *testing.T) {
-	s := NewSession("sakusen", "42", "/tmp/work")
-	if s.Name != "sakusen-42" {
-		t.Errorf("expected name sakusen-42, got %s", s.Name)
+	s := NewSession("sakusen", "42", "my-task", "/tmp/work")
+	if s.Name != "sakusen-42-my-task" {
+		t.Errorf("expected name sakusen-42-my-task, got %s", s.Name)
 	}
 	if s.WorkDir != "/tmp/work" {
 		t.Errorf("expected workdir /tmp/work, got %s", s.WorkDir)
 	}
+	if got := NewSession("sakusen", "42", "", "/tmp/work").Name; got != "sakusen-42" {
+		t.Errorf("empty slug: expected name sakusen-42, got %s", got)
+	}
+}
+
+func TestSessionName(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+		taskID  string
+		slug    string
+		want    string
+	}{
+		{"plain slug", "intrum", "580", "rotate-northflank-tokens", "intrum-580-rotate-northflank-tokens"},
+		{"empty slug", "intrum", "580", "", "intrum-580"},
+		{"slug cleans to empty", "intrum", "580", "---", "intrum-580"},
+		{"punctuation only", "intrum", "580", ".:!", "intrum-580"},
+		{"uppercase and spaces", "intrum", "580", "Rotate Tokens", "intrum-580-rotate-tokens"},
+		{"tmux-hostile characters", "intrum", "580", "fix.login:page", "intrum-580-fix-login-page"},
+		{"leading and trailing dashes", "intrum", "580", "-fix-login-", "intrum-580-fix-login"},
+		{"non-ascii", "intrum", "580", "café-menu", "intrum-580-caf-menu"},
+		{"long slug truncated", "intrum", "580", "rotate-northflank-tokens-and-secrets", "intrum-580-rotate-northflank-tokens"},
+		{"dot-prefixed project", ".docs", "7", "fix-login", "_docs-7-fix-login"},
+	}
+
+	slugRe := regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SessionName(tt.project, tt.taskID, tt.slug)
+			if got != tt.want {
+				t.Fatalf("SessionName(%q, %q, %q) = %q, want %q", tt.project, tt.taskID, tt.slug, got, tt.want)
+			}
+			bare := SessionPrefix(tt.project) + tt.taskID
+			if got == bare {
+				return
+			}
+			slugPart := strings.TrimPrefix(got, bare+"-")
+			if !slugRe.MatchString(slugPart) {
+				t.Errorf("slug part %q does not match %s", slugPart, slugRe)
+			}
+			if len(slugPart) > 24 {
+				t.Errorf("slug part %q is %d chars, want <= 24", slugPart, len(slugPart))
+			}
+		})
+	}
 }
 
 func TestNewSessionDotPrefix(t *testing.T) {
-	s := NewSession(".docs", "7", "/tmp/work")
+	s := NewSession(".docs", "7", "", "/tmp/work")
 	if s.Name != "_docs-7" {
 		t.Errorf("expected name _docs-7, got %s", s.Name)
 	}
@@ -105,7 +152,7 @@ func TestRunSetupCommand_SubstitutesVars(t *testing.T) {
 	}
 
 	t.Run("all vars substituted", func(t *testing.T) {
-		s := NewSession("proj", "42", t.TempDir())
+		s := NewSession("proj", "42", "", t.TempDir())
 		vars := &SetupVars{AgentCommand: "AGENTCMD", RunAgent: "RUNAGENT"}
 		cmd := `echo "{{agent_command}}|{{run_agent}}|{{session_name}}|{{worktree_path}}" > out.txt`
 		if err := s.RunSetupCommand(cmd, vars); err != nil {
@@ -122,7 +169,7 @@ func TestRunSetupCommand_SubstitutesVars(t *testing.T) {
 	})
 
 	t.Run("nil vars leave agent placeholders literal", func(t *testing.T) {
-		s := NewSession("proj", "42", t.TempDir())
+		s := NewSession("proj", "42", "", t.TempDir())
 		cmd := `echo "{{agent_command}}|{{run_agent}}|{{session_name}}" > out.txt`
 		if err := s.RunSetupCommand(cmd, nil); err != nil {
 			t.Fatalf("RunSetupCommand failed: %v", err)
@@ -138,7 +185,7 @@ func TestRunSetupCommand_SubstitutesVars(t *testing.T) {
 	})
 
 	t.Run("empty command is a no-op", func(t *testing.T) {
-		s := NewSession("proj", "42", t.TempDir())
+		s := NewSession("proj", "42", "", t.TempDir())
 		if err := s.RunSetupCommand("", &SetupVars{}); err != nil {
 			t.Fatalf("empty command should be a nil-error no-op, got: %v", err)
 		}
@@ -164,7 +211,8 @@ func TestTaskIDFromSessionName(t *testing.T) {
 		wantOK      bool
 	}{
 		{"task session", "nexus", "nexus-42", 42, true},
-		{"legacy suffixed task session", "nexus", "nexus-42-implement", 42, true},
+		{"slugged task session", "nexus", "nexus-42-implement", 42, true},
+		{"long slugged task session", "intrum", "intrum-580-rotate-northflank-tokens", 580, true},
 		{"unrelated session sharing prefix", "nexus", "nexus-em", 0, false},
 		{"unrelated multi-segment session", "nexus", "nexus-personal-notes", 0, false},
 		{"different project", "nexus", "other-42", 0, false},
@@ -254,7 +302,7 @@ func TestSwitchClientCommandExactTarget(t *testing.T) {
 func createTaskSessions(t *testing.T, project string, taskIDs ...string) {
 	t.Helper()
 	for _, id := range taskIDs {
-		s := NewSession(project, id, t.TempDir())
+		s := NewSession(project, id, "", t.TempDir())
 		if err := s.Create("sleep", "600"); err != nil {
 			t.Fatalf("failed to create session %s: %v", s.Name, err)
 		}
@@ -285,12 +333,12 @@ func TestSessionExistsIsExact(t *testing.T) {
 	project := "sakusen-exists-test"
 	createTaskSessions(t, project, "560")
 
-	if NewSession(project, "56", "").Exists() {
+	if NewSession(project, "56", "", "").Exists() {
 		t.Error("Exists must not match a session that only shares the name as a prefix")
 	}
 
 	createTaskSessions(t, project, "56")
-	if !NewSession(project, "56", "").Exists() {
+	if !NewSession(project, "56", "", "").Exists() {
 		t.Error("Exists must report a session with the exact name")
 	}
 }
@@ -303,7 +351,7 @@ func TestSessionKillIsExact(t *testing.T) {
 	project := "sakusen-kill-test"
 	createTaskSessions(t, project, "560")
 
-	if err := NewSession(project, "56", "").Kill(); err == nil {
+	if err := NewSession(project, "56", "", "").Kill(); err == nil {
 		t.Error("expected Kill to fail for a name that only matches by prefix")
 	}
 	if !liveSessionNames(t)[project+"-560"] {
@@ -319,7 +367,7 @@ func TestPaneTargetsAreExact(t *testing.T) {
 	project := "sakusen-pane-test"
 	createTaskSessions(t, project, "560")
 
-	missing := NewSession(project, "56", "")
+	missing := NewSession(project, "56", "", "")
 	if missing.IsAlive() {
 		t.Error("IsAlive must not report on a session that only matches by prefix")
 	}
@@ -334,7 +382,7 @@ func TestPaneTargetsAreExact(t *testing.T) {
 	}
 
 	// The exact form must still resolve a session that does exist.
-	live := NewSession(project, "560", "")
+	live := NewSession(project, "560", "", "")
 	if !live.IsAlive() {
 		t.Error("IsAlive must report a live session with the exact name")
 	}
@@ -343,25 +391,74 @@ func TestPaneTargetsAreExact(t *testing.T) {
 	}
 }
 
+// startSession starts a detached session with the exact name and kills it when
+// the test ends.
+func startSession(t *testing.T, name string) *Session {
+	t.Helper()
+	s := &Session{Name: name, WorkDir: t.TempDir()}
+	if err := s.Create("sleep", "600"); err != nil {
+		t.Fatalf("failed to create session %s: %v", name, err)
+	}
+	t.Cleanup(func() { s.Kill() })
+	return s
+}
+
+func TestFindSession(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	t.Run("full name live", func(t *testing.T) {
+		project := "sakusen-find-full-test"
+		startSession(t, project+"-56-x")
+		startSession(t, project+"-56")
+		if got := FindSession(project, "56", "x", "").Name; got != project+"-56-x" {
+			t.Errorf("FindSession = %q, want the full name", got)
+		}
+	})
+
+	t.Run("only legacy live", func(t *testing.T) {
+		project := "sakusen-find-legacy-test"
+		startSession(t, project+"-56")
+		startSession(t, project+"-560-x")
+		if got := FindSession(project, "56", "x", "").Name; got != project+"-56" {
+			t.Errorf("FindSession = %q, want the legacy name", got)
+		}
+	})
+
+	t.Run("neither live", func(t *testing.T) {
+		project := "sakusen-find-none-test"
+		startSession(t, project+"-560")
+		startSession(t, project+"-56-xy")
+		if got := FindSession(project, "56", "x", "").Name; got != project+"-56-x" {
+			t.Errorf("FindSession = %q, want the full name", got)
+		}
+	})
+}
+
 func TestKillSessionsForTaskIsExact(t *testing.T) {
 	if !IsAvailable() {
 		t.Skip("tmux is not installed")
 	}
 
 	project := "sakusen-killtask-test"
-	createTaskSessions(t, project, "56", "560", "569")
+	for _, suffix := range []string{"56-x", "56", "560", "560-x", "569"} {
+		startSession(t, project+"-"+suffix)
+	}
 
-	if err := KillSessionsForTask(project, "56"); err != nil {
+	if err := KillSessionsForTask(project, "56", "x"); err != nil {
 		t.Fatalf("KillSessionsForTask: %v", err)
 	}
 
 	names := liveSessionNames(t)
-	if names[project+"-56"] {
-		t.Error("the task's own session must be killed")
+	for _, suffix := range []string{"56-x", "56"} {
+		if names[project+"-"+suffix] {
+			t.Errorf("session %s-%s must be killed", project, suffix)
+		}
 	}
-	for _, id := range []string{"560", "569"} {
-		if !names[project+"-"+id] {
-			t.Errorf("session for task %s must survive killing task 56", id)
+	for _, suffix := range []string{"560", "560-x", "569"} {
+		if !names[project+"-"+suffix] {
+			t.Errorf("session %s-%s must survive killing task 56", project, suffix)
 		}
 	}
 }
@@ -374,11 +471,29 @@ func TestKillSessionsForTaskMissingSession(t *testing.T) {
 	project := "sakusen-killtask-missing-test"
 	createTaskSessions(t, project, "560")
 
-	if err := KillSessionsForTask(project, "56"); err != nil {
+	if err := KillSessionsForTask(project, "56", "x"); err != nil {
 		t.Errorf("a missing session must not be an error, got %v", err)
 	}
 	if !liveSessionNames(t)[project+"-560"] {
 		t.Error("session for task 560 must survive killing task 56")
+	}
+}
+
+func TestListTaskSessionsFullName(t *testing.T) {
+	if !IsAvailable() {
+		t.Skip("tmux is not installed")
+	}
+
+	project := "sakusen-listtask-test"
+	name := SessionName(project, "580", "rotate-northflank-tokens")
+	startSession(t, name)
+
+	sessions, err := ListTaskSessions(project)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if s := sessions[580]; s == nil || s.Name != name {
+		t.Errorf("sessions[580] = %v, want %q", s, name)
 	}
 }
 

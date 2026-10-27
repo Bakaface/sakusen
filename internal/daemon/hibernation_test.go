@@ -129,6 +129,8 @@ func setupHibernationFixture(t *testing.T, sakusenYML string) *hibernationFixtur
 	}
 }
 
+const hibernateSlug = "hibernate-me"
+
 // newTask creates a StatusTmux task rooted at the project dir. stepIndex 1
 // leaves it paused on the workflow's "implement" step (the cursor invariant:
 // StepIndex points one past the paused step); 0 leaves it with no paused
@@ -136,7 +138,7 @@ func setupHibernationFixture(t *testing.T, sakusenYML string) *hibernationFixtur
 func (f *hibernationFixture) newTask(t *testing.T, stepIndex int) *task.Task {
 	t.Helper()
 	tk, err := f.database.CreateTaskWithPriority(
-		f.projectID, "Hibernate me", "input", "hibernate-me", "default", "", "", "", "",
+		f.projectID, "Hibernate me", "input", hibernateSlug, "default", "", "", "", "",
 		task.StatusTmux, task.PriorityMedium, false, nil, nil,
 	)
 	if err != nil {
@@ -157,7 +159,7 @@ func (f *hibernationFixture) newTask(t *testing.T, stepIndex int) *task.Task {
 }
 
 func (f *hibernationFixture) session(taskID int64) *tmux.Session {
-	return tmux.NewSession(f.projectName, fmt.Sprintf("%d", taskID), f.projectDir)
+	return tmux.NewSession(f.projectName, fmt.Sprintf("%d", taskID), hibernateSlug, f.projectDir)
 }
 
 // sessionExistsExactly reports whether a session with exactly this name is
@@ -626,7 +628,7 @@ func TestHibernateTmuxTask(t *testing.T) {
 
 	// A decoy whose name starts with the target's: tmux.KillSessionsForTask
 	// matches by prefix, so hibernating #N must not take #N0 with it.
-	decoy := tmux.NewSession(f.projectName, fmt.Sprintf("%d0", tk.ID), f.projectDir)
+	decoy := tmux.NewSession(f.projectName, fmt.Sprintf("%d0", tk.ID), "", f.projectDir)
 	if err := decoy.Create("sleep", "600"); err != nil {
 		t.Fatalf("failed to create decoy session: %v", err)
 	}

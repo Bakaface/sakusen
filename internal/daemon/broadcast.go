@@ -64,7 +64,7 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 
 		// Kill tmux sessions before finalization
 		if pc, err := s.getProjectContext(a.Task.ProjectID); err == nil {
-			if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, a.ID); err != nil {
+			if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, a.ID, a.Task.Slug); err != nil {
 				log.Printf("%sWarning: failed to kill tmux sessions for task %s: %v", prefix, a.ID, err)
 			}
 		}
@@ -81,7 +81,7 @@ func (s *Server) onAgentStateChange(a *agent.Agent, oldState, newState agent.Sta
 			log.Printf("%sFailed to update task error: %v", prefix, err)
 		}
 		if pc, err := s.getProjectContext(a.Task.ProjectID); err == nil {
-			if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, a.ID); err != nil {
+			if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, a.ID, a.Task.Slug); err != nil {
 				log.Printf("%sWarning: failed to kill tmux sessions for task %s: %v", prefix, a.ID, err)
 			}
 		}

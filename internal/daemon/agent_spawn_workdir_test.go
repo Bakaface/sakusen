@@ -45,8 +45,8 @@ func TestRestoreTmuxSession_StartsInWorkdir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := fmt.Sprintf("%s-%d", pc.cfg.Project.Name, tk.ID)
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", session, "#{session_path}").Output()
+	session := fmt.Sprintf("%s-%d-%s", pc.cfg.Project.Name, tk.ID, tk.Slug)
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", "="+session+":", "#{session_path}").Output()
 	if err != nil {
 		t.Fatalf("tmux display-message: %v", err)
 	}

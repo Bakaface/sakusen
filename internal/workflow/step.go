@@ -307,14 +307,12 @@ func (e *Engine) runStepTmux(ctx context.Context, t *task.Task, step config.Step
 		return 1, "", err
 	}
 	taskID := fmt.Sprintf("%d", t.ID)
-	session := tmux.NewSession(e.cfg.ProjectName, taskID, startDir)
+	session := tmux.NewSession(e.cfg.ProjectName, taskID, t.Slug, startDir)
 	session.RootDir = t.WorktreePath
 
-	// Kill stale session if exists (handles retries)
-	if session.Exists() {
-		if err := session.Kill(); err != nil {
-			log.Printf("Warning: failed to kill stale tmux session for task #%d: %v", t.ID, err)
-		}
+	// Kill stale sessions, slugged or legacy (handles retries)
+	if err := tmux.KillSessionsForTask(e.cfg.ProjectName, taskID, t.Slug); err != nil {
+		log.Printf("Warning: failed to kill stale tmux session for task #%d: %v", t.ID, err)
 	}
 
 	sakusenDir := filepath.Join(t.WorktreePath, ".sakusen")

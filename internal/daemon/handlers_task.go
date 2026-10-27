@@ -372,7 +372,7 @@ func (s *Server) cleanupDeletedTaskResources(t *task.Task) {
 	agentID := fmt.Sprintf("%d", t.ID)
 
 	if pc, err := s.getProjectContext(t.ProjectID); err == nil {
-		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID); err != nil {
+		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID, t.Slug); err != nil {
 			log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 		}
 	}
@@ -402,7 +402,7 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 	// Kill any stale tmux sessions for this task
 	agentID := fmt.Sprintf("%d", req.TaskID)
 	if pc, err := s.getProjectContext(t.ProjectID); err == nil {
-		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID); err != nil {
+		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID, t.Slug); err != nil {
 			log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), req.TaskID, err)
 		}
 	}

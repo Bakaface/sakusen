@@ -147,7 +147,7 @@ func (s *Server) continuePausedTask(conn net.Conn, t *task.Task) {
 	agentID := fmt.Sprintf("%d", t.ID)
 	pc, pcErr := s.getProjectContext(t.ProjectID)
 	if pcErr == nil {
-		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID); err != nil {
+		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID, t.Slug); err != nil {
 			log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 		}
 	}
@@ -274,7 +274,7 @@ func (s *Server) wakeTmuxTask(taskID int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get project context: %v", err)
 	}
-	session := tmux.NewSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.WorktreePath)
+	session := tmux.FindSession(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.Slug, t.WorktreePath)
 	if session.Exists() {
 		// Nothing to spawn, but a stale marker would keep rendering the task
 		// as hibernated — e.g. after the user started a session by hand.
@@ -343,7 +343,7 @@ func (s *Server) advanceTmuxTask(t *task.Task) (tmuxAdvanceOutcome, error) {
 
 	// Kill tmux sessions
 	agentID := fmt.Sprintf("%d", t.ID)
-	if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID); err != nil {
+	if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID, t.Slug); err != nil {
 		log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 	}
 
@@ -601,6 +601,7 @@ func (s *Server) setupTmuxDirect(taskID, projectID int64, title string) {
 		log.Printf("%sFailed to finalize identity for tmux-direct task #%d: %v", s.projectLogPrefix(projectID), taskID, err)
 		return
 	}
+	t.Slug = slug
 
 	// Ensure worktree exists
 	if err := s.ensureWorktree(t, pc); err != nil {

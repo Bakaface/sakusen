@@ -188,8 +188,8 @@ func TestTmuxStepStartsInWorkdir(t *testing.T) {
 		t.Fatalf("RunTask: %v", err)
 	}
 
-	session := fmt.Sprintf("%s-%d", engine.cfg.ProjectName, tk.ID)
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", session, "#{session_path}").Output()
+	session := fmt.Sprintf("%s-%d-%s", engine.cfg.ProjectName, tk.ID, tk.Slug)
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", "="+session+":", "#{session_path}").Output()
 	if err != nil {
 		t.Fatalf("tmux display-message: %v", err)
 	}

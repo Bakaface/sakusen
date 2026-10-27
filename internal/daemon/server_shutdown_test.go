@@ -119,7 +119,7 @@ func TestKillTaskSessionsSparesForeignSessions(t *testing.T) {
 	s.projectsMu.Unlock()
 
 	workDir := t.TempDir()
-	taskSession := tmux.NewSession(projectName, "42", workDir)
+	taskSession := tmux.NewSession(projectName, "42", "", workDir)
 	foreignSession := &tmux.Session{Name: projectName + "-em", WorkDir: workDir}
 	for _, sess := range []*tmux.Session{taskSession, foreignSession} {
 		if err := sess.Create("sleep", "300"); err != nil {
