@@ -281,3 +281,139 @@ func TestManager_ShutdownWaitsForRunningAgentsToRespondToCancellation(t *testing
 		t.Errorf("Shutdown took %v, expected it to return well before the %v grace period", elapsed, gracePeriod)
 	}
 }
+
+// acquireAsync runs AcquireBranchSlot on a goroutine so a test can assert
+// whether it blocks.
+func acquireAsync(ctx context.Context, m *Manager, taskID int64) <-chan acquireResult {
+	ch := make(chan acquireResult, 1)
+	go func() {
+		release, err := m.AcquireBranchSlot(ctx, taskID)
+		ch <- acquireResult{release, err}
+	}()
+	return ch
+}
+
+type acquireResult struct {
+	release func()
+	err     error
+}
+
+func expectBlocked(t *testing.T, ch <-chan acquireResult) {
+	t.Helper()
+	select {
+	case r := <-ch:
+		t.Fatalf("acquire returned (err=%v), want it blocked", r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func expectAcquired(t *testing.T, ch <-chan acquireResult) func() {
+	t.Helper()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			t.Fatalf("acquire: %v", r.err)
+		}
+		return r.release
+	case <-time.After(testTransitionTimeout):
+		t.Fatal("timed out waiting for a branch slot")
+		return nil
+	}
+}
+
+func TestBranchSlotsBorrowParentSlot(t *testing.T) {
+	m := NewManager(1, 10)
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	if _, err := m.StartAgent(&task.Task{ID: 1}, "/w1", blockingRunner(done, nil)); err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		release := expectAcquired(t, acquireAsync(context.Background(), m, 1))
+		release()
+	}
+}
+
+func TestBranchSlotsCountAgainstLimit(t *testing.T) {
+	m := NewManager(2, 10)
+	done1, done2 := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(done1); close(done2) })
+	if _, err := m.StartAgent(&task.Task{ID: 1}, "/w1", blockingRunner(done1, nil)); err != nil {
+		t.Fatalf("StartAgent(1): %v", err)
+	}
+
+	r1 := expectAcquired(t, acquireAsync(context.Background(), m, 1))
+	r2 := expectAcquired(t, acquireAsync(context.Background(), m, 1))
+	defer r1()
+
+	third := acquireAsync(context.Background(), m, 1)
+	expectBlocked(t, third)
+
+	a2, err := m.StartAgent(&task.Task{ID: 2}, "/w2", blockingRunner(done2, nil))
+	if err != nil {
+		t.Fatalf("StartAgent(2): %v", err)
+	}
+	if got := a2.GetState(); got != StatePending {
+		t.Fatalf("task 2 state = %v, want %v while branch slots fill the limit", got, StatePending)
+	}
+
+	r2()
+	r3 := expectAcquired(t, third)
+	defer r3()
+	if got := a2.GetState(); got != StatePending {
+		t.Errorf("task 2 state = %v, want %v: the waiting branch is served first", got, StatePending)
+	}
+}
+
+func TestBranchSlotsCancelAndRelease(t *testing.T) {
+	m := NewManager(2, 10)
+	done1, done2 := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(done1); close(done2) })
+	if _, err := m.StartAgent(&task.Task{ID: 1}, "/w1", blockingRunner(done1, nil)); err != nil {
+		t.Fatalf("StartAgent(1): %v", err)
+	}
+	r1 := expectAcquired(t, acquireAsync(context.Background(), m, 1))
+	r2 := expectAcquired(t, acquireAsync(context.Background(), m, 1))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	blocked := acquireAsync(ctx, m, 1)
+	expectBlocked(t, blocked)
+	cancel()
+	select {
+	case r := <-blocked:
+		if !errors.Is(r.err, context.Canceled) {
+			t.Fatalf("cancelled acquire err = %v, want context.Canceled", r.err)
+		}
+	case <-time.After(testTransitionTimeout):
+		t.Fatal("cancelled acquire did not return")
+	}
+	m.mu.RLock()
+	waiters := len(m.branchWaiters)
+	m.mu.RUnlock()
+	if waiters != 0 {
+		t.Fatalf("waiters after cancel = %d, want 0", waiters)
+	}
+
+	a2, err := m.StartAgent(&task.Task{ID: 2}, "/w2", blockingRunner(done2, nil))
+	if err != nil {
+		t.Fatalf("StartAgent(2): %v", err)
+	}
+	if got := a2.GetState(); got != StatePending {
+		t.Fatalf("task 2 state = %v, want %v", got, StatePending)
+	}
+
+	r2()
+	r2()
+	r1()
+	r1()
+	if got := a2.GetState(); got != StateRunning {
+		t.Errorf("task 2 state = %v, want %v after every branch slot was released", got, StateRunning)
+	}
+	m.mu.RLock()
+	held := len(m.branchHeld)
+	m.mu.RUnlock()
+	if held != 0 {
+		t.Errorf("branchHeld = %d entries, want 0", held)
+	}
+}

@@ -49,6 +49,16 @@ type Engine struct {
 	// not have to infer a pause from the task's DB status alone — a status that
 	// a concurrent request can overwrite (see SetPauseCallback).
 	onPause func(taskID int64)
+
+	// branchSlots caps how many isolated parallel branches run at once across
+	// the daemon; nil means unlimited.
+	branchSlots BranchSlots
+}
+
+// BranchSlots grants one concurrency slot to an isolated parallel branch of
+// taskID, blocking until one is free or ctx is done.
+type BranchSlots interface {
+	AcquireBranchSlot(ctx context.Context, taskID int64) (release func(), err error)
 }
 
 // NewEngine creates a new workflow engine. It still accepts the full
@@ -136,6 +146,12 @@ func (e *Engine) Coord() *merge.Coordinator { return e.coord }
 // held here.
 func (e *Engine) SetPauseCallback(cb func(taskID int64)) {
 	e.onPause = cb
+}
+
+// SetBranchSlots registers the limiter isolated parallel branches acquire a
+// slot from before provisioning their worktree.
+func (e *Engine) SetBranchSlots(s BranchSlots) {
+	e.branchSlots = s
 }
 
 // buildTemplateContext constructs a TemplateContext wired to the engine's

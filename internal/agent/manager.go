@@ -34,6 +34,12 @@ type Manager struct {
 	maxConcurrent  int
 	bufferSize     int
 
+	// branchHeld counts the parallel-branch slots each task holds; the first
+	// borrows the task's own slot, every further one costs a unit of
+	// maxConcurrent.
+	branchHeld    map[int64]int
+	branchWaiters []*branchWaiter
+
 	onStateChange StateChangeCallback
 
 	// shutdownPollInterval is how often Shutdown polls hasActiveAgents while
@@ -51,6 +57,7 @@ func NewManager(maxConcurrent, bufferSize int) *Manager {
 		pendingQueue:         make([]string, 0),
 		pendingRunners:       make(map[string]func(ctx context.Context) error),
 		cancelFuncs:          make(map[string]context.CancelFunc),
+		branchHeld:           make(map[int64]int),
 		maxConcurrent:        maxConcurrent,
 		bufferSize:           bufferSize,
 		shutdownPollInterval: 500 * time.Millisecond,
@@ -106,7 +113,105 @@ func (m *Manager) canStartMore() bool {
 		}
 	}
 
-	return activeCount < m.maxConcurrent
+	return activeCount+m.branchExtraLocked() < m.maxConcurrent
+}
+
+type branchWaiter struct {
+	taskID  int64
+	granted chan struct{}
+}
+
+// branchExtraLocked is the number of slots held by branches beyond the one
+// each task borrows from itself.
+func (m *Manager) branchExtraLocked() int {
+	extra := 0
+	for _, held := range m.branchHeld {
+		if held > 1 {
+			extra += held - 1
+		}
+	}
+	return extra
+}
+
+func (m *Manager) canGrantBranchLocked(taskID int64) bool {
+	return m.maxConcurrent <= 0 || m.branchHeld[taskID] == 0 || m.canStartMore()
+}
+
+// AcquireBranchSlot blocks until taskID may run one more parallel branch
+// under maxConcurrent, or ctx is done. Waiting branches are served before
+// pending tasks. The returned release is idempotent.
+func (m *Manager) AcquireBranchSlot(ctx context.Context, taskID int64) (func(), error) {
+	m.mu.Lock()
+	if m.branchHeld[taskID] == 0 || (len(m.branchWaiters) == 0 && m.canGrantBranchLocked(taskID)) {
+		m.branchHeld[taskID]++
+		m.mu.Unlock()
+		return m.branchRelease(taskID), nil //nolint:contextcheck // a queued agent must not inherit the branch context
+	}
+	w := &branchWaiter{taskID: taskID, granted: make(chan struct{})}
+	m.branchWaiters = append(m.branchWaiters, w)
+	m.mu.Unlock()
+
+	select {
+	case <-w.granted:
+		return m.branchRelease(taskID), nil //nolint:contextcheck // a queued agent must not inherit the branch context
+	case <-ctx.Done():
+	}
+
+	m.mu.Lock()
+	select {
+	case <-w.granted:
+		m.mu.Unlock()
+		m.branchRelease(taskID)() //nolint:contextcheck // a queued agent must not inherit the branch context
+		return nil, ctx.Err()
+	default:
+	}
+	for i, q := range m.branchWaiters {
+		if q == w {
+			m.branchWaiters = append(m.branchWaiters[:i], m.branchWaiters[i+1:]...)
+			break
+		}
+	}
+	// A cancelled head waiter may have been blocking grantable ones behind it.
+	transitions := m.releaseSlotLocked() //nolint:contextcheck // a queued agent must not inherit the waiter's context
+	m.mu.Unlock()
+	m.fireTransitions(transitions)
+	return nil, ctx.Err()
+}
+
+func (m *Manager) branchRelease(taskID int64) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.mu.Lock()
+			if m.branchHeld[taskID] <= 1 {
+				delete(m.branchHeld, taskID)
+			} else {
+				m.branchHeld[taskID]--
+			}
+			transitions := m.releaseSlotLocked()
+			m.mu.Unlock()
+			m.fireTransitions(transitions)
+		})
+	}
+}
+
+// releaseSlotLocked hands freed capacity to waiting branches first, then to
+// pending tasks.
+func (m *Manager) releaseSlotLocked() []stateTransition {
+	m.serveBranchWaitersLocked()
+	return m.processQueueLocked()
+}
+
+func (m *Manager) serveBranchWaitersLocked() {
+	for len(m.branchWaiters) > 0 {
+		w := m.branchWaiters[0]
+		if !m.canGrantBranchLocked(w.taskID) {
+			return
+		}
+		m.branchHeld[w.taskID]++
+		close(w.granted)
+		m.branchWaiters = m.branchWaiters[1:]
+	}
 }
 
 func (m *Manager) startAgentLocked(agent *Agent, runner func(ctx context.Context) error) []stateTransition {
@@ -138,7 +243,7 @@ func (m *Manager) startAgentLocked(agent *Agent, runner func(ctx context.Context
 		delete(m.knownTasks, agent.Task.ID)
 
 		newState := agent.GetState()
-		queueTransitions := m.processQueueLocked() //nolint:contextcheck // a queued agent must not inherit the finished agent's context
+		queueTransitions := m.releaseSlotLocked() //nolint:contextcheck // a queued agent must not inherit the finished agent's context
 
 		m.mu.Unlock()
 
@@ -175,7 +280,7 @@ func (m *Manager) StopAgent(agentID string) error {
 
 	var transitions []stateTransition
 	transitions = append(transitions, stateTransition{agent, oldState, StateStopped})
-	transitions = append(transitions, m.processQueueLocked()...)
+	transitions = append(transitions, m.releaseSlotLocked()...)
 
 	m.mu.Unlock()
 	m.fireTransitions(transitions)
@@ -184,7 +289,7 @@ func (m *Manager) StopAgent(agentID string) error {
 }
 
 func (m *Manager) processQueueLocked() []stateTransition {
-	if len(m.pendingQueue) == 0 || !m.canStartMore() {
+	if len(m.pendingQueue) == 0 || len(m.branchWaiters) > 0 || !m.canStartMore() {
 		return nil
 	}
 

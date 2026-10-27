@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -857,5 +858,67 @@ func TestParallelIsolatedRetryReprovisionsMissingWorktree(t *testing.T) {
 	}
 	if got := gitOutput(t, path, "rev-parse", "HEAD"); got != branchHead {
 		t.Errorf("re-provisioned HEAD = %q, want the surviving branch tip %q", got, branchHead)
+	}
+}
+
+// semaphoreSlots is a BranchSlots of fixed capacity that counts acquires.
+type semaphoreSlots struct {
+	sem      chan struct{}
+	acquired atomic.Int32
+}
+
+func (s *semaphoreSlots) AcquireBranchSlot(ctx context.Context, taskID int64) (func(), error) {
+	s.acquired.Add(1)
+	select {
+	case s.sem <- struct{}{}:
+		return func() { <-s.sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestParallelIsolatedRespectsSlotLimit(t *testing.T) {
+	names := []string{"impl-a", "impl-b", "impl-c"}
+	engine, tk, runner, _ := newIsolatedTestEngine(t, isolatedWorkflow("all", names...))
+	engine.SetBranchSlots(&semaphoreSlots{sem: make(chan struct{}, 1)})
+
+	var running, peak atomic.Int32
+	for _, n := range names {
+		runner.script(n, fakeAgentResult{resultText: "ok", onRun: func(*task.Task) {
+			cur := running.Add(1)
+			for {
+				p := peak.Load()
+				if cur <= p || peak.CompareAndSwap(p, cur) {
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+			running.Add(-1)
+		}})
+	}
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if got := peak.Load(); got != 1 {
+		t.Errorf("peak concurrent branches = %d, want 1", got)
+	}
+	for _, n := range names {
+		if len(runner.callsFor(n)) != 1 {
+			t.Errorf("%s calls = %d, want 1", n, len(runner.callsFor(n)))
+		}
+	}
+}
+
+func TestParallelSharedBranchesDoNotAcquireSlots(t *testing.T) {
+	engine, tk, _, _ := newFakeRunnerTestEngine(t, twoBranchWorkflow(""))
+	slots := &semaphoreSlots{sem: make(chan struct{}, 1)}
+	engine.SetBranchSlots(slots)
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if got := slots.acquired.Load(); got != 0 {
+		t.Errorf("shared branches acquired %d slots, want 0", got)
 	}
 }

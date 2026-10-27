@@ -307,6 +307,13 @@ func (e *Engine) runBranch(ctx context.Context, t *task.Task, wf *config.Workflo
 	run := t
 	imageRelPaths := ws.imageRelPaths
 	if baseCommit != "" {
+		if e.branchSlots != nil {
+			release, err := e.branchSlots.AcquireBranchSlot(ctx, t.ID)
+			if err != nil {
+				return fail(branchFailReason(err, e.cfg.GetStepTimeout(branch)), 1)
+			}
+			defer release()
+		}
 		bt := *t
 		bt.WorktreePath = IsolatedBranchWorktreePath(t.WorktreePath, branch.Name)
 		bt.Branch = IsolatedBranchGitBranch(t.Branch, branch.Name)

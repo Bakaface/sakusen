@@ -349,6 +349,7 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	// concurrent request. Re-wired here on every engine (re)construction so
 	// config reloads don't drop the signal path.
 	engine.SetPauseCallback(s.markEnginePaused)
+	engine.SetBranchSlots(s.manager)
 
 	pc := &projectContext{
 		cfg:                     projCfg,
