@@ -1,6 +1,6 @@
 # internal/git — Git Operations
 
-Worktree management, merge/rebase, conflict resolution, branch operations. Every git call is `exec.Command("git", ...)` with `Dir` set; there is no library binding.
+Worktree management, merge/rebase, conflict resolution, branch operations. Every git call is `exec.Command("git", ...)` with `Dir` set; there is no library binding. Load `/git-operations` skill (`.claude/skills/git-operations/SKILL.md`) before making substantial changes.
 
 ## Critical Invariants
 
@@ -13,12 +13,13 @@ Worktree management, merge/rebase, conflict resolution, branch operations. Every
 | File | Purpose |
 |------|---------|
 | `repo.go` | `Repo` — thin wrapper over a repo root. Main-tree operations (merge, branch management, worktree lifecycle) are methods with no path argument; operations scoped to one task worktree take that worktree's path explicitly. Cheap to construct per call site |
-| `worktree.go` | Worktree create/checkout/remove/list/prune, detach/reattach HEAD, default-branch detection (`symbolic-ref` → main/master → HEAD) |
+| `worktree.go` | Worktree create/checkout/remove/list/prune, detach/reattach HEAD, default-branch detection (`symbolic-ref` → main/master → HEAD). `EnsureWorktreeAt(path, branch, baseCommit)` adds a worktree at an explicit path from a base commit: an existing worktree root is reused untouched, a missing worktree on a surviving branch is re-added (after a prune) — unlike `CreateWorktree`, which removes an existing worktree first |
 | `operations.go` | Commit, meaningful-change detection, fast-forward-only merge, rebase with auto-abort, diff stat, conflict helpers (`MergeInto` / `GetConflictedFiles` / `CompleteMerge` / `AbortMerge`), revert, commit-message utilities |
 | `errors.go` | Sentinels classified from git stderr: `ErrWorktreeExists` (create falls back to checking out the existing branch), `ErrNotAWorktree` (remove treats as a no-op) |
 
 ## Conventions
 
 - Worktree path: `<repoRoot>/.sakusen/worktrees/<branch with slashes as dashes>`.
+- Isolated parallel branches (`isolation: worktree`) bypass the path convention: their worktree is `<task worktree>-<name>` on branch `<task branch>-<name>`, created via `EnsureWorktreeAt` (names derived in `internal/workflow/parallel.go`).
 - Conflict helpers leave the merge in progress on purpose; the workflow engine's conflict-resolution step runs an agent against the markers, then calls complete or abort.
 - `HasMeaningfulChanges` takes an `excludeFiles` list; the caller decides what to ignore.

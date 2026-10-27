@@ -363,7 +363,7 @@ routines:
     cadence: "0 3 * * *"
 ```
 
-A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`, `workdir`), `agent`, `on_complete`, `exclusive_workdir` (a `worktree: false` task waits while another active `worktree: false` task of the project holds the project root), `summarizer_prompt`, the per-workflow worktree/tmux overrides, `notifications` (per-event overrides and `notify_if`, also accepted on `routines:` entries; see the reference's Notifications section), and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `advance`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop` — or, instead of `prompt`, a `parallel:` block that fans out to concurrent headless branches on the same worktree (see the reference's Parallel Groups section). **Execution mode comes from the resolved agent record, never from the step.**
+A workflow body holds `name`, `description`, the pins (`input`, `worktree`, `branch`, `checkout`, `target`, `workdir`), `agent`, `on_complete`, `exclusive_workdir` (a `worktree: false` task waits while another active `worktree: false` task of the project holds the project root), `summarizer_prompt`, the per-workflow worktree/tmux overrides, `notifications` (per-event overrides and `notify_if`, also accepted on `routines:` entries; see the reference's Notifications section), and `steps:`. A step holds `name`, `description`, `prompt`, `agent`, `timeout`, `human`, `advance`, `summarization_strategy`, `summarization_prompt`, `require_context`, and `loop` — or, instead of `prompt`, a `parallel:` block that fans out to concurrent headless branches — on the same worktree by default, or each in its own throwaway worktree with `isolation: worktree` (see the reference's Parallel Groups section). **Execution mode comes from the resolved agent record, never from the step.**
 
 Prompts interpolate `{{task.*}}`, `{{git.*}}`, `{{steps.<name>.context}}`, `{{loop.*}}`, `{{track.*}}`, `{{tasks.<id>.<field>}}`, `{{children.*}}`, and `{{prompt.<name>}}` (inlines `<project>/.sakusen/prompts/<name>.md`, falling back to `~/.sakusen/prompts/<name>.md`, for passages shared across workflows). **Every multi-line variable must be wrapped in a semantic XML-style tag** (`<task-input>`, `<step-context name="...">`, `<track-context>`, `<chat>`, …) so the receiving agent can tell fixed prompt text from interpolated content. Do not hard-wrap prompt prose — see the reference for the canonical tag table, the full variable catalog, and prompt-formatting rules.
 
@@ -387,9 +387,48 @@ When the user describes what they want, follow this:
 14. **"Talk to me first, then run unattended"** (interview / plan approval / human gate) → A tmux step with `advance: explicit` that publishes a decision record via `update_step_context` and self-advances via `advance_task`, followed by headless steps templating that step's context — see `references/workflow-building.md` → The human-gated step
 15. **"Carry standing context across a stream of related tasks"** (sprint/epic/feature-area context) → Interpolate `{{track.context}}` in step prompts (explicit opt-in, empty for trackless tasks) and optionally write back with `update_track_context` — see `references/workflow-building.md` → Tracks in Workflows
 16. **"Several workflows repeat the same block of prompt text"** (craft guidance, review rules, commit hygiene) → Put the passage in `.sakusen/prompts/<name>.md` (or `~/.sakusen/prompts/` to share across projects) and reference it as `{{prompt.<name>}}`. Keep step-context wiring and scope-policy sentences inline — see `references/workflow-building.md` → Prompt Includes
-17. **"Run the same review with two different models"** / "redundant checks in parallel" / "several agents look at the same diff at once" → A `parallel:` group step: branches run concurrently on the one worktree, `require:` sets the join policy, and the group publishes one aggregated `{{steps.<group>.context}}` for a following synthesis step. Branches must be read-only — for concurrent work that WRITES, use child tasks (`create_tasks_and_wait`) instead. See `references/workflow-building.md` → Parallel Groups
+17. **"Run the same review with two different models"** / "redundant checks in parallel" / "several agents look at the same diff at once" → A `parallel:` group step: branches run concurrently on the one worktree, `require:` sets the join policy, and the group publishes one aggregated `{{steps.<group>.context}}` for a following synthesis step. In a shared group branches must be read-only; for concurrent work that WRITES, set `isolation: worktree` (each branch gets its own worktree and git branch, see the best-of-N example below) or use child tasks (`create_tasks_and_wait`) when each unit needs its own workflow and merge. See `references/workflow-building.md` → Parallel Groups
 18. **"Run this workflow on a schedule"** / **"give this predefined job a name I can invoke"** ("compose the wiki", "nightly digest", "weekly dependency bump") → A `routines:` entry naming the workflow, with pins and an optional `cadence`. One workflow can back several routines with different pins — see `references/workflow-building.md` → Routines — Invocation Bindings
 19. **"Reuse one workflow across projects / customize a shared workflow"** → Author it in `~/.sakusen.yml` or `~/.sakusen/workflows/`, reference it by name from the project, and override individual steps with bare-string step refs — see `references/workflow-building.md` → Global Workflows, Overrides, and Step References
+
+## Best-of-N with isolated parallel branches
+
+`isolation: worktree` lets several agents attempt the same WRITING task at once, then a later step picks the winner:
+
+```yaml
+workflows:
+  - name: best-of-n
+    steps:
+      - name: prepare
+        prompt: "Read <task-input>{{task.input}}</task-input> and commit any scaffolding the attempts should share."
+      - name: attempts
+        parallel:
+          isolation: worktree
+          require: 1                 # one successful attempt is enough; failures do not cancel the others
+          branches:
+            - name: attempt-opus
+              agent: claude:opus
+              prompt: "Implement: <task-input>{{task.input}}</task-input>"
+            - name: attempt-codex
+              agent: codex
+              prompt: "Implement: <task-input>{{task.input}}</task-input>"
+      - name: pick
+        prompt: |
+          Two independent attempts at the same task live on separate git branches. Failed attempts may be missing or incomplete.
+          - attempt-opus: branch `{{branches.attempt-opus.branch}}`, worktree `{{branches.attempt-opus.worktree}}`
+          - attempt-codex: branch `{{branches.attempt-codex.branch}}`, worktree `{{branches.attempt-codex.worktree}}`
+          <attempt-summaries>
+          {{steps.attempts.context}}
+          </attempt-summaries>
+          Compare the branches (`git diff HEAD...<branch>`), choose the better one, and merge it into the current worktree with `git merge <branch>`.
+```
+
+- Each branch gets worktree `<task worktree>-<name>` on git branch `<task branch>-<name>`, and a successful branch's changes are committed for you (`sakusen: task #N branch <name>`).
+- **Branches start from the task branch's HEAD, so uncommitted changes in the task worktree are NOT carried over.** Commit in an earlier step (like `prepare` above) anything the branches need.
+- `{{branches.<name>.branch}}` / `{{branches.<name>.worktree}}` resolve in any step's prompt; they are `""` for unknown names and for branches of a shared group.
+- Branch worktrees are removed together with the task worktree (after merge, on delete or cleanup); their git branches are deleted too unless the task checked out a user-provided branch.
+- Isolated branches count against `max_workers`: a task's first running branch reuses the task's own slot, and each further one takes another slot (waiting if none is free).
+- Every branch must resolve to a headless agent; `require: all` still cancels the siblings on the first failure.
 
 ## Discovering undocumented fields
 
@@ -411,6 +450,7 @@ This lists every YAML field name the binary will accept. Cross-reference unknown
 - Loop ranges cannot overlap
 - `advance: explicit` (tmux step advances only via `advance_task` or the user; not an approval gate) needs a step that resolves to a tmux-mode agent, cannot be combined with `human: true`, and is not allowed on a parallel group or branch
 - A `parallel:` group step sets no `prompt`/`loop`/`human`/`advance`/`summarization_strategy`/`summarization_prompt`/`require_context`; its branches set no `parallel`/`loop`/`human`/`advance` and must be inline mappings. `require:` is `all` (default), `any`, or an integer in `1..len(branches)`
+- `parallel.isolation:` is `shared` (default) or `worktree`; `isolation: worktree` is a load error under a workflow, or a routine, that pins `worktree: false`
 - Parallel branch names share the step namespace — unique across the whole workflow — and every branch must resolve to a headless agent. A loop `goto` may target a group but not a branch; retry-from-step takes the group name, not a branch name
 - `on_complete` (top-level, or per-workflow override) values: `"commit"`, `"merge"`, `"none"` — moved out of `git:`; `git.on_complete` is now an error
 - Never emit the removed keys (`claude:`, `yolo:`, `system_prompt:`, `allowed_summarization_models:`, `print:`, `tmux:`) — all are hard load errors. See [Removed keys](#removed-keys-hard-load-errors--never-emit-these).

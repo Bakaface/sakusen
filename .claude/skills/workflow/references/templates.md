@@ -10,6 +10,7 @@ type TemplateContext struct {
     Loop      LoopVars
     Track     TrackVars           // zero value (trackless task) resolves every {{track.*}} var to ""
     Branch    BranchVars          // set ONLY while resolving a parallel branch's prompt
+    Branches  map[string]IsolatedBranchVars // every isolated parallel branch -> {Branch, Worktree}, derived from config
     PromptDirs []string           // ordered {{prompt.<name>}} search roots (config.PromptDirs)
 }
 
@@ -62,6 +63,8 @@ type BranchVars struct {
 | `{{conflict.files}}` | Conflicted files as one `` - `path` `` line each — merge-conflict resolver prompts only; "" everywhere else |
 | `{{branch.name}}` | Parallel branch name — "" outside a branch prompt |
 | `{{branch.agent}}` | Resolved agent slug of the running branch — "" outside a branch prompt |
+| `{{branches.name.branch}}` | Git branch of an isolated (`isolation: worktree`) parallel branch, `<task branch>-<name>` — "" for unknown names and shared-group branches |
+| `{{branches.name.worktree}}` | Worktree path of an isolated parallel branch, `<task worktree>-<name>` — "" for unknown names and shared-group branches |
 | `{{steps.step_name.context}}` | Step context from DB (captured from the agent's result text or a summarize_chat pass) |
 | `{{steps.group_name.context}}` | A parallel group's AGGREGATE — see below |
 | `{{artifacts.step_name}}` | Backward compat alias for `{{steps.step_name.context}}` |

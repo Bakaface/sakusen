@@ -679,9 +679,10 @@ steps:
       </parallel-reviews>
 ```
 
-**Branches must be read-only.** They share the task's single worktree and run at the same time,
-so two branches writing the same files would race. Nothing enforces this — say so in the branch
-prompts. (Isolated per-branch worktrees are a separate, later feature.)
+**In a shared group (the default), branches must be read-only.** They share the task's single
+worktree and run at the same time, so two branches writing the same files would race. Nothing
+enforces this — say so in the branch prompts. For branches that write, use
+[`isolation: worktree`](#isolation--per-branch-worktrees).
 
 ### `require:` — the join policy
 
@@ -693,6 +694,56 @@ prompts. (Isolated per-branch worktrees are a separate, later feature.)
 
 When too few branches succeed, the task fails with an error naming each failed branch and its
 reason (`exit 3`, `timed out after 20m`, `cancelled`) plus a tail of the first failure's log.
+
+### `isolation:` — per-branch worktrees
+
+| Value | Meaning |
+|---|---|
+| omitted / `shared` | Every branch runs in the task's worktree (read-only branches). |
+| `worktree` | Every branch gets its own throwaway worktree and git branch, so branches may write. |
+
+```yaml
+  - name: attempts
+    parallel:
+      isolation: worktree
+      require: 1
+      branches:
+        - name: attempt-opus
+          agent: claude:opus
+          prompt: "Implement: <task-input>{{task.input}}</task-input>"
+        - name: attempt-codex
+          agent: codex
+          prompt: "Implement: <task-input>{{task.input}}</task-input>"
+
+  - name: pick
+    prompt: |
+      Compare `{{branches.attempt-opus.branch}}` (worktree `{{branches.attempt-opus.worktree}}`) with `{{branches.attempt-codex.branch}}` (worktree `{{branches.attempt-codex.worktree}}`), pick the better attempt and `git merge` its branch into the current worktree.
+      <attempt-summaries>
+      {{steps.attempts.context}}
+      </attempt-summaries>
+```
+
+- **Naming:** branch `<name>` runs in worktree `<task worktree>-<name>` on git branch
+  `<task branch>-<name>`.
+- **Starting point:** branches are created from the task branch's HEAD. **Uncommitted changes in
+  the task worktree are not carried over** — commit them in an earlier step.
+- **Hand-back:** a successful branch's changes are committed on its branch
+  (`sakusen: task #N branch <name>`; nothing is committed when the tree is clean). A failed
+  branch is left uncommitted. Nothing is merged into the task branch for you — a later step does
+  that, locating each branch through `{{branches.<name>.branch}}` and
+  `{{branches.<name>.worktree}}` (both `""` for unknown names and for shared-group branches).
+- **Join policy:** `require: all` still cancels siblings on the first failure. Under `any` / `<N>`
+  a success never cancels the others (their work is kept for the picking step); the group fails
+  as soon as N successes become unreachable.
+- **Retries and loops** reuse an existing branch worktree, so a re-run branch continues from its
+  previous state.
+- **Cleanup:** branch worktrees are removed with the task worktree (after merge, on delete or
+  cleanup); their git branches are deleted too unless the task checked out a user-provided
+  branch.
+- **Workers:** isolated branches count against `max_workers`. A task's first running branch
+  reuses the task's own slot; each further branch takes another slot, waiting if none is free.
+- **Requires a worktree:** `isolation: worktree` is a load error under a workflow or routine
+  that pins `worktree: false`, and fails the group at runtime for a task created without one.
 
 ### Branch fields
 
@@ -751,9 +802,10 @@ whole workflow.
 
 ### Parallel group vs. child tasks
 
-A parallel group is for **one task doing several things at once on one branch**: several readers
-of the same diff, whose outputs are combined into one prompt. It costs no extra worktrees,
-branches, or task rows, and the branches cannot write.
+A shared parallel group is for **one task doing several things at once on one branch**: several
+readers of the same diff, whose outputs are combined into one prompt. It costs no extra worktrees,
+branches, or task rows, and the branches cannot write. An `isolation: worktree` group lets the
+branches write (best-of-N, competing attempts) while staying one task with one merge.
 
 Use `create_tasks_and_wait` (see [MCP Orchestration Patterns](#mcp-orchestration-patterns))
 instead when the concurrent work needs to **produce changes** — separate worktrees, separate
