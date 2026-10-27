@@ -196,3 +196,124 @@ func TestTaskInfo_OpenFetchesFanoutChildren(t *testing.T) {
 		t.Error("a task without a fanout step must not trigger GetTask")
 	}
 }
+
+func fanoutNodesWorkflow() *config.WorkflowConfig {
+	return &config.WorkflowConfig{
+		Name: "graphed",
+		Steps: []config.StepConfig{
+			{Name: "plan", Prompt: "p"},
+			{Name: "build", Fanout: &config.FanoutConfig{Workflow: "unit", Require: "all", Nodes: []config.FanoutNodeConfig{
+				{Name: "release-prep", Needs: []string{"integrate", "docs", "infra"}},
+				{Name: "integrate", Needs: []string{"api", "ui", "schema"}},
+				{Name: "api"},
+				{Name: "ui"},
+				{Name: "schema"},
+				{Name: "docs"},
+				{Name: "infra"},
+			}}},
+		},
+	}
+}
+
+func renderFanoutNodesTaskInfo(t *testing.T, children []daemon.FanoutChildInfo) (metadata, view string) {
+	t.Helper()
+	v := newTaskInfoView()
+	v.SetSize(120, 80)
+	v.SetWorkflow(fanoutNodesWorkflow())
+	v.SetTask(&daemon.TaskInfo{
+		ID: 7, Title: "Graphed task", Status: "awaiting-children",
+		Workflow: "graphed", StepIndex: 1, CurrentStep: "build",
+	})
+	v.SetFanoutChildren(children)
+	return stripANSI(v.renderMetadata()), v.View()
+}
+
+// nodeRows returns the trimmed node sub-rows following the build step row.
+func nodeRows(lines []string) []string {
+	var rows []string
+	in := false
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "2. build"):
+			in = true
+		case in && strings.HasPrefix(l, "      "):
+			rows = append(rows, strings.TrimSpace(l))
+		case in:
+			return rows
+		}
+	}
+	return rows
+}
+
+func TestTaskInfoView_FanoutNodes(t *testing.T) {
+	t.Run("partly run", func(t *testing.T) {
+		children := []daemon.FanoutChildInfo{
+			{Step: "build", Slug: "api", TaskID: 21, Status: "completed"},
+			{Step: "build", Slug: "ui", TaskID: 22, Status: "completed"},
+			{Step: "build", Slug: "schema", TaskID: 23, Status: "running"},
+			{Step: "build", Slug: "docs", TaskID: 24, Status: "pending"},
+			{Step: "build", Slug: "infra", TaskID: 25, Status: "completed"},
+		}
+		metadata, view := renderFanoutNodesTaskInfo(t, children)
+		lines := strings.Split(metadata, "\n")
+
+		if !strings.Contains(metadata, "2. build [fanout 3/7, require:all →unit]") {
+			t.Errorf("missing node fanout badge\n%s", metadata)
+		}
+		want := []string{
+			"✓ api #21 completed",
+			"✓ ui #22 completed",
+			"● schema #23 running",
+			"○ integrate waiting on schema",
+			"○ docs #24 pending",
+			"✓ infra #25 completed",
+			"○ release-prep waiting on integrate, docs",
+		}
+		got := nodeRows(lines)
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("node rows =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+
+		assertViewWidth(t, view, 120)
+		assertUniformFrameWidth(t, view)
+	})
+
+	t.Run("failed need", func(t *testing.T) {
+		children := []daemon.FanoutChildInfo{
+			{Step: "build", Slug: "api", TaskID: 21, Status: "completed"},
+			{Step: "build", Slug: "ui", TaskID: 22, Status: "completed"},
+			{Step: "build", Slug: "schema", TaskID: 23, Status: "failed"},
+			{Step: "build", Slug: "docs", TaskID: 24, Status: "completed"},
+			{Step: "build", Slug: "infra", TaskID: 25, Status: "completed"},
+		}
+		metadata, view := renderFanoutNodesTaskInfo(t, children)
+		got := nodeRows(strings.Split(metadata, "\n"))
+		if len(got) != 7 {
+			t.Fatalf("node rows = %d, want 7\n%s", len(got), metadata)
+		}
+		if got[3] != "✗ integrate skipped" || got[6] != "✗ release-prep skipped" {
+			t.Errorf("dependents of a failed need = %q, %q; want skipped", got[3], got[6])
+		}
+
+		assertViewWidth(t, view, 120)
+		assertUniformFrameWidth(t, view)
+	})
+
+	t.Run("failed need with retries left", func(t *testing.T) {
+		wf := fanoutNodesWorkflow()
+		wf.Steps[1].Fanout.Retries = 1
+		v := newTaskInfoView()
+		v.SetSize(120, 80)
+		v.SetWorkflow(wf)
+		v.SetTask(&daemon.TaskInfo{ID: 7, Status: "awaiting-children", Workflow: "graphed", StepIndex: 1, CurrentStep: "build"})
+		v.SetFanoutChildren([]daemon.FanoutChildInfo{
+			{Step: "build", Slug: "api", TaskID: 21, Status: "completed"},
+			{Step: "build", Slug: "ui", TaskID: 22, Status: "completed"},
+			{Step: "build", Slug: "schema", TaskID: 23, Status: "failed"},
+		})
+		got := nodeRows(strings.Split(stripANSI(v.renderMetadata()), "\n"))
+		if len(got) != 7 || got[3] != "○ integrate waiting on schema" {
+			t.Errorf("a retryable failed need must keep its dependent waiting: %q", got)
+		}
+	})
+}

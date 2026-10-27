@@ -321,15 +321,26 @@ func (v *taskInfoView) renderMetadata() string {
 						}
 					}
 				}
-				suffix += fmt.Sprintf(" [fanout %d/%d, require:%s →%s]",
-					done, total, step.Fanout.EffectiveRequire(), step.Fanout.Workflow)
+				if step.Fanout.IsNodes() {
+					total = len(step.Fanout.Nodes)
+				}
+				target := ""
+				if step.Fanout.Workflow != "" {
+					target = " →" + step.Fanout.Workflow
+				}
+				suffix += fmt.Sprintf(" [fanout %d/%d, require:%s%s]",
+					done, total, step.Fanout.EffectiveRequire(), target)
 			}
 
 			b.WriteString(style.Render(fmt.Sprintf("  %s %d. %s%s", icon, i+1, step.Name, suffix)))
 			b.WriteString("\n")
 
 			if step.IsFanout() {
-				for _, row := range renderFanoutChildRows(step.Name, v.fanoutChildren) {
+				rows := renderFanoutChildRows(step.Name, v.fanoutChildren)
+				if step.Fanout.IsNodes() {
+					rows = renderFanoutNodeRows(step.Fanout, step.Name, v.fanoutChildren)
+				}
+				for _, row := range rows {
 					b.WriteString(row)
 					b.WriteString("\n")
 				}
@@ -525,6 +536,73 @@ func renderFanoutChildRows(step string, children []daemon.FanoutChildInfo) []str
 	}
 	if extra := len(mine) - len(shown); extra > 0 {
 		rows = append(rows, dimStyle.Render(fmt.Sprintf("      +%d more", extra)))
+	}
+	return rows
+}
+
+// renderFanoutNodeRows renders one sub-row per declared node in dependency
+// order: spawned nodes show their child, unspawned ones whether they wait on
+// unfinished needs or are skipped behind a need that failed for good.
+func renderFanoutNodeRows(f *config.FanoutConfig, step string, children []daemon.FanoutChildInfo) []string {
+	bySlug := make(map[string]daemon.FanoutChildInfo)
+	for _, c := range children {
+		if c.Step == step {
+			bySlug[c.Slug] = c
+		}
+	}
+	index := make(map[string]int, len(f.Nodes))
+	for i, n := range f.Nodes {
+		index[n.Name] = i
+	}
+	// Mirrors the engine: a failed child is retried while its attempts are
+	// below the node's retries; merge-failed is never retried.
+	failedForGood := func(name string) bool {
+		c, ok := bySlug[name]
+		if !ok {
+			return false
+		}
+		switch task.Status(c.Status) {
+		case task.StatusMergeFailed:
+			return true
+		case task.StatusFailed:
+			return c.Attempts >= f.EffectiveNodeRetries(index[name])
+		default:
+			return false
+		}
+	}
+
+	skipped := make(map[string]bool)
+	rows := make([]string, 0, len(f.Nodes))
+	for _, i := range f.NodeTopoOrder() {
+		n := f.Nodes[i]
+		if c, ok := bySlug[n.Name]; ok {
+			glyph := fanoutChildStepStatus(c.Status)
+			rows = append(rows, branchRowStyle(glyph).Render(
+				fmt.Sprintf("      %s %s #%d %s", branchIcon(glyph), n.Name, c.TaskID, c.Status)))
+			continue
+		}
+		var open []string
+		for _, need := range n.Needs {
+			if skipped[need] || failedForGood(need) {
+				skipped[n.Name] = true
+				break
+			}
+			if c, ok := bySlug[need]; !ok || c.Status != string(task.StatusCompleted) {
+				open = append(open, need)
+			}
+		}
+		if skipped[n.Name] {
+			rows = append(rows, dimStyle.Render(fmt.Sprintf("      %s %s skipped", branchIcon(stepStatusFailed), n.Name)))
+			continue
+		}
+		if len(n.Needs) == 0 {
+			rows = append(rows, dimStyle.Render(fmt.Sprintf("      %s %s pending", branchIcon(""), n.Name)))
+			continue
+		}
+		if len(open) == 0 {
+			open = n.Needs
+		}
+		rows = append(rows, dimStyle.Render(fmt.Sprintf("      %s %s waiting on %s", branchIcon(""), n.Name, strings.Join(open, ", "))))
 	}
 	return rows
 }
