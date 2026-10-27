@@ -50,6 +50,9 @@ type Engine struct {
 	// a concurrent request can overwrite (see SetPauseCallback).
 	onPause func(taskID int64)
 
+	// fanoutHost spawns fanout children (see SetFanoutHost).
+	fanoutHost FanoutHost
+
 	// branchSlots caps how many isolated parallel branches run at once across
 	// the daemon; nil means unlimited.
 	branchSlots BranchSlots
@@ -510,6 +513,9 @@ type stepResult struct {
 	resultText string
 	outputTail string
 	useTmux    bool
+	// suspend: a fanout step is waiting on its children (wait-on edges are
+	// already recorded).
+	suspend bool
 }
 
 // recordExitCode persists a failed step's exit code and error message.
@@ -546,6 +552,14 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	// Record step start in task_steps table
 	if err := e.database.CreateTaskStep(t.ID, step.Name); err != nil {
 		log.Printf("Warning: failed to create task step record: %v", err)
+	}
+
+	// A fanout source publishes a fresh list on every run; a stale one from an
+	// earlier run must not be fanned out.
+	if wf.IsFanoutSource(step.Name) {
+		if err := e.database.ClearPublishedItems(t.ID, step.Name); err != nil {
+			log.Printf("Warning: failed to clear published items for step %q of task #%d: %v", step.Name, t.ID, err)
+		}
 	}
 
 	// Collect step contexts from ALL steps that have a recorded context.
@@ -626,6 +640,10 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	// context assembled above. See parallel.go.
 	if step.IsParallel() {
 		return e.runParallelGroup(ctx, t, wf, step, tmplCtx, ws, outputFn)
+	}
+	// A fanout runs no agent either: it spawns child tasks. See fanout.go.
+	if step.IsFanout() {
+		return e.runFanoutStep(t, step, tmplCtx)
 	}
 
 	// A {{prompt.<name>}} include that can't be read (file deleted since the
@@ -733,7 +751,7 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 	if waitsErr != nil {
 		log.Printf("Warning: failed to check waits-on for task #%d: %v", t.ID, waitsErr)
 	}
-	if hasWaits {
+	if hasWaits || result.suspend {
 		// Skip output validation, step completion record, summarize_chat,
 		// loop handling, and the tmux/human approval pause — none of them
 		// apply to a step that is going to re-run. The step_index stays at
@@ -745,9 +763,27 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 		return stepOutcome{kind: stepOutcomeSuspend}, nil
 	}
 
+	// A fanout source must have published its items by the time it completes.
+	// A tmux step publishes from its live session after this point, so the
+	// fanout's own missing-items check covers it instead.
+	if !result.useTmux {
+		if fanout := fanoutConsumer(wf, step.Name); fanout != "" {
+			_, published, err := e.database.GetPublishedItems(t.ID, step.Name)
+			if err != nil {
+				return stepOutcome{}, fmt.Errorf("step %q: failed to read published items: %w", step.Name, err)
+			}
+			if !published {
+				errMsg := fmt.Sprintf("step %q completed without publishing items for fanout %q", step.Name, fanout)
+				e.recordExitCode(t.ID, 1, errMsg)
+				return stepOutcome{}, errors.New(errMsg)
+			}
+		}
+	}
+
 	// Validate that the step produced meaningful changes
 	// Skip for human and tmux steps (handled separately or not yet complete)
-	if !step.Human && !result.useTmux {
+	// and fanout steps (their result is the engine-built aggregate)
+	if !step.Human && !result.useTmux && !step.IsFanout() {
 		if strings.TrimSpace(result.resultText) == "" {
 			// No output — require a diff as the alternative signal
 			noiseFiles := []string{runner.OutputLogFileName}

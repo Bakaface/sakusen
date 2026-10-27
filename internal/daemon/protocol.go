@@ -197,6 +197,8 @@ type CreateTaskRequest struct {
 	// PersistDefaults saves this request's worktree, branch mode and workflow
 	// as the project's New Task defaults.
 	PersistDefaults bool `json:"persist_defaults,omitempty"`
+	// FanoutOrigin is set by the engine's fanout host, never by a client.
+	FanoutOrigin *task.FanoutOrigin `json:"-"`
 }
 
 type ContinueTaskRequest struct {

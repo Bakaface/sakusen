@@ -36,6 +36,7 @@ type taskStore interface {
 	// Task CRUD, lookup, and lifecycle transitions.
 	CreateTask(projectID int64, title, description, slug, workflow, branch string, status task.Status, images []string) (*task.Task, error)
 	CreateTaskWithPriority(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error)
+	CreateFanoutChildTask(projectID int64, title, description, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64, origin task.FanoutOrigin) (*task.Task, error)
 	GetTask(id int64) (*task.Task, error)
 	GetAllTasks() ([]*task.Task, error)
 	GetRunningTasks() ([]*task.Task, error)
@@ -174,4 +175,10 @@ type taskStore interface {
 	RemoveAllTaskWaitsOn(taskID int64) error
 	AppendTaskCommit(id int64, commitHash string) error
 	GetWorktreeTasksOnBranch(projectID int64, branch string) ([]*task.Task, error)
+	// Fanout steps: the engine reads the published list, clears it when the
+	// source step re-runs, and joins on the children it spawned.
+	GetPublishedItems(taskID int64, step string) ([]task.PublishedItem, bool, error)
+	ClearPublishedItems(taskID int64, step string) error
+	GetFanoutChildren(parentID int64, step string) ([]*task.Task, error)
+	GetFanoutDepth(taskID int64) (int, error)
 }

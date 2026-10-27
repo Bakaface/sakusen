@@ -350,6 +350,7 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 	// config reloads don't drop the signal path.
 	engine.SetPauseCallback(s.markEnginePaused)
 	engine.SetBranchSlots(s.manager)
+	engine.SetFanoutHost(fanoutHost{s: s})
 
 	pc := &projectContext{
 		cfg:                     projCfg,

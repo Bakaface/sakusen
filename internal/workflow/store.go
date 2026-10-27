@@ -17,8 +17,8 @@ import (
 // keep passing a *db.DB into NewEngine unchanged.
 //
 // Methods are grouped by concern, mirroring the order they're touched during
-// a task run: task reads/writes, step tracking, chat sessions, then
-// child-task suspension (task_waits_on).
+// a task run: task reads/writes, step tracking, chat sessions,
+// child-task suspension (task_waits_on), then fanout.
 type taskStore interface {
 	// Task reads and field updates.
 	GetTask(id int64) (*task.Task, error)
@@ -75,4 +75,11 @@ type taskStore interface {
 	HasAnyWaitsOn(taskID int64) (bool, error)
 	GetWaitsOnChildren(taskID int64) ([]*task.Task, error)
 	RemoveAllTaskWaitsOn(taskID int64) error
+	AddTaskWaitsOn(taskID, waitsOnID int64) error
+
+	// Fanout: published item lists and the children a fanout step spawned.
+	GetPublishedItems(taskID int64, step string) ([]task.PublishedItem, bool, error)
+	ClearPublishedItems(taskID int64, step string) error
+	GetFanoutChildren(parentID int64, step string) ([]*task.Task, error)
+	GetFanoutDepth(taskID int64) (int, error)
 }

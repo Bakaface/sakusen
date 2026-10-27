@@ -73,6 +73,17 @@ type IsolatedBranchVars struct {
 	Worktree string
 }
 
+// ItemVars is the published item a fanout child's input is being rendered
+// for, exposed as {{item.input}}, {{item.slug}}, {{item.title}} and
+// {{item.index}} (1-based). The zero value (any non-fanout resolution)
+// renders every field as "".
+type ItemVars struct {
+	Input string
+	Slug  string
+	Title string
+	Index int
+}
+
 // ConflictVars exposes the merge-conflict resolver's working set via
 // {{conflict.files}}. The zero value (any non-resolver context) renders "".
 type ConflictVars struct {
@@ -92,6 +103,8 @@ type TemplateContext struct {
 	// Branches maps every isolated parallel branch of the workflow to its git
 	// branch and worktree. Nil for non-worktree tasks.
 	Branches map[string]IsolatedBranchVars
+	// Item is set only while rendering a fanout child's input.
+	Item ItemVars
 	// TaskLookup resolves a task by ID for {{tasks.<id>.<field>}} references.
 	// When nil, such references resolve to "".
 	TaskLookup func(int64) (*task.Task, error)
@@ -168,6 +181,17 @@ func resolveVars(tmpl string, ctx *TemplateContext) string {
 			return ctx.Branch.Name
 		case key == "branch.agent":
 			return ctx.Branch.Agent
+		case key == "item.input":
+			return ctx.Item.Input
+		case key == "item.slug":
+			return ctx.Item.Slug
+		case key == "item.title":
+			return ctx.Item.Title
+		case key == "item.index":
+			if ctx.Item.Index == 0 {
+				return ""
+			}
+			return strconv.Itoa(ctx.Item.Index)
 		case key == "conflict.files":
 			return formatConflictFiles(ctx.Conflict.Files)
 		case key == "track.id":

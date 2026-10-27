@@ -159,6 +159,15 @@ func (f *fakeTaskStore) DeleteTaskStepsFrom(taskID int64, stepNames []string) er
 func (f *fakeTaskStore) HasAnyWaitsOn(taskID int64) (bool, error)                   { return false, nil }
 func (f *fakeTaskStore) GetWaitsOnChildren(taskID int64) ([]*task.Task, error)      { return nil, nil }
 func (f *fakeTaskStore) RemoveAllTaskWaitsOn(taskID int64) error                    { return nil }
+func (f *fakeTaskStore) AddTaskWaitsOn(taskID, waitsOnID int64) error               { return nil }
+func (f *fakeTaskStore) GetPublishedItems(taskID int64, step string) ([]task.PublishedItem, bool, error) {
+	return nil, false, nil
+}
+func (f *fakeTaskStore) ClearPublishedItems(taskID int64, step string) error { return nil }
+func (f *fakeTaskStore) GetFanoutChildren(parentID int64, step string) ([]*task.Task, error) {
+	return nil, nil
+}
+func (f *fakeTaskStore) GetFanoutDepth(taskID int64) (int, error) { return 0, nil }
 
 // TestPromoteSingleStepContextToTaskFakeStore demonstrates the taskStore fake
 // seam: promoteSingleStepContextToTask reads a step's captured context and

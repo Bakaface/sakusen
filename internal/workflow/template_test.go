@@ -383,3 +383,27 @@ func TestResolveTemplateBranchesVars(t *testing.T) {
 		t.Errorf("empty map resolved to %q, want %q", got, "[]")
 	}
 }
+
+// TestResolveTemplateItemVars covers {{item.*}}: set while rendering a fanout
+// child's input, empty everywhere else.
+func TestResolveTemplateItemVars(t *testing.T) {
+	inItem := &TemplateContext{
+		Item:  ItemVars{Input: "do x", Slug: "x", Title: "Do X", Index: 2},
+		Steps: map[string]string{"plan": "the plan"},
+	}
+	got, err := ResolveTemplate("{{item.index}}:{{item.slug}}:{{item.title}}:{{item.input}}:{{steps.plan.context}}", inItem)
+	if err != nil {
+		t.Fatalf("ResolveTemplate: %v", err)
+	}
+	if want := "2:x:Do X:do x:the plan"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	got, err = ResolveTemplate("[{{item.index}}][{{item.slug}}][{{item.title}}][{{item.input}}]", &TemplateContext{})
+	if err != nil {
+		t.Fatalf("ResolveTemplate: %v", err)
+	}
+	if got != "[][][][]" {
+		t.Errorf("got %q, want empty item vars outside a fanout input render", got)
+	}
+}

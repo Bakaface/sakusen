@@ -170,8 +170,9 @@ func (e *Engine) captureHeadlessStepContext(ctx context.Context, t *task.Task, w
 	// the whole precedence chain per branch and assembled the aggregate, which
 	// arrives here as resultText. Running the chain again would let a manual
 	// write against the group row, or a summarize_chat pass over a log the
-	// group never wrote, replace the aggregate. Store it verbatim.
-	if step.IsParallel() {
+	// group never wrote, replace the aggregate. Store it verbatim. A fanout
+	// step's aggregate is engine-built the same way.
+	if step.IsParallel() || step.IsFanout() {
 		if err := e.database.CompleteTaskStep(t.ID, step.Name, &resultText, exitCode); err != nil {
 			log.Printf("Warning: failed to complete parallel group step record: %v", err)
 		}

@@ -273,7 +273,12 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 	if tr != nil {
 		trackID = &tr.ID
 	}
-	t, err := s.database.CreateTaskWithPriority(proj.ID, title, input, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
+	var t *task.Task
+	if req.FanoutOrigin != nil {
+		t, err = s.database.CreateFanoutChildTask(proj.ID, title, input, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID, *req.FanoutOrigin)
+	} else {
+		t, err = s.database.CreateTaskWithPriority(proj.ID, title, input, slug, workflowName, branchName, "", targetBranch, checkoutBranch, task.StatusInit, priority, worktree, req.Images, trackID)
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create task: %v", err)
 	}
