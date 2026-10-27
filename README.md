@@ -286,8 +286,8 @@ A `fanout:` step runs no agent. It spawns one child task per item that an earlie
 | Key | Default | Notes |
 |---|---|---|
 | `from` | required unless `nodes` is set | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
-| `workflow` | required | The workflow each child runs. It must exist and have no `human:` step or step that resolves to a tmux-mode agent, because children run unattended. |
-| `input` | `{{item.input}}` | Child task input template. Sees the normal variables plus `{{item.*}}`. |
+| `workflow` | required (with `nodes:`, unless every node sets its own) | The workflow each child runs. It must exist and have no `human:` step or step that resolves to a tmux-mode agent, because children run unattended. |
+| `input` | `{{item.input}}` | Child task input template. Sees the normal variables plus `{{item.*}}`. Rejected with `nodes:`, where each node carries its own. |
 | `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
 | `require` | `all` | Join policy: `all`, `any`, or an integer `N >= 1` (at least N children must complete). |
 | `retries` | `0` | How many times a failed child is re-run automatically before the join judges it. |

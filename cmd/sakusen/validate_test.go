@@ -251,3 +251,32 @@ func TestValidate_FanoutNodes(t *testing.T) {
 		})
 	}
 }
+
+// A needed node's workflow may inherit on_complete: merge from the project's
+// top level; validate must apply that cascade, not the built-in default.
+func TestValidate_FanoutNodesTopLevelOnComplete(t *testing.T) {
+	nodes := `            - name: ui
+              input: "{{steps.api.context}}"
+              needs: [api]
+`
+	fixture := strings.Replace(strings.Replace(fanoutNodesValidateFixture, "%NODES%", nodes, 1), "    on_complete: merge\n", "", 1)
+	for _, tc := range []struct{ name, top, wantErr string }{
+		{"inherits merge", "on_complete: merge\n", ""},
+		{"inherits commit", "on_complete: commit\n", `must have on_complete: merge (got "commit")`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateGlobalConfig(t)
+			path := writeValidateFixture(t, tc.top+fixture)
+			err := validateCmd.RunE(validateCmd, []string{path})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected valid nodes config, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validate err = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}

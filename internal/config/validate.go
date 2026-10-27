@@ -275,6 +275,9 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	if err := validateRoutines(&routineCfg); err != nil {
 		return nil, err
 	}
+	// The needed-node on_complete rule cascades through this file's top-level
+	// value; unset is left "" because only the merged load knows the global tier.
+	routineCfg.OnComplete = proj.OnComplete
 	if err := validateFanoutTargets(&routineCfg); err != nil {
 		return nil, err
 	}

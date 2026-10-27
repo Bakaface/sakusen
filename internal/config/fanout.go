@@ -66,7 +66,8 @@ func validateFanoutNodeTargets(cfg *Config, wf *WorkflowConfig, step *StepConfig
 			}
 		}
 		if needed[n.Name] {
-			if oc := cfg.EffectiveOnComplete(child.Name); oc != "merge" {
+			// "" is an unresolved tier (single-file validation); the merged load decides.
+			if oc := cfg.EffectiveOnComplete(child.Name); oc != "merge" && oc != "" {
 				return fmt.Errorf("workflow %q step %q: fanout node %q is needed by another node, so its workflow %q must have on_complete: merge (got %q)",
 					wf.Name, step.Name, n.Name, child.Name, oc)
 			}
