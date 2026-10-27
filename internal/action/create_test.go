@@ -69,3 +69,23 @@ func TestRunCreate_WorkdirPassthrough(t *testing.T) {
 		t.Errorf("Workdir: got %q, want em/rails-foundation", got.Workdir)
 	}
 }
+
+func TestRunCreate_PersistDefaultsPassthrough(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		var got daemon.CreateTaskRequest
+		fc := &fakeClient{createTask: func(req daemon.CreateTaskRequest) (*daemon.TaskInfo, error) {
+			got = req
+			return &daemon.TaskInfo{ID: 1}, nil
+		}}
+		if _, err := action.RunCreate(action.Ctx{Client: fc}, action.CreateArgs{
+			Input:           "do the thing",
+			ProjectPath:     "/tmp/proj",
+			PersistDefaults: want,
+		}); err != nil {
+			t.Fatalf("RunCreate: %v", err)
+		}
+		if got.PersistDefaults != want {
+			t.Errorf("PersistDefaults: got %v, want %v", got.PersistDefaults, want)
+		}
+	}
+}

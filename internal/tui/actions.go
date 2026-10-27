@@ -238,6 +238,8 @@ func (m Model) createTaskWithPrompt(title, slug, input, branchName string, workt
 			ProjectPath: m.projectPath,
 			Images:      images,
 			BranchMode:  &bm,
+			// Only the New Task form saves the project's defaults.
+			PersistDefaults: true,
 		}
 		if m.blockingTaskID != 0 {
 			args.DependsOn = []int64{m.blockingTaskID}

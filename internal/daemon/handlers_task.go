@@ -252,12 +252,10 @@ func (s *Server) createTaskFromRequest(req CreateTaskRequest) (*task.Task, strin
 		workdir = config.CleanWorkdir(reqWorkdir)
 	}
 
-	// Persist form preferences for this project. Only user-driven choices
-	// (explicit request values) should overwrite the saved project defaults —
-	// pin-derived worktree values must not leak into the persisted default.
-	// Skipped for routine fires — those must not clobber the user's
-	// interactive "new task" defaults (worktree / branch mode / workflow).
-	if req.PeriodicID == nil {
+	// Persist form preferences for this project, only when the caller opts in
+	// (the TUI new-task form). Only explicit request values may overwrite the
+	// saved defaults — pin-derived worktree values must not leak into them.
+	if req.PersistDefaults {
 		persistWorktree := proj.DefaultWorktree
 		if req.Worktree != nil {
 			persistWorktree = *req.Worktree

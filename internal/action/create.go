@@ -42,6 +42,9 @@ type CreateArgs struct {
 	BranchMode  *int
 	// NotBefore keeps the task pending until this time; nil means no wait.
 	NotBefore *time.Time
+	// PersistDefaults saves the worktree, branch mode and workflow as the
+	// project's New Task defaults.
+	PersistDefaults bool
 }
 
 func (a CreateArgs) Validate() error {
@@ -63,23 +66,24 @@ func RunCreate(ctx Ctx, args CreateArgs) (Result, error) {
 	}
 
 	req := daemon.CreateTaskRequest{
-		Title:          args.Title,
-		Slug:           args.Slug,
-		Input:          strings.TrimSpace(args.Input),
-		Workflow:       args.Workflow,
-		Priority:       args.Priority,
-		BranchName:     args.Branch,
-		TargetBranch:   args.Target,
-		CheckoutBranch: args.Checkout,
-		ProjectPath:    args.ProjectPath,
-		Worktree:       args.Worktree,
-		Workdir:        args.Workdir,
-		Track:          args.Track,
-		BranchMode:     args.BranchMode,
-		TmuxDirect:     args.TmuxDirect,
-		Images:         args.Images,
-		BlockedBy:      args.DependsOn,
-		NotBefore:      args.NotBefore,
+		Title:           args.Title,
+		Slug:            args.Slug,
+		Input:           strings.TrimSpace(args.Input),
+		Workflow:        args.Workflow,
+		Priority:        args.Priority,
+		BranchName:      args.Branch,
+		TargetBranch:    args.Target,
+		CheckoutBranch:  args.Checkout,
+		ProjectPath:     args.ProjectPath,
+		Worktree:        args.Worktree,
+		Workdir:         args.Workdir,
+		Track:           args.Track,
+		BranchMode:      args.BranchMode,
+		TmuxDirect:      args.TmuxDirect,
+		Images:          args.Images,
+		BlockedBy:       args.DependsOn,
+		NotBefore:       args.NotBefore,
+		PersistDefaults: args.PersistDefaults,
 	}
 
 	t, err := ctx.Client.CreateTaskWithOptions(req)

@@ -191,6 +191,9 @@ type CreateTaskRequest struct {
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
 	// NotBefore keeps the task pending until this time; nil means no wait.
 	NotBefore *time.Time `json:"not_before,omitempty"`
+	// PersistDefaults saves this request's worktree, branch mode and workflow
+	// as the project's New Task defaults.
+	PersistDefaults bool `json:"persist_defaults,omitempty"`
 }
 
 type ContinueTaskRequest struct {

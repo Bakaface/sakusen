@@ -563,7 +563,7 @@ func TestCreateTaskFromRequest_Tracks(t *testing.T) {
 		}
 
 		// Track's workflow when request leaves it empty.
-		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "payments"})
+		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{Input: "d", ProjectPath: projectPath, Track: "payments", PersistDefaults: true})
 		if err != nil {
 			t.Fatalf("createTaskFromRequest: %v", err)
 		}

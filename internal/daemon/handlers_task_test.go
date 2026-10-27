@@ -697,8 +697,9 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 		}
 
 		tk, _, err := s.createTaskFromRequest(CreateTaskRequest{
-			ProjectPath: "/tmp/sakusen-pin-test-7",
-			Workflow:    "pinned",
+			ProjectPath:     "/tmp/sakusen-pin-test-7",
+			Workflow:        "pinned",
+			PersistDefaults: true,
 			// No Worktree on the request — only the pin sets it.
 		})
 		if err != nil {
@@ -714,6 +715,85 @@ func TestCreateTaskFromRequest_WorkflowPinsFallback(t *testing.T) {
 		if proj.DefaultWorktree {
 			t.Errorf("persisted project DefaultWorktree: got true, want false (pin-derived worktree must not leak into project defaults)")
 		}
+	})
+}
+
+// TestCreateTask_ProjectDefaults: only a request that opts in via
+// PersistDefaults (the TUI New Task form) saves the project's New Task
+// defaults; MCP, CLI and create_tasks_and_wait creates leave them untouched.
+func TestCreateTask_ProjectDefaults(t *testing.T) {
+	const projectPath = "/tmp/sakusen-defaults-test"
+	wf := config.WorkflowConfig{Name: "other", Steps: []config.StepConfig{{Name: "implement"}}}
+
+	assertDefaults := func(t *testing.T, s *Server, projID int64, worktree bool, branchMode int, workflow string) {
+		t.Helper()
+		proj, err := s.database.GetProject(projID)
+		if err != nil {
+			t.Fatalf("GetProject: %v", err)
+		}
+		if proj.DefaultWorktree != worktree || proj.DefaultBranchMode != branchMode || proj.DefaultWorkflow != workflow {
+			t.Errorf("project defaults = (worktree=%v, branchMode=%d, workflow=%q), want (%v, %d, %q)",
+				proj.DefaultWorktree, proj.DefaultBranchMode, proj.DefaultWorkflow, worktree, branchMode, workflow)
+		}
+	}
+	seed := func(t *testing.T) (*Server, int64) {
+		t.Helper()
+		s, projID := setupServerWithPinnedWorkflow(t, projectPath, wf)
+		if err := s.database.UpdateProjectDefaults(projID, true, 0, ""); err != nil {
+			t.Fatalf("seed project defaults: %v", err)
+		}
+		return s, projID
+	}
+	worktreeFalse := false
+	branchMode := 1
+
+	t.Run("create without PersistDefaults leaves defaults unchanged", func(t *testing.T) {
+		s, projID := seed(t)
+		if _, _, err := s.createTaskFromRequest(CreateTaskRequest{
+			Input:       "do it",
+			ProjectPath: projectPath,
+			Workflow:    "other",
+			Worktree:    &worktreeFalse,
+			BranchMode:  &branchMode,
+		}); err != nil {
+			t.Fatalf("createTaskFromRequest: %v", err)
+		}
+		assertDefaults(t, s, projID, true, 0, "")
+	})
+
+	t.Run("create with PersistDefaults saves defaults", func(t *testing.T) {
+		s, projID := seed(t)
+		if _, _, err := s.createTaskFromRequest(CreateTaskRequest{
+			Input:           "do it",
+			ProjectPath:     projectPath,
+			Workflow:        "other",
+			Worktree:        &worktreeFalse,
+			BranchMode:      &branchMode,
+			PersistDefaults: true,
+		}); err != nil {
+			t.Fatalf("createTaskFromRequest: %v", err)
+		}
+		assertDefaults(t, s, projID, false, 1, "other")
+	})
+
+	t.Run("create_tasks_and_wait children leave defaults unchanged", func(t *testing.T) {
+		s, projID := seed(t)
+		parent := newParent(t, s, projID, nil)
+
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleCreateTasksAndWait(serverConn, CreateTasksAndWaitRequest{
+			ParentTaskID: parent.ID,
+			Tasks: []CreateTaskRequest{
+				{Title: "child", Input: "do it", Workflow: "other", Worktree: &worktreeFalse},
+			},
+		})
+		msg := readOneMessage(t, clientConn)
+		mustNotError(t, msg)
+		resp := decodePayload[CreateTasksAndWaitResponse](t, msg)
+		for _, c := range resp.Children {
+			waitTaskLeavesInit(t, s, c.ID)
+		}
+		assertDefaults(t, s, projID, true, 0, "")
 	})
 }
 
