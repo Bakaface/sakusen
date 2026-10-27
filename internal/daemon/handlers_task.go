@@ -448,7 +448,7 @@ func (s *Server) retryTaskFull(id int64) (*task.Task, error) {
 	}
 	agentID := fmt.Sprintf("%d", id)
 	if pc, err := s.getProjectContext(t.ProjectID); err == nil {
-		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID); err != nil {
+		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID, t.Slug); err != nil {
 			log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), id, err)
 		}
 	}
