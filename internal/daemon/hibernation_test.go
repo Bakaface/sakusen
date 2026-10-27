@@ -626,8 +626,8 @@ func TestHibernateTmuxTask(t *testing.T) {
 	f, tk := setupEligible(t, hibernateYML)
 	sentinel := writeSentinelWithSession(t, f.projectDir, "implement", "sess-step")
 
-	// A decoy whose name starts with the target's: tmux.KillSessionsForTask
-	// matches by prefix, so hibernating #N must not take #N0 with it.
+	// A decoy whose name starts with the target's: hibernating #N must leave
+	// #N0 alive.
 	decoy := tmux.NewSession(f.projectName, fmt.Sprintf("%d0", tk.ID), "", f.projectDir)
 	if err := decoy.Create("sleep", "600"); err != nil {
 		t.Fatalf("failed to create decoy session: %v", err)
@@ -665,6 +665,35 @@ func TestHibernateTmuxTask(t *testing.T) {
 	f.server.mu.RUnlock()
 	if hasActivity || hasState {
 		t.Error("expected the in-memory monitor entries to be dropped")
+	}
+}
+
+// A session created before slugs were part of the name is found by its legacy
+// bare name and hibernated like any other.
+func TestHibernateTmuxTask_LegacySession(t *testing.T) {
+	f, tk := setupEligible(t, hibernateYML)
+	if err := f.session(tk.ID).Kill(); err != nil {
+		t.Fatalf("failed to kill the full-name session: %v", err)
+	}
+	legacy := tmux.NewSession(f.projectName, fmt.Sprintf("%d", tk.ID), "", f.projectDir)
+	if err := legacy.Create("sleep", "600"); err != nil {
+		t.Fatalf("failed to create legacy session: %v", err)
+	}
+	t.Cleanup(func() { legacy.Kill() })
+
+	if !f.server.hibernateTmuxTask(tk, "idle") {
+		t.Fatal("expected hibernateTmuxTask to hibernate the legacy-named session")
+	}
+	if sessionExistsExactly(t, legacy.Name) {
+		t.Error("expected the legacy session to be gone")
+	}
+
+	refreshed, err := f.database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.HibernatedAt == nil {
+		t.Error("expected hibernated_at to be stamped")
 	}
 }
 

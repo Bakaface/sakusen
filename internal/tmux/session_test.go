@@ -85,6 +85,11 @@ func TestSessionName(t *testing.T) {
 		{"non-ascii", "intrum", "580", "café-menu", "intrum-580-caf-menu"},
 		{"long slug truncated", "intrum", "580", "rotate-northflank-tokens-and-secrets", "intrum-580-rotate-northflank-tokens"},
 		{"dot-prefixed project", ".docs", "7", "fix-login", "_docs-7-fix-login"},
+		{"dot project, short slug", ".docs", "7", "fix", "_docs-7-fix"},
+		{"punctuation only dots", "p", "1", "...", "p-1"},
+		{"empty slug short project", "p", "1", "", "p-1"},
+		{"mixed hostile", "intrum", "580", "Fix.Ünicode_Thing", "intrum-580-fix-nicode-thing"},
+		{"60-char slug", "intrum", "580", strings.Repeat("abcde-", 10), "intrum-580-abcde-abcde-abcde-abcde"},
 	}
 
 	slugRe := regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -430,8 +435,12 @@ func TestFindSession(t *testing.T) {
 		project := "sakusen-find-none-test"
 		startSession(t, project+"-560")
 		startSession(t, project+"-56-xy")
-		if got := FindSession(project, "56", "x", "").Name; got != project+"-56-x" {
-			t.Errorf("FindSession = %q, want the full name", got)
+		s := FindSession(project, "56", "x", "")
+		if s.Name != project+"-56-x" {
+			t.Errorf("FindSession = %q, want the full name", s.Name)
+		}
+		if s.Exists() {
+			t.Errorf("FindSession(%q).Exists() = true, want false", s.Name)
 		}
 	})
 }
