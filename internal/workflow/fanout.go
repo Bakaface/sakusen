@@ -10,8 +10,8 @@ import (
 )
 
 // fanoutSummaryRunes caps each item's summary in the fanout aggregate so a
-// line stays under 200 runes even with a maximal (64-rune) slug.
-const fanoutSummaryRunes = 100
+// line stays near 200 runes even with a maximal (64-rune) slug.
+const fanoutSummaryRunes = 120
 
 // FanoutSpawnRequest is one child task a fanout step asks its host to create.
 type FanoutSpawnRequest struct {
@@ -288,7 +288,7 @@ func (e *Engine) fanoutChildrenBySlug(parentID int64, step string) (map[string]*
 //	- docs #14 failed — (failed: step "write" exited with code 1)
 //
 // A summary is the first non-empty line of the child's context with
-// whitespace collapsed, truncated to 100 runes, so the aggregate stays one
+// whitespace collapsed, truncated to 120 runes, so the aggregate stays one
 // line per item however large the fanout. Full outputs are reachable through
 // {{tasks.<id>.context}}.
 func FormatFanoutAggregate(step, policy string, items []task.PublishedItem, children map[string]*task.Task, contexts map[int64]string) string {

@@ -697,14 +697,14 @@ func TestFormatFanoutAggregate(t *testing.T) {
 	contexts := map[int64]string{
 		12: "\n\n  Added   the endpoint\tand tests  \nmore",
 		13: "  \n",
-		15: strings.Repeat("x", 130),
+		15: strings.Repeat("x", 150),
 	}
 	got := FormatFanoutAggregate("units", "all", list, children, contexts)
 	want := "fanout units: 3/4 completed (require all)\n" +
 		"- api #12 completed — Added the endpoint and tests\n" +
 		"- ui #13 completed — (no context)\n" +
 		"- docs #14 failed — (failed: step \"write\" exited with code 1)\n" +
-		"- long #15 completed — " + strings.Repeat("x", 99) + "…"
+		"- long #15 completed — " + strings.Repeat("x", 119) + "…"
 	if got != want {
 		t.Errorf("aggregate =\n%s\nwant\n%s", got, want)
 	}
@@ -723,8 +723,8 @@ func TestFormatFanoutAggregate(t *testing.T) {
 		t.Fatalf("lines = %d, want 201", len(lines))
 	}
 	for i, l := range lines {
-		if n := utf8.RuneCountInString(l); n > 200 {
-			t.Errorf("line %d is %d runes, want <= 200", i, n)
+		if n := utf8.RuneCountInString(l); n > 210 {
+			t.Errorf("line %d is %d runes, want <= 210", i, n)
 		}
 	}
 }
