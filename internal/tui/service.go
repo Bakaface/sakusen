@@ -24,6 +24,10 @@ type TaskService interface {
 	ListTasksFiltered(projectID int64) ([]daemon.TaskInfo, error)
 	ListTasksByProjectName(name string) ([]daemon.TaskInfo, error)
 
+	// Single-task read — task info's fanout child sub-rows, which only
+	// get_task carries.
+	GetTask(id int64) (*daemon.TaskInfo, error)
+
 	// Step context reads/writes — artifact viewer and step editor.
 	GetTaskSteps(taskID int64) ([]daemon.TaskStepDetail, error)
 	UpdateStepContext(taskID int64, stepName, context string) error

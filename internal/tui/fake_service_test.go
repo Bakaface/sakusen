@@ -36,6 +36,7 @@ type fakeTaskService struct {
 	listRoutineRuns        func(string, string) ([]daemon.TaskInfo, error)
 	setRoutinePaused       func(string, string, bool) (*daemon.PeriodicInfo, error)
 	runRoutine             func(string, string, string) (*daemon.TaskInfo, error)
+	getTask                func(int64) (*daemon.TaskInfo, error)
 	getTaskSteps           func(int64) ([]daemon.TaskStepDetail, error)
 	updateStepContext      func(int64, string, string) error
 	advanceTask            func(int64) (string, error)
@@ -165,6 +166,13 @@ func (f *fakeTaskService) ListTasksByProjectName(name string) ([]daemon.TaskInfo
 		return nil, errNotStubbedTUI
 	}
 	return f.listTasksByProjectName(name)
+}
+
+func (f *fakeTaskService) GetTask(id int64) (*daemon.TaskInfo, error) {
+	if f.getTask == nil {
+		return nil, errNotStubbedTUI
+	}
+	return f.getTask(id)
 }
 
 func (f *fakeTaskService) GetTaskSteps(taskID int64) ([]daemon.TaskStepDetail, error) {

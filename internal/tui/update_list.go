@@ -128,7 +128,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewTaskInfo
 			m.taskInfo.SetTask(task)
 			m.taskInfo.SetWorkflow(m.cfg.GetTaskWorkflow(task.Workflow))
-			return m, nil
+			return m, m.loadFanoutChildren(task)
 		}
 		return m, nil
 

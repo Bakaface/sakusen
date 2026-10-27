@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -12,22 +13,36 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// maxFanoutSubRows caps the child sub-rows shown under one fanout step.
+const maxFanoutSubRows = 20
+
 type taskInfoView struct {
 	task     *daemon.TaskInfo
 	workflow *config.WorkflowConfig
-	viewport viewport.Model
-	width    int
-	height   int
-	ready    bool
-	showHelp bool // toggled by ctrl+h
+	// fanoutChildren comes from get_task, not broadcasts, so it survives
+	// SetTask for the same task ID.
+	fanoutChildren []daemon.FanoutChildInfo
+	viewport       viewport.Model
+	width          int
+	height         int
+	ready          bool
+	showHelp       bool // toggled by ctrl+h
 }
 
 func newTaskInfoView() taskInfoView {
 	return taskInfoView{}
 }
 
-func (v *taskInfoView) SetTask(task *daemon.TaskInfo) {
-	v.task = task
+func (v *taskInfoView) SetTask(t *daemon.TaskInfo) {
+	if v.task == nil || t == nil || v.task.ID != t.ID {
+		v.fanoutChildren = nil
+	}
+	v.task = t
+	v.updateContent()
+}
+
+func (v *taskInfoView) SetFanoutChildren(children []daemon.FanoutChildInfo) {
+	v.fanoutChildren = children
 	v.updateContent()
 }
 
@@ -296,9 +311,30 @@ func (v *taskInfoView) renderMetadata() string {
 					completedBranches(&step, t.BranchStatus), len(step.Parallel.Branches),
 					step.Parallel.EffectiveRequire(), isolation)
 			}
+			if step.IsFanout() {
+				done, total := 0, 0
+				for _, c := range v.fanoutChildren {
+					if c.Step == step.Name {
+						total++
+						if c.Status == string(task.StatusCompleted) {
+							done++
+						}
+					}
+				}
+				suffix += fmt.Sprintf(" [fanout %d/%d, require:%s →%s]",
+					done, total, step.Fanout.EffectiveRequire(), step.Fanout.Workflow)
+			}
 
 			b.WriteString(style.Render(fmt.Sprintf("  %s %d. %s%s", icon, i+1, step.Name, suffix)))
 			b.WriteString("\n")
+
+			if step.IsFanout() {
+				for _, row := range renderFanoutChildRows(step.Name, v.fanoutChildren) {
+					b.WriteString(row)
+					b.WriteString("\n")
+				}
+				continue
+			}
 
 			// Branch sub-rows. The current-step marker above lands on the
 			// group row only; a branch's own state comes from BranchStatus,
@@ -453,4 +489,57 @@ func (v *taskInfoView) renderHelp() string {
 	}
 
 	return help.String()
+}
+
+// renderFanoutChildRows renders the sub-rows for one fanout step's children:
+// failed first, then still-active, then completed, each group in its original
+// order, capped at maxFanoutSubRows plus a "+N more" line.
+func renderFanoutChildRows(step string, children []daemon.FanoutChildInfo) []string {
+	var mine []daemon.FanoutChildInfo
+	for _, c := range children {
+		if c.Step == step {
+			mine = append(mine, c)
+		}
+	}
+	rank := func(status string) int {
+		switch fanoutChildStepStatus(status) {
+		case stepStatusFailed:
+			return 0
+		case stepStatusCompleted:
+			return 2
+		default:
+			return 1
+		}
+	}
+	sort.SliceStable(mine, func(i, j int) bool { return rank(mine[i].Status) < rank(mine[j].Status) })
+
+	shown := mine
+	if len(shown) > maxFanoutSubRows {
+		shown = shown[:maxFanoutSubRows]
+	}
+	rows := make([]string, 0, len(shown)+1)
+	for _, c := range shown {
+		glyph := fanoutChildStepStatus(c.Status)
+		rows = append(rows, branchRowStyle(glyph).Render(
+			fmt.Sprintf("      %s %s #%d %s", branchIcon(glyph), c.Slug, c.TaskID, c.Status)))
+	}
+	if extra := len(mine) - len(shown); extra > 0 {
+		rows = append(rows, dimStyle.Render(fmt.Sprintf("      +%d more", extra)))
+	}
+	return rows
+}
+
+// fanoutChildStepStatus maps a child task status onto the step-status
+// vocabulary branchIcon and branchRowStyle understand.
+func fanoutChildStepStatus(status string) string {
+	switch task.Status(status) {
+	case task.StatusCompleted:
+		return stepStatusCompleted
+	case task.StatusFailed, task.StatusMergeFailed:
+		return stepStatusFailed
+	case task.StatusPending, task.StatusInit:
+		return ""
+	default:
+		return stepStatusRunning
+	}
 }

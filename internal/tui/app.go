@@ -137,6 +137,11 @@ type editorStepContextFinishedMsg struct {
 	stepName string
 	path     string
 }
+type taskFanoutLoadedMsg struct {
+	taskID   int64
+	children []daemon.FanoutChildInfo
+	err      error
+}
 type stepContextUpdatedMsg struct {
 	taskID   int64
 	stepName string
@@ -238,9 +243,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg[i].ID == m.taskInfo.task.ID {
 					task := msg[i]
 					m.taskInfo.SetTask(&task)
-					break
+					return m, m.loadFanoutChildren(&task)
 				}
 			}
+		}
+		return m, nil
+
+	case taskFanoutLoadedMsg:
+		if msg.err == nil && m.taskInfo.task != nil && m.taskInfo.task.ID == msg.taskID {
+			m.taskInfo.SetFanoutChildren(msg.children)
 		}
 		return m, nil
 
@@ -275,6 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewTaskInfo && m.taskInfo.task != nil && m.taskInfo.task.ID == msg.ID {
 			task := daemon.TaskInfo(msg)
 			m.taskInfo.SetTask(&task)
+			return m, m.loadFanoutChildren(&task)
 		}
 		return m, nil
 

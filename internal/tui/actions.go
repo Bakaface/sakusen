@@ -11,6 +11,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/action"
 	"github.com/Bakaface/sakusen/internal/client"
+	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/daemon"
 	gitpkg "github.com/Bakaface/sakusen/internal/git"
 	taskpkg "github.com/Bakaface/sakusen/internal/task"
@@ -88,6 +89,36 @@ func (m Model) refreshTasks() tea.Cmd {
 		}
 		return tasksLoadedMsg(tasks)
 	}
+}
+
+// loadFanoutChildren fetches the task's fanout children via get_task, since
+// broadcasts and listings never carry them. Tasks whose workflow has no
+// fanout step get no request.
+func (m Model) loadFanoutChildren(t *daemon.TaskInfo) tea.Cmd {
+	if m.client == nil || m.cfg == nil || t == nil || !hasFanoutStep(m.cfg.GetTaskWorkflow(t.Workflow)) {
+		return nil
+	}
+	taskID := t.ID
+	c := m.client
+	return func() tea.Msg {
+		info, err := c.GetTask(taskID)
+		if err != nil {
+			return taskFanoutLoadedMsg{taskID: taskID, err: err}
+		}
+		return taskFanoutLoadedMsg{taskID: taskID, children: info.FanoutChildren}
+	}
+}
+
+func hasFanoutStep(wf *config.WorkflowConfig) bool {
+	if wf == nil {
+		return false
+	}
+	for i := range wf.Steps {
+		if wf.Steps[i].IsFanout() {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) loadOutput(taskID int64, offset int) tea.Cmd {
