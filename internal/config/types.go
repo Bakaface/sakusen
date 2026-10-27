@@ -918,16 +918,20 @@ func (s *StepConfig) EffectiveBranches() []StepConfig {
 }
 
 // FanoutConfig is the body of a `fanout:` step: instead of running an agent,
-// the step spawns one child task per item an earlier step published, runs
-// each through `workflow`, and joins on them under the `require` policy.
-// `from:` is today's only item source; `nodes:` will be added later as an
-// alternative source.
+// the step spawns child tasks, runs each through a workflow, and joins on them
+// under the `require` policy. Exactly one item source is set: `from:` fans out
+// the items an earlier step published at run time, while `nodes:` declares a
+// static graph of children ordered by their `needs:`, for which the step-level
+// `workflow` and `retries` are per-node defaults.
 type FanoutConfig struct {
 	// From names the earlier top-level step whose published items are fanned out.
-	From string `yaml:"from"`
+	From string `yaml:"from,omitempty"`
+	// Nodes is the declared child graph; mutually exclusive with From.
+	Nodes []FanoutNodeConfig `yaml:"nodes,omitempty"`
 	// Workflow is the workflow each child task runs; its steps must be headless.
-	Workflow string `yaml:"workflow"`
+	Workflow string `yaml:"workflow,omitempty"`
 	// Input is the child task's input template; empty → DefaultFanoutInput.
+	// Only valid with From: each node carries its own input.
 	Input string `yaml:"input,omitempty"`
 	// Merge is where a child's branch lands: "parent" (the fanning-out
 	// task's branch) or "base" (the default).
@@ -937,6 +941,20 @@ type FanoutConfig struct {
 	// Retries is how many times a failed child is retried before it counts
 	// as failed.
 	Retries int `yaml:"retries,omitempty"`
+}
+
+// FanoutNodeConfig is one declared child of a `nodes:` fanout. Its name joins
+// the workflow's step namespace, so {{steps.<name>.context}} addresses it.
+type FanoutNodeConfig struct {
+	Name string `yaml:"name"`
+	// Workflow overrides the fanout step's workflow for this node.
+	Workflow string `yaml:"workflow,omitempty"`
+	// Input is the child task's input template.
+	Input string `yaml:"input"`
+	// Needs lists nodes of the same fanout that must complete first.
+	Needs []string `yaml:"needs,omitempty"`
+	// Retries overrides the fanout step's retries for this node.
+	Retries *int `yaml:"retries,omitempty"`
 }
 
 // Fanout merge targets (FanoutConfig.Merge).
@@ -976,6 +994,74 @@ func (f *FanoutConfig) EffectiveRequire() string {
 	return f.Require
 }
 
+// IsNodes reports whether the fanout declares a static `nodes:` graph.
+func (f *FanoutConfig) IsNodes() bool {
+	return f != nil && len(f.Nodes) > 0
+}
+
+// EffectiveNodeWorkflow returns node i's workflow, falling back to the step's.
+func (f *FanoutConfig) EffectiveNodeWorkflow(i int) string {
+	if w := f.Nodes[i].Workflow; w != "" {
+		return w
+	}
+	return f.Workflow
+}
+
+// EffectiveNodeRetries returns node i's retries, falling back to the step's.
+func (f *FanoutConfig) EffectiveNodeRetries(i int) int {
+	if r := f.Nodes[i].Retries; r != nil {
+		return *r
+	}
+	return f.Retries
+}
+
+// NodeTopoOrder returns the indices of Nodes in dependency order, breaking
+// ties by declaration order. Nodes on a cycle or behind an unknown need are
+// omitted; validation rejects both.
+func (f *FanoutConfig) NodeTopoOrder() []int {
+	if f == nil {
+		return nil
+	}
+	index := make(map[string]int, len(f.Nodes))
+	for i, n := range f.Nodes {
+		index[n.Name] = i
+	}
+	pending := make([]int, len(f.Nodes))
+	dependents := make([][]int, len(f.Nodes))
+	for i, n := range f.Nodes {
+		for _, need := range n.Needs {
+			j, ok := index[need]
+			if !ok {
+				pending[i] = -1
+				break
+			}
+			pending[i]++
+			dependents[j] = append(dependents[j], i)
+		}
+	}
+	done := make([]bool, len(f.Nodes))
+	out := make([]int, 0, len(f.Nodes))
+	for {
+		next := -1
+		for i := range f.Nodes {
+			if !done[i] && pending[i] == 0 {
+				next = i
+				break
+			}
+		}
+		if next < 0 {
+			return out
+		}
+		done[next] = true
+		out = append(out, next)
+		for _, d := range dependents[next] {
+			if pending[d] > 0 {
+				pending[d]--
+			}
+		}
+	}
+}
+
 // RequiredCount returns how many of n children must complete.
 func (f *FanoutConfig) RequiredCount(n int) int {
 	if f == nil {
@@ -1008,13 +1094,18 @@ func (s *StepConfig) IsFanout() bool {
 
 // AllStepNames returns every name in the workflow's step namespace: each
 // top-level step in order, with a group immediately followed by its branch
-// names. Used wherever "all names a {{steps.<name>.context}} ref could
+// names and a fanout by its node names. Used wherever "all names a {{steps.<name>.context}} ref could
 // address" is needed (the engine's step-context snapshot, validation).
 func (wf *WorkflowConfig) AllStepNames() []string {
 	var out []string
 	for i := range wf.Steps {
 		step := &wf.Steps[i]
 		out = append(out, step.Name)
+		if step.IsFanout() {
+			for _, n := range step.Fanout.Nodes {
+				out = append(out, n.Name)
+			}
+		}
 		if !step.IsParallel() {
 			continue
 		}
@@ -1238,6 +1329,13 @@ func (wf *WorkflowConfig) ValidateSteps() error {
 			if err := wf.validateFanoutStep(step, i, stepIndex, branchNames); err != nil {
 				return err
 			}
+			for _, n := range step.Fanout.Nodes {
+				_, isStep := stepIndex[n.Name]
+				if isStep || branchNames[n.Name] || seen[n.Name] {
+					return fmt.Errorf("step %q: fanout node %q duplicates another step name (steps, parallel branches and fanout nodes share one namespace)", step.Name, n.Name)
+				}
+				seen[n.Name] = true
+			}
 			continue
 		}
 		if step.IsParallel() {
@@ -1386,8 +1484,13 @@ func (wf *WorkflowConfig) validateFanoutStep(step *StepConfig, i int, stepIndex 
 		}
 	}
 
-	if f.From == "" {
-		return fmt.Errorf("step %q: fanout needs `from:` (the earlier step whose items it fans out)", step.Name)
+	switch {
+	case f.From != "" && f.IsNodes():
+		return fmt.Errorf("step %q: fanout sets both `from:` (%q) and `nodes:`; use one item source", step.Name, f.From)
+	case f.IsNodes():
+		return wf.validateFanoutNodes(step, i)
+	case f.From == "":
+		return fmt.Errorf("step %q: fanout needs `from:` (the earlier step whose items it fans out) or `nodes:` (a declared child graph)", step.Name)
 	}
 	if branchNames[f.From] {
 		return fmt.Errorf("step %q: fanout from %q names a parallel branch; name an ordinary top-level step", step.Name, f.From)
@@ -1411,6 +1514,12 @@ func (wf *WorkflowConfig) validateFanoutStep(step *StepConfig, i int, stepIndex 
 		return fmt.Errorf("step %q: fanout needs `workflow:` (the workflow each child runs)", step.Name)
 	}
 
+	return validateFanoutCommon(step)
+}
+
+// validateFanoutCommon checks the join knobs shared by both item sources.
+func validateFanoutCommon(step *StepConfig) error {
+	f := step.Fanout
 	switch f.Require {
 	case "", RequireAll, RequireAny:
 	default:

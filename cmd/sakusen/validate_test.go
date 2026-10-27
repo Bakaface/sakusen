@@ -192,3 +192,62 @@ func TestValidate_FanoutRejects(t *testing.T) {
 		})
 	}
 }
+
+const fanoutNodesValidateFixture = `
+agents:
+  claude:
+    command: "claude -p"
+workflows:
+  - name: unit
+    on_complete: merge
+    steps:
+      - name: build
+        prompt: "build"
+  - name: planner
+    steps:
+      - name: plan
+        prompt: "plan"
+      - name: units
+        fanout:
+          workflow: unit
+          nodes:
+            - name: api
+              input: "api"
+%NODES%`
+
+func TestValidate_FanoutNodes(t *testing.T) {
+	cases := []struct {
+		name, nodes, wantErr string
+	}{
+		{"valid", `            - name: ui
+              input: "{{steps.api.context}} {{steps.plan.context}}"
+              needs: [api]
+`, ""},
+		{"cycle", `            - name: a
+              input: "a"
+              needs: [b]
+            - name: b
+              input: "b"
+              needs: [a]
+`, "a -> b -> a"},
+		{"non-need reference", `            - name: ui
+              input: "{{steps.api.context}}"
+`, `fanout node "ui" input references {{steps.api.context}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateGlobalConfig(t)
+			path := writeValidateFixture(t, strings.Replace(fanoutNodesValidateFixture, "%NODES%", tc.nodes, 1))
+			err := validateCmd.RunE(validateCmd, []string{path})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected valid nodes config, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validate err = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}

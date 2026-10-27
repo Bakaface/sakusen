@@ -512,6 +512,13 @@ func validateUniqueNames(cfg *Config) error {
 			if err := claim(step.Name, "step"); err != nil {
 				return err
 			}
+			if step.IsFanout() {
+				for _, n := range step.Fanout.Nodes {
+					if err := claim(n.Name, fmt.Sprintf("step %q: fanout node", step.Name)); err != nil {
+						return err
+					}
+				}
+			}
 			if !step.IsParallel() {
 				continue
 			}

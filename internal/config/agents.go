@@ -873,7 +873,20 @@ func validateAgentRefs(cfg *Config) error {
 			}
 			// Fanout children run unattended; a missing child workflow is
 			// reported by validateFanoutTargets.
-			if step.IsFanout() {
+			if step.IsFanout() && step.Fanout.IsNodes() {
+				for n := range step.Fanout.Nodes {
+					child := findWorkflowByName(cfg, step.Fanout.EffectiveNodeWorkflow(n))
+					if child == nil {
+						continue
+					}
+					for k := range child.Steps {
+						if cfg.StepIsTmux(child, &child.Steps[k]) {
+							return fmt.Errorf("workflow %q step %q: fanout node %q workflow %q step %q resolves to a tmux-mode agent (fanout children must run headless)",
+								wf.Name, step.Name, step.Fanout.Nodes[n].Name, child.Name, child.Steps[k].Name)
+						}
+					}
+				}
+			} else if step.IsFanout() {
 				if child := findWorkflowByName(cfg, step.Fanout.Workflow); child != nil {
 					for k := range child.Steps {
 						if cfg.StepIsTmux(child, &child.Steps[k]) {

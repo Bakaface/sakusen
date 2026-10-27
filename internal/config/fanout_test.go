@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -78,7 +79,7 @@ func TestFanoutValidConfigLoads(t *testing.T) {
 		t.Fatalf("units: IsFanout=%v IsParallel=%v, want a fanout step", units.IsFanout(), units.IsParallel())
 	}
 	want := FanoutConfig{From: "plan", Workflow: "unit", Input: "{{item.title}}", Merge: FanoutMergeParent, Require: RequireAny, Retries: 2}
-	if *units.Fanout != want {
+	if !reflect.DeepEqual(*units.Fanout, want) {
 		t.Errorf("units.Fanout = %+v, want %+v", *units.Fanout, want)
 	}
 	if got := units.Fanout.RequiredCount(5); got != 1 {
@@ -233,5 +234,200 @@ func TestFanoutIsFanoutSource(t *testing.T) {
 		if got := wf.IsFanoutSource(step); got != want {
 			t.Errorf("IsFanoutSource(%q) = %v, want %v", step, got, want)
 		}
+	}
+}
+
+// loadFanoutNodesProject is loadFanoutProject plus "unit-merge", a headless
+// child workflow with on_complete: merge that needed nodes can run.
+func loadFanoutNodesProject(t *testing.T, steps string) (*Config, error) {
+	t.Helper()
+	yml := strings.Replace(fanoutProject(steps), "  - name: planner\n", `  - name: unit-merge
+    on_complete: merge
+    steps:
+      - name: build
+        prompt: "build {{task.input}}"
+  - name: planner
+`, 1)
+	path := writeParallelProject(t, yml)
+	return LoadForProject(filepath.Dir(path))
+}
+
+func TestFanoutNodes(t *testing.T) {
+	cfg, err := loadFanoutNodesProject(t, `
+      - name: plan
+        prompt: "plan"
+      - name: build
+        fanout:
+          workflow: unit-merge
+          retries: 2
+          nodes:
+            - name: api
+              input: "api"
+            - name: ui
+              input: "ui"
+              retries: 0
+            - name: schema
+              input: "schema {{steps.plan.context}}"
+            - name: integrate
+              input: "{{steps.api.context}} {{steps.ui.context}} {{steps.schema.context}}"
+              needs: [api, ui, schema]
+            - name: docs
+              input: "docs"
+            - name: infra
+              input: "infra"
+            - name: release-prep
+              input: "{{steps.integrate.context}} {{steps.api.context}}"
+              needs: [integrate, docs, infra]
+              workflow: unit
+      - name: next
+        prompt: "{{steps.release-prep.context}}"
+`)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	wf := findWorkflowByName(cfg, "planner")
+	if wf == nil {
+		t.Fatal("planner workflow missing")
+	}
+	want := []string{"plan", "build", "api", "ui", "schema", "integrate", "docs", "infra", "release-prep", "next"}
+	if got := wf.AllStepNames(); !reflect.DeepEqual(got, want) {
+		t.Errorf("AllStepNames = %v, want %v", got, want)
+	}
+
+	f := wf.Steps[1].Fanout
+	if !f.IsNodes() {
+		t.Fatal("IsNodes = false for a nodes fanout")
+	}
+	if got := f.EffectiveNodeWorkflow(0); got != "unit-merge" {
+		t.Errorf("api workflow = %q, want the step's unit-merge", got)
+	}
+	if got := f.EffectiveNodeWorkflow(6); got != "unit" {
+		t.Errorf("release-prep workflow = %q, want its own unit", got)
+	}
+	if got := f.EffectiveNodeRetries(0); got != 2 {
+		t.Errorf("api retries = %d, want the step's 2", got)
+	}
+	if got := f.EffectiveNodeRetries(1); got != 0 {
+		t.Errorf("ui retries = %d, want its own 0", got)
+	}
+
+	var order []string
+	for _, i := range f.NodeTopoOrder() {
+		order = append(order, f.Nodes[i].Name)
+	}
+	wantOrder := []string{"api", "ui", "schema", "integrate", "docs", "infra", "release-prep"}
+	if !reflect.DeepEqual(order, wantOrder) {
+		t.Errorf("NodeTopoOrder = %v, want %v", order, wantOrder)
+	}
+	if wf.FanoutConsumer("") != "" {
+		t.Error("FanoutConsumer(\"\") must not match a nodes fanout")
+	}
+}
+
+func TestFanoutNodeTopoOrderDeclarationTies(t *testing.T) {
+	f := &FanoutConfig{Nodes: []FanoutNodeConfig{
+		{Name: "c", Needs: []string{"b"}},
+		{Name: "a"},
+		{Name: "b", Needs: []string{"a"}},
+		{Name: "d"},
+	}}
+	var order []string
+	for _, i := range f.NodeTopoOrder() {
+		order = append(order, f.Nodes[i].Name)
+	}
+	if want := []string{"a", "b", "c", "d"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("NodeTopoOrder = %v, want %v", order, want)
+	}
+}
+
+func TestFanoutNodesValidation(t *testing.T) {
+	const plan = `
+      - name: plan
+        prompt: "plan"
+`
+	// nodes renders a nodes fanout step "units" with the given step-level
+	// lines and node list.
+	nodes := func(stepLines, list string) string {
+		return "      - name: units\n        fanout:\n" + stepLines + "          nodes:\n" + list
+	}
+	const wfLine = "          workflow: unit-merge\n"
+	node := func(name, extra string) string {
+		return fmt.Sprintf("            - name: %s\n              input: \"x\"\n%s", name, extra)
+	}
+	group := `
+      - name: review
+        parallel:
+          branches:
+            - name: review-a
+              prompt: "a"
+`
+	ref := func(s string) string { return "              input: \"" + s + "\"\n" }
+	refNode := func(name, input, extra string) string {
+		return "            - name: " + name + "\n" + ref(input) + extra
+	}
+
+	cases := []struct {
+		name  string
+		steps string
+		want  []string
+	}{
+		{"a/duplicate node", plan + nodes(wfLine, node("api", "")+node("api", "")), []string{`"units"`, `duplicate fanout node "api"`}},
+		{"b/collides with step", plan + nodes(wfLine, node("plan", "")), []string{`"units"`, `node "plan"`, "share one namespace"}},
+		{"b/collides with branch", plan + group + nodes(wfLine, node("review-a", "")), []string{`"units"`, `node "review-a"`, "share one namespace"}},
+		{"b/collides with other fanout node", plan + strings.Replace(nodes(wfLine, node("api", "")), "units", "first", 1) + nodes(wfLine, node("api", "")),
+			[]string{`"units"`, `node "api"`, "share one namespace"}},
+		{"c/bad name", plan + nodes(wfLine, node("-api", "")), []string{`"units"`, `"-api"`, "is invalid"}},
+		{"c/empty name", plan + nodes(wfLine, "            - input: \"x\"\n"), []string{`"units"`, "node 0 is missing a name"}},
+		{"d/unknown need", plan + nodes(wfLine, node("api", "              needs: [ghost]\n")), []string{`"units"`, `node "api"`, `unknown node "ghost"`}},
+		{"d/need names step", plan + nodes(wfLine, node("api", "              needs: [plan]\n")), []string{`"units"`, `node "api"`, `unknown node "plan"`}},
+		{"e/cycle", plan + nodes(wfLine, node("a", "              needs: [b]\n")+node("b", "              needs: [a]\n")),
+			[]string{`"units"`, `node "a"`, "a -> b -> a"}},
+		{"e/self need", plan + nodes(wfLine, node("a", "              needs: [a]\n")), []string{`"units"`, `node "a"`, "a -> a"}},
+		{"f/both", plan + nodes(wfLine+"          from: plan\n", node("api", "")), []string{`"units"`, "both `from:`", `"plan"`}},
+		{"f/neither", plan + "      - name: units\n        fanout:\n" + wfLine, []string{`"units"`, "needs `from:`", "`nodes:`"}},
+		{"g/step input", plan + nodes(wfLine+"          input: \"{{item.input}}\"\n", node("api", "")), []string{`"units"`, `input "{{item.input}}"`, "`nodes:`"}},
+		{"h/no workflow", plan + nodes("", node("api", "")), []string{`"units"`, `node "api" has no workflow`}},
+		{"h/undefined workflow", plan + nodes(wfLine, node("api", "              workflow: ghost\n")), []string{`"units"`, `node "api"`, `workflow "ghost" is not defined`}},
+		{"h/human workflow", plan + nodes(wfLine, node("api", "              workflow: unit-human\n")), []string{`"units"`, `node "api"`, `"unit-human"`, "human: true"}},
+		{"h/tmux workflow", plan + nodes(wfLine, node("api", "              workflow: unit-tmux\n")), []string{`"units"`, `node "api"`, `"unit-tmux"`, "tmux-mode agent"}},
+		{"i/unknown ref", plan + nodes(wfLine, refNode("api", "{{steps.ghost.context}}", "")), []string{`"units"`, `node "api"`, "steps.ghost.context"}},
+		{"i/non-need sibling", plan + nodes(wfLine, node("api", "")+refNode("ui", "{{steps.api.context}}", "")), []string{`"units"`, `node "ui"`, "steps.api.context"}},
+		{"i/fanout itself", plan + nodes(wfLine, refNode("api", "{{steps.units.context}}", "")), []string{`"units"`, `node "api"`, "steps.units.context"}},
+		{"i/later step", plan + nodes(wfLine, refNode("api", "{{steps.after.context}}", "")) + "      - name: after\n        prompt: \"x\"\n",
+			[]string{`"units"`, `node "api"`, "steps.after.context"}},
+		{"j/require over count", plan + nodes(wfLine+"          require: \"3\"\n", node("api", "")+node("ui", "")), []string{`"units"`, "require 3", "node count (2)"}},
+		{"k/negative node retries", plan + nodes(wfLine, node("api", "              retries: -1\n")), []string{`"units"`, `node "api"`, "got -1"}},
+		{"k/negative step retries", plan + nodes(wfLine+"          retries: -2\n", node("api", "")), []string{`"units"`, "got -2"}},
+		{"l/empty input", plan + nodes(wfLine, "            - name: api\n              input: \"\"\n"), []string{`"units"`, `node "api" needs ` + "`input:`"}},
+		{"m/needed node not merging", plan + nodes(wfLine, node("api", "              workflow: unit\n")+node("ui", "              needs: [api]\n")),
+			[]string{`"units"`, `node "api"`, `workflow "unit"`, "on_complete: merge"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadFanoutNodesProject(t, tc.steps)
+			if err == nil {
+				t.Fatalf("LoadForProject succeeded, want error containing %q", tc.want)
+			}
+			msg := err.Error()
+			for _, want := range append([]string{`"planner"`}, tc.want...) {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error = %q, want it to contain %q", msg, want)
+				}
+			}
+		})
+	}
+
+	legal := []struct{ name, steps string }{
+		{"transitive need", plan + nodes(wfLine, node("a", "")+node("b", "              needs: [a]\n")+refNode("c", "{{steps.a.context}}", "              needs: [b]\n"))},
+		{"earlier step", plan + nodes(wfLine, refNode("api", "{{steps.plan.context}} {{steps.plan}}", ""))},
+		{"earlier branch", plan + group + nodes(wfLine, refNode("api", "{{steps.review-a.context}} {{steps.review.context}}", ""))},
+		{"earlier fanout node", plan + strings.Replace(nodes(wfLine, node("first-a", "")), "units", "first", 1) + nodes(wfLine, refNode("api", "{{steps.first-a.context}}", ""))},
+	}
+	for _, tc := range legal {
+		t.Run("legal/"+tc.name, func(t *testing.T) {
+			if _, err := loadFanoutNodesProject(t, tc.steps); err != nil {
+				t.Fatalf("LoadForProject: %v", err)
+			}
+		})
 	}
 }
