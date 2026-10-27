@@ -275,6 +275,9 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	if err := validateRoutines(&routineCfg); err != nil {
 		return nil, err
 	}
+	if err := validateFanoutTargets(&routineCfg); err != nil {
+		return nil, err
+	}
 
 	// Every {{prompt.<name>}} include must resolve to a file on disk — an
 	// unresolved include would reach an agent as literal placeholder text.

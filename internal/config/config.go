@@ -235,6 +235,9 @@ func Load() (*Config, error) {
 	if err := validateRoutines(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateFanoutTargets(cfg); err != nil {
+		return nil, err
+	}
 
 	// The agent registry is finalized (variants expanded, aliases resolved)
 	// and refs validated once every tier (global + project + tracks) has
@@ -300,6 +303,9 @@ func loadMerged(projectDir, projectFilePath string) (*Config, error) {
 
 	// See the matching call in Load().
 	if err := validateRoutines(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateFanoutTargets(cfg); err != nil {
 		return nil, err
 	}
 

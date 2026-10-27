@@ -131,3 +131,64 @@ workflows:
 		t.Fatalf("expected --file-only to pass, got: %v", err)
 	}
 }
+
+const fanoutValidateFixture = `
+agents:
+  claude:
+    command: "claude -p"
+workflows:
+  - name: unit
+    steps:
+      - name: build
+        prompt: "build"
+  - name: unit-human
+    steps:
+      - name: approve
+        prompt: "approve"
+        human: true
+  - name: planner
+    steps:
+      - name: plan
+        prompt: "plan"
+      - name: units
+        fanout:
+          from: %FROM%
+          workflow: %CHILD%
+%EXTRA%`
+
+func fanoutFixture(from, child, extra string) string {
+	return strings.NewReplacer("%FROM%", from, "%CHILD%", child, "%EXTRA%", extra).Replace(fanoutValidateFixture)
+}
+
+func TestValidate_FanoutValid(t *testing.T) {
+	isolateGlobalConfig(t)
+	path := writeValidateFixture(t, fanoutFixture("plan", "unit", ""))
+	if err := validateCmd.RunE(validateCmd, []string{path}); err != nil {
+		t.Fatalf("expected valid fanout config, got: %v", err)
+	}
+}
+
+func TestValidate_FanoutRejects(t *testing.T) {
+	cases := []struct {
+		name, from, child, extra, wantErr string
+	}{
+		{"from not earlier", "units", "unit", "", "must name an earlier step"},
+		{"human child", "plan", "unit-human", "", "has human: true"},
+		{"loop over fanout", "plan", "unit", `      - name: check
+        prompt: "check"
+        loop:
+          goto: plan
+          max_iterations: 2
+`, "loop range contains fanout step"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateGlobalConfig(t)
+			path := writeValidateFixture(t, fanoutFixture(tc.from, tc.child, tc.extra))
+			err := validateCmd.RunE(validateCmd, []string{path})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validate err = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}

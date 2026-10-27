@@ -645,6 +645,11 @@ type StepConfig struct {
 	// works too. See ValidateSteps for the mutually-exclusive field rules.
 	Parallel *ParallelConfig `yaml:"parallel,omitempty"`
 
+	// Fanout, when non-nil, makes this entry a FANOUT step: it runs no agent
+	// and instead spawns one child task per item published by an earlier
+	// step. See FanoutConfig and validateFanoutStep.
+	Fanout *FanoutConfig `yaml:"fanout,omitempty"`
+
 	// ref marks a step parsed from a bare-string list entry (e.g. `- planning`).
 	// A reference step carries only its Name; resolveWorkflowSteps replaces it
 	// with the same-named step from the base (global) workflow during config
@@ -852,16 +857,23 @@ func (p *ParallelConfig) RequiredCount() int {
 	if p == nil {
 		return 0
 	}
-	switch p.Require {
+	return RequiredCount(p.Require, len(p.Branches))
+}
+
+// RequiredCount maps a `require:` join policy over n members to how many must
+// complete: "" / "all" → n, "any" → 1, an integer → itself. An unparseable
+// value can only mean validation was bypassed, so it degrades to "all".
+func RequiredCount(require string, n int) int {
+	switch require {
 	case "", RequireAll:
-		return len(p.Branches)
+		return n
 	case RequireAny:
 		return 1
 	}
-	if n, err := strconv.Atoi(p.Require); err == nil {
-		return n
+	if v, err := strconv.Atoi(require); err == nil {
+		return v
 	}
-	return len(p.Branches)
+	return n
 }
 
 // EffectiveBranch returns branch i with the group-level fallbacks applied: the
@@ -905,6 +917,73 @@ func (s *StepConfig) EffectiveBranches() []StepConfig {
 	return out
 }
 
+// FanoutConfig is the body of a `fanout:` step: instead of running an agent,
+// the step spawns one child task per item an earlier step published, runs
+// each through `workflow`, and joins on them under the `require` policy.
+// `from:` is today's only item source; `nodes:` will be added later as an
+// alternative source.
+type FanoutConfig struct {
+	// From names the earlier top-level step whose published items are fanned out.
+	From string `yaml:"from"`
+	// Workflow is the workflow each child task runs; its steps must be headless.
+	Workflow string `yaml:"workflow"`
+	// Input is the child task's input template; empty → DefaultFanoutInput.
+	Input string `yaml:"input,omitempty"`
+	// Merge is where a child's branch lands: "parent" (the fanning-out
+	// task's branch) or "base" (the default).
+	Merge string `yaml:"merge,omitempty"`
+	// Require is the join policy: "" / "all", "any", or an integer >= 1.
+	Require string `yaml:"require,omitempty"`
+	// Retries is how many times a failed child is retried before it counts
+	// as failed.
+	Retries int `yaml:"retries,omitempty"`
+}
+
+// Fanout merge targets (FanoutConfig.Merge).
+const (
+	FanoutMergeParent = "parent"
+	FanoutMergeBase   = "base"
+)
+
+// DefaultFanoutInput is the child input template when `input:` is unset.
+const DefaultFanoutInput = "{{item.input}}"
+
+// MaxFanoutDepth bounds nested fanouts. A task's depth is the number of
+// fanout_parent_id hops above it.
+const MaxFanoutDepth = 3
+
+// EffectiveInput returns the child input template, defaulting to DefaultFanoutInput.
+func (f *FanoutConfig) EffectiveInput() string {
+	if f == nil || f.Input == "" {
+		return DefaultFanoutInput
+	}
+	return f.Input
+}
+
+// EffectiveMerge returns the merge target, defaulting to FanoutMergeBase.
+func (f *FanoutConfig) EffectiveMerge() string {
+	if f == nil || f.Merge == "" {
+		return FanoutMergeBase
+	}
+	return f.Merge
+}
+
+// EffectiveRequire returns the join policy, defaulting to RequireAll.
+func (f *FanoutConfig) EffectiveRequire() string {
+	if f == nil || f.Require == "" {
+		return RequireAll
+	}
+	return f.Require
+}
+
+// RequiredCount returns how many of n children must complete.
+func (f *FanoutConfig) RequiredCount(n int) int {
+	if f == nil {
+		return n
+	}
+	return RequiredCount(f.Require, n)
+}
+
 // Step advance modes (StepConfig.Advance).
 const (
 	AdvanceAuto     = "auto"
@@ -920,6 +999,11 @@ func (s *StepConfig) ExplicitAdvance() bool {
 // IsParallel reports whether this step entry is a parallel group.
 func (s *StepConfig) IsParallel() bool {
 	return s != nil && s.Parallel != nil
+}
+
+// IsFanout reports whether this step entry is a fanout step.
+func (s *StepConfig) IsFanout() bool {
+	return s != nil && s.Fanout != nil
 }
 
 // AllStepNames returns every name in the workflow's step namespace: each
@@ -994,7 +1078,8 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 	var ranges []loopRange
 
 	for i, step := range wf.Steps {
-		if step.Loop == nil {
+		// A loop on a fanout step is rejected by ValidateSteps.
+		if step.Loop == nil || step.IsFanout() {
 			continue
 		}
 
@@ -1010,6 +1095,13 @@ func (wf *WorkflowConfig) ValidateLoops() error {
 		// goto must be an earlier step or the step itself (no forward jumps)
 		if targetIdx > i {
 			return fmt.Errorf("step %q: loop goto must reference an earlier step or itself (got %q at index %d, current at %d)", step.Name, step.Loop.Goto, targetIdx, i)
+		}
+
+		// Re-running a fanout would spawn its children a second time.
+		for k := targetIdx; k <= i; k++ {
+			if wf.Steps[k].IsFanout() {
+				return fmt.Errorf("step %q: loop range contains fanout step %q (a fanout cannot sit inside a loop)", step.Name, wf.Steps[k].Name)
+			}
 		}
 
 		// max_iterations is required and must be >= 1
@@ -1126,10 +1218,27 @@ func (wf *WorkflowConfig) ValidateSteps() error {
 		return nil
 	}
 
+	stepIndex := make(map[string]int, len(wf.Steps))
+	branchNames := make(map[string]bool)
+	for i := range wf.Steps {
+		stepIndex[wf.Steps[i].Name] = i
+		if wf.Steps[i].IsParallel() {
+			for _, b := range wf.Steps[i].Parallel.Branches {
+				branchNames[b.Name] = true
+			}
+		}
+	}
+
 	for i := range wf.Steps {
 		step := &wf.Steps[i]
 		if err := claim(step.Name, fmt.Sprintf("step %d", i)); err != nil {
 			return err
+		}
+		if step.IsFanout() {
+			if err := wf.validateFanoutStep(step, i, stepIndex, branchNames); err != nil {
+				return err
+			}
+			continue
 		}
 		if step.IsParallel() {
 			if err := validateParallelGroup(step); err != nil {
@@ -1248,6 +1357,76 @@ func validateParallelGroup(step *StepConfig) error {
 				step.Name, b.Name, b.SummarizationStrategy,
 				SummarizationStrategyLastMessage, SummarizationStrategySummarizeChat, SummarizationStrategyNone)
 		}
+	}
+	return nil
+}
+
+// validateFanoutStep checks a `fanout:` step at index i. A fanout runs no agent,
+// so every per-agent field is rejected; its item source must be an earlier
+// ordinary step, which alone publishes items. Whether the child workflow exists
+// is checked once every workflow is assembled (validateFanoutTargets).
+func (wf *WorkflowConfig) validateFanoutStep(step *StepConfig, i int, stepIndex map[string]int, branchNames map[string]bool) error {
+	f := step.Fanout
+	for _, banned := range []struct {
+		set   bool
+		field string
+	}{
+		{step.Prompt != "", "prompt"},
+		{step.Agent != "", "agent"},
+		{step.Loop != nil, "loop"},
+		{step.Human, "human"},
+		{step.Advance != "", "advance"},
+		{step.Parallel != nil, "parallel"},
+		{step.SummarizationStrategy != "", "summarization_strategy"},
+		{step.SummarizationPrompt != "", "summarization_prompt"},
+		{step.RequireContext, "require_context"},
+	} {
+		if banned.set {
+			return fmt.Errorf("step %q: fanout step cannot set %s (a fanout runs no agent)", step.Name, banned.field)
+		}
+	}
+
+	if f.From == "" {
+		return fmt.Errorf("step %q: fanout needs `from:` (the earlier step whose items it fans out)", step.Name)
+	}
+	if branchNames[f.From] {
+		return fmt.Errorf("step %q: fanout from %q names a parallel branch; name an ordinary top-level step", step.Name, f.From)
+	}
+	fromIdx, ok := stepIndex[f.From]
+	if !ok {
+		return fmt.Errorf("step %q: fanout from references unknown step %q", step.Name, f.From)
+	}
+	if fromIdx >= i {
+		return fmt.Errorf("step %q: fanout from %q must name an earlier step", step.Name, f.From)
+	}
+	from := &wf.Steps[fromIdx]
+	if from.IsFanout() {
+		return fmt.Errorf("step %q: fanout from %q names another fanout step", step.Name, f.From)
+	}
+	if from.IsParallel() {
+		return fmt.Errorf("step %q: fanout from %q names a parallel group; name an ordinary step", step.Name, f.From)
+	}
+
+	if f.Workflow == "" {
+		return fmt.Errorf("step %q: fanout needs `workflow:` (the workflow each child runs)", step.Name)
+	}
+
+	switch f.Require {
+	case "", RequireAll, RequireAny:
+	default:
+		if n, err := strconv.Atoi(f.Require); err != nil || n < 1 {
+			return fmt.Errorf("step %q: fanout require %q is invalid (must be %q, %q, or an integer >= 1)",
+				step.Name, f.Require, RequireAll, RequireAny)
+		}
+	}
+	if f.Retries < 0 {
+		return fmt.Errorf("step %q: fanout retries must be >= 0 (got %d)", step.Name, f.Retries)
+	}
+	switch f.Merge {
+	case "", FanoutMergeParent, FanoutMergeBase:
+	default:
+		return fmt.Errorf("step %q: fanout merge %q is invalid (must be %q or %q)",
+			step.Name, f.Merge, FanoutMergeParent, FanoutMergeBase)
 	}
 	return nil
 }

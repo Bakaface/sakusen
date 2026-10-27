@@ -393,7 +393,7 @@ func (c *Config) StepIsTmux(wf *WorkflowConfig, step *StepConfig) bool {
 	// validated headless — so it is never a tmux step, even when the cascade
 	// the group itself would fall back to (workflow / default_agent) is
 	// tmux-mode.
-	if step.IsParallel() {
+	if step.IsParallel() || step.IsFanout() {
 		return false
 	}
 	_, agent, err := c.StepAgent(wf, step)
@@ -869,6 +869,18 @@ func validateAgentRefs(cfg *Config) error {
 			if step.ExplicitAdvance() {
 				if agent, ok := cfg.ResolveAgent(cfg.StepAgentSlug(wf, step)); ok && !agent.IsTmux() {
 					return fmt.Errorf("workflow %q step %q: advance: explicit requires a tmux-mode agent", wf.Name, step.Name)
+				}
+			}
+			// Fanout children run unattended; a missing child workflow is
+			// reported by validateFanoutTargets.
+			if step.IsFanout() {
+				if child := findWorkflowByName(cfg, step.Fanout.Workflow); child != nil {
+					for k := range child.Steps {
+						if cfg.StepIsTmux(child, &child.Steps[k]) {
+							return fmt.Errorf("workflow %q step %q: fanout workflow %q step %q resolves to a tmux-mode agent (fanout children must run headless)",
+								wf.Name, step.Name, child.Name, child.Steps[k].Name)
+						}
+					}
 				}
 			}
 			// Parallel branches run concurrently and are joined synchronously,
