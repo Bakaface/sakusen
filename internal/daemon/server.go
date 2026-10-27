@@ -54,6 +54,10 @@ type projectContext struct {
 	// agents, aliases, global workflows' wiring — reach already-cached
 	// projects without a daemon restart.
 	globalConfigFingerprint string
+	// workflowsFingerprint covers the file-based workflow dirs
+	// (workflowsFingerprint()), so editing, adding or deleting a global or
+	// project .sakusen/workflows/*.yml reaches already-cached projects.
+	workflowsFingerprint string
 	// loadErr is the config.LoadForProject failure that made cfg fall back to
 	// the daemon defaults; nil when the project config loaded.
 	loadErr error
@@ -273,7 +277,9 @@ func (s *Server) taskFlowLock(taskID int64) *sync.Mutex {
 // indirection without leverage. The natural cache key is projectID (carried on
 // every *task.Task), not repoRoot, so the conventional Store.Get(repoRoot)
 // shape would push an extra DB lookup into callers. Invalidation lives below
-// via .sakusen.yml mod-time check; no handler needs an Invalidate() API.
+// via four freshness signals — the .sakusen.yml mtime, tracksFingerprint,
+// globalConfigFingerprint and workflowsFingerprint (global and project
+// .sakusen/workflows/ files) — so no handler needs an Invalidate() API.
 // Concurrent first-time loads can race, but the duplicated work is a YAML parse
 // and the loser's *projectContext is GC'd — per-repo merge locks (now owned by
 // internal/merge) are keyed independently, so merge serialization survives the
@@ -301,6 +307,10 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 		}
 		// Third: the global config files every project inherits.
 		if fresh && globalConfigFingerprint() != pc.globalConfigFingerprint {
+			fresh = false
+		}
+		// Fourth: the global and project file-based workflow dirs.
+		if fresh && workflowsFingerprint(pc.repoRoot) != pc.workflowsFingerprint {
 			fresh = false
 		}
 		if fresh {
@@ -348,6 +358,7 @@ func (s *Server) getProjectContext(projectID int64) (*projectContext, error) {
 		configModTime:           modTime,
 		tracksFingerprint:       tracksFingerprint(proj.Path),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(proj.Path),
 		loadErr:                 loadErr,
 	}
 
@@ -369,6 +380,46 @@ func globalConfigFingerprint() string {
 		}
 	}
 	return strings.Join(parts, ";")
+}
+
+// workflowsFingerprint returns "maxMtimeUnixNano:entryCount" over the
+// file-based workflow dirs config.WorkflowDirs(repoRoot) reports, or "" when
+// none exists or holds anything. Each dir and each of its entries contribute
+// their mtimes; every entry counts, since the loader rejects any non-workflow
+// entry and so any of them can change the load result. Used by
+// getProjectContext as a config-cache freshness signal.
+func workflowsFingerprint(repoRoot string) string {
+	var maxMtime int64
+	var entryCount int
+
+	note := func(t time.Time) {
+		if n := t.UnixNano(); n > maxMtime {
+			maxMtime = n
+		}
+	}
+
+	for _, dir := range config.WorkflowDirs(repoRoot) {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		note(info.ModTime())
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if fi, err := entry.Info(); err == nil {
+				note(fi.ModTime())
+			}
+			entryCount++
+		}
+	}
+
+	if maxMtime == 0 && entryCount == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", maxMtime, entryCount)
 }
 
 // tracksFingerprint returns "maxMtimeUnixNano:fileCount" over the project's

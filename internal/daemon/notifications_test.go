@@ -66,6 +66,7 @@ func newNotifyTestServer(t *testing.T, base config.NotificationsConfig, cfg *con
 		repoRoot:                repoRoot,
 		tracksFingerprint:       tracksFingerprint(repoRoot),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(repoRoot),
 	}
 	s.projectsMu.Unlock()
 	return s, rec, proj.ID

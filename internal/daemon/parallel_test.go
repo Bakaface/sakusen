@@ -51,6 +51,7 @@ func primeParallelProject(t *testing.T, s *Server, projID int64) *config.Config 
 		repoRoot:                repoRoot,
 		tracksFingerprint:       tracksFingerprint(repoRoot),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(repoRoot),
 	}
 	s.projectsMu.Unlock()
 	return cfg
@@ -176,6 +177,7 @@ func TestTaskToInfoBranchStatusAbsentWithoutGroup(t *testing.T) {
 		repoRoot:                repoRoot,
 		tracksFingerprint:       tracksFingerprint(repoRoot),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(repoRoot),
 	}
 	s.projectsMu.Unlock()
 

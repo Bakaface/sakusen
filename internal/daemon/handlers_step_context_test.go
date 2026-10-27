@@ -91,6 +91,7 @@ func createPausedTmuxStep(t *testing.T, s *Server, projID int64, stepName string
 		// machine may have a real ~/.sakusen/tracks tree).
 		tracksFingerprint:       tracksFingerprint(repoRoot),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(repoRoot),
 	}
 	s.projectsMu.Unlock()
 

@@ -82,6 +82,7 @@ func setupSlugServer(t *testing.T, cfg *config.Config) (*Server, *task.Task) {
 		repoRoot:                projectPath,
 		tracksFingerprint:       tracksFingerprint(projectPath),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(projectPath),
 	}
 	s.projectsMu.Unlock()
 

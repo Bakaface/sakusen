@@ -559,7 +559,13 @@ func loadWorkflowFilePool(baseDir string) (*workflowFilePool, error) {
 	if baseDir == "" {
 		return newWorkflowFilePool(), nil
 	}
-	return loadWorkflowDir(filepath.Join(baseDir, ".sakusen", "workflows"))
+	return loadWorkflowDir(workflowFileDir(baseDir))
+}
+
+// workflowFileDir returns the file-based workflows directory belonging to the
+// .sakusen.yml-shaped config file in baseDir.
+func workflowFileDir(baseDir string) string {
+	return filepath.Join(baseDir, ".sakusen", "workflows")
 }
 
 // loadWorkflowDir scans a workflows directory (flat, no subdirs) and returns
@@ -1108,6 +1114,22 @@ func GlobalConfigPaths() []string {
 		}
 	}
 	return paths
+}
+
+// WorkflowDirs returns the file-based workflow directories LoadForProject
+// reads for projectDir: the global one beside the resolved global .sakusen.yml
+// (only when that file exists, as the loader skips it otherwise) and the
+// project's .sakusen/workflows. Used by the daemon's config cache as a
+// freshness signal.
+func WorkflowDirs(projectDir string) []string {
+	var dirs []string
+	if p := getGlobalSakusenYmlPath(); p != "" {
+		dirs = append(dirs, workflowFileDir(filepath.Dir(p)))
+	}
+	if projectDir != "" {
+		dirs = append(dirs, workflowFileDir(projectDir))
+	}
+	return dirs
 }
 
 func getGlobalSakusenYmlPath() string {

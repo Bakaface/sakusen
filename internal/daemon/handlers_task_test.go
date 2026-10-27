@@ -447,6 +447,7 @@ func setupServerWithPinnedWorkflow(t *testing.T, projectPath string, wf config.W
 		// doesn't evict this hand-primed entry.
 		tracksFingerprint:       tracksFingerprint(projectPath),
 		globalConfigFingerprint: globalConfigFingerprint(),
+		workflowsFingerprint:    workflowsFingerprint(projectPath),
 	}
 	s.projectsMu.Unlock()
 
