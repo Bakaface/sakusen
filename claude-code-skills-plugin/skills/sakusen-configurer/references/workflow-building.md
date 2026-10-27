@@ -569,7 +569,8 @@ contract:
   task**. The reason and the command's combined output (truncated) go to the task log and the
   failure reason; an uncertain decision never silently ends or continues the loop.
 
-Each evaluation is logged to the task log (`Loop exit: command `…` exited 0, exiting loop`).
+Each evaluation is logged to the task log (`Loop exit: command `…` exited 0, exiting loop`),
+followed by the tail of the command's combined output when it printed anything.
 
 ```yaml
 loop:

@@ -238,7 +238,7 @@ sakusen routines pause|resume <name>  # triggered (cadence/after) routines only
 
 - `step_context_empty: <step>` — exit when that step's context is empty.
 - `step_context_contains: <step>` + `marker: <literal>` — exit when that step's context contains the marker.
-- `command: <shell string>` — let a program decide. It runs via `bash -c` in the task's workdir with the step env (`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_LOOP_ITERATION`, …, `SAKUSEN_PURPOSE=loop_exit`). Optional `stdin_from: <step>` pipes that step's context to stdin, and `timeout:` (Go duration, default `2m`) bounds it. Exit `0` ends the loop, `1` continues it; any other status, a timeout or a failure to start fails the task, with the command's output in the task log and failure reason.
+- `command: <shell string>` — let a program decide. It runs via `bash -c` in the task's workdir with the step env (`SAKUSEN_TASK_ID`, `SAKUSEN_STEP`, `SAKUSEN_LOOP_ITERATION`, …, `SAKUSEN_PURPOSE=loop_exit`). Optional `stdin_from: <step>` pipes that step's context to stdin, and `timeout:` (Go duration, default `2m`) bounds it. Exit `0` ends the loop, `1` continues it; any other status, a timeout or a failure to start fails the task, with the command's output in the failure reason. The tail of the command's output goes to the task log on every outcome.
 
 ```yaml
     exit_condition:

@@ -759,7 +759,8 @@ const (
 // contract plus SAKUSEN_LOOP_ITERATION, stdin fed from StdinFrom's context.
 // Exit 0 ends the loop, exit 1 continues it, and any other status, a timeout
 // or a failure to start fails the task — an uncertain decision must never
-// silently end or continue the loop.
+// silently end or continue the loop. The tail of the command's combined
+// stdout+stderr is written to the task log on every outcome.
 type LoopExitCondition struct {
 	StepContextEmpty string `yaml:"step_context_empty"` // step name whose context must be empty
 

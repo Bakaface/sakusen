@@ -45,6 +45,9 @@ func TestLoopExitCommand(t *testing.T) {
 		if !strings.Contains(string(logged), "Loop exit: command `exit 0` exited 0") {
 			t.Errorf("task log is missing the evaluation record:\n%s", logged)
 		}
+		if strings.Contains(string(logged), "command output") {
+			t.Errorf("task log has an output record for a silent command:\n%s", logged)
+		}
 	})
 
 	t.Run("exit 1 continues the loop", func(t *testing.T) {
@@ -63,6 +66,33 @@ func TestLoopExitCommand(t *testing.T) {
 		}
 		if got := strings.Count(string(logged), "exited 1, continuing loop"); got != 2 {
 			t.Errorf("task log has %d continue records, want 2:\n%s", got, logged)
+		}
+		if strings.Contains(string(logged), "command output") {
+			t.Errorf("task log has an output record for a silent command:\n%s", logged)
+		}
+	})
+
+	t.Run("output is logged on exit 0 and 1", func(t *testing.T) {
+		engine, tk, runner, _ := newFakeRunnerTestEngine(t, loopExitCommandWorkflow(&config.LoopExitCondition{
+			Command: `if [ "$SAKUSEN_LOOP_ITERATION" -ge 1 ]; then echo "met p=0.93"; exit 0; fi; echo "unmet p=0.04"; echo "retry 1: uncertain" >&2; exit 1`,
+		}))
+		if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+			t.Fatalf("RunTask: %v", err)
+		}
+		if got := len(runner.callsFor("plan")); got != 2 {
+			t.Errorf("plan ran %d times, want 2", got)
+		}
+		logged, err := os.ReadFile(ProjectLogPath(engine.dataDir, tk.ID))
+		if err != nil {
+			t.Fatalf("read task log: %v", err)
+		}
+		if got := strings.Count(string(logged), "Loop exit: command output (tail):"); got != 2 {
+			t.Errorf("task log has %d output records, want 2:\n%s", got, logged)
+		}
+		for _, want := range []string{"unmet p=0.04", "retry 1: uncertain", "met p=0.93"} {
+			if !strings.Contains(string(logged), want) {
+				t.Errorf("task log is missing the command output %q:\n%s", want, logged)
+			}
 		}
 	})
 

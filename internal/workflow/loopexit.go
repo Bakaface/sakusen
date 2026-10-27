@@ -34,9 +34,7 @@ const (
 func (e *Engine) evalLoopExitCommand(ctx context.Context, t *task.Task, step config.StepConfig) (bool, error) {
 	ec := step.Loop.ExitCondition
 	fail := func(reason, output string) (bool, error) {
-		if tail := loopExitOutputTail(output, maxLoopExitLogBytes); tail != "" {
-			e.appendTaskLog(t.ID, "Loop exit: command output (tail):\n%s", tail)
-		}
+		e.logLoopExitOutput(t.ID, output)
 		e.appendTaskLog(t.ID, "Loop exit: command `%s` %s", ec.Command, reason)
 		errMsg := fmt.Sprintf("step %q: loop exit command `%s` %s", step.Name, ec.Command, reason)
 		if tail := loopExitOutputTail(output, maxLoopExitDetailBytes); tail != "" {
@@ -73,6 +71,7 @@ func (e *Engine) evalLoopExitCommand(ctx context.Context, t *task.Task, step con
 	switch {
 	case err == nil:
 		e.appendTaskLog(t.ID, "Loop exit: command `%s` exited 0, exiting loop", ec.Command)
+		e.logLoopExitOutput(t.ID, output)
 		return true, nil
 	case ctx.Err() != nil:
 		return false, fmt.Errorf("step %q: loop exit command interrupted: %w", step.Name, ctx.Err())
@@ -80,11 +79,20 @@ func (e *Engine) evalLoopExitCommand(ctx context.Context, t *task.Task, step con
 		return fail(fmt.Sprintf("timed out after %s", timeout), output)
 	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
 		e.appendTaskLog(t.ID, "Loop exit: command `%s` exited 1, continuing loop", ec.Command)
+		e.logLoopExitOutput(t.ID, output)
 		return false, nil
 	case errors.As(err, &exitErr):
 		return fail(fmt.Sprintf("exited %d (want 0 to exit the loop or 1 to continue)", exitErr.ExitCode()), output)
 	default:
 		return fail(fmt.Sprintf("could not start: %v", err), output)
+	}
+}
+
+// logLoopExitOutput appends the tail of a loop exit command's output to the
+// task log, if there is any.
+func (e *Engine) logLoopExitOutput(taskID int64, output string) {
+	if tail := loopExitOutputTail(output, maxLoopExitLogBytes); tail != "" {
+		e.appendTaskLog(taskID, "Loop exit: command output (tail):\n%s", tail)
 	}
 }
 
