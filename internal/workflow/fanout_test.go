@@ -699,7 +699,7 @@ func TestFormatFanoutAggregate(t *testing.T) {
 		13: "  \n",
 		15: strings.Repeat("x", 150),
 	}
-	got := FormatFanoutAggregate("units", "all", list, children, contexts)
+	got := FormatFanoutAggregate("units", "all", list, children, contexts, nil)
 	want := "fanout units: 3/4 completed (require all)\n" +
 		"- api #12 completed — Added the endpoint and tests\n" +
 		"- ui #13 completed — (no context)\n" +
@@ -722,7 +722,7 @@ func TestFormatFanoutAggregate(t *testing.T) {
 		bigContexts[id] = strings.Repeat("word ", 60)
 		failedChildren[slug] = &task.Task{ID: id, Status: task.StatusResolvingConflicts, ErrorMessage: strings.Repeat("oops ", 60)}
 	}
-	lines := strings.Split(FormatFanoutAggregate("units", "all", big, bigChildren, bigContexts), "\n")
+	lines := strings.Split(FormatFanoutAggregate("units", "all", big, bigChildren, bigContexts, nil), "\n")
 	if len(lines) != 201 {
 		t.Fatalf("lines = %d, want 201", len(lines))
 	}
@@ -732,7 +732,7 @@ func TestFormatFanoutAggregate(t *testing.T) {
 		}
 	}
 
-	lines = strings.Split(FormatFanoutAggregate("units", "all", big, failedChildren, nil), "\n")
+	lines = strings.Split(FormatFanoutAggregate("units", "all", big, failedChildren, nil, nil), "\n")
 	if len(lines) != 201 {
 		t.Fatalf("failed lines = %d, want 201", len(lines))
 	}
@@ -743,5 +743,344 @@ func TestFormatFanoutAggregate(t *testing.T) {
 		if i > 0 && !strings.HasSuffix(l, "…)") {
 			t.Errorf("failed line %d = %q, want a cut reason ending in …)", i, l)
 		}
+	}
+}
+
+// nodeNames is the declaration order of nodesWorkflow's graph.
+var nodeNames = []string{"api", "ui", "schema", "docs", "infra", "integrate", "release-prep"}
+
+// nodesWorkflow: build fans out a declared 7-node graph, after consumes the
+// aggregate and one node's context.
+func nodesWorkflow(require string) config.WorkflowConfig {
+	node := func(name string, needs ...string) config.FanoutNodeConfig {
+		return config.FanoutNodeConfig{Name: name, Input: "do " + name, Needs: needs}
+	}
+	integrate := node("integrate", "api", "ui", "schema")
+	integrate.Input = "Join: {{steps.api.context}} {{steps.ui.context}} {{steps.schema.context}}"
+	return config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{
+			{Name: "build", Fanout: &config.FanoutConfig{
+				Workflow: "unit",
+				Require:  require,
+				Nodes: []config.FanoutNodeConfig{
+					node("api"), node("ui"), node("schema"), node("docs"), node("infra"),
+					integrate,
+					node("release-prep", "integrate", "docs", "infra"),
+				},
+			}},
+			{Name: "after", Prompt: "{{steps.build.context}}\nAPI: {{steps.api.context}}"},
+		},
+	}
+}
+
+func nodeContext(name string) string { return strings.ToUpper(name) + " ctx" }
+
+func nodeChildren(t *testing.T, database *db.DB, parentID int64) map[string]*task.Task {
+	t.Helper()
+	list, err := database.GetFanoutChildren(parentID, "build")
+	if err != nil {
+		t.Fatalf("GetFanoutChildren: %v", err)
+	}
+	out := make(map[string]*task.Task, len(list))
+	for _, c := range list {
+		out[c.FanoutItem] = c
+	}
+	return out
+}
+
+func spawnedNodes(host *fakeFanoutHost, from int) []string {
+	var out []string
+	for _, c := range host.calls[from:] {
+		out = append(out, c.Item)
+	}
+	return out
+}
+
+// resumeNodes finishes the named children and resumes the parent.
+func resumeNodes(t *testing.T, engine *Engine, database *db.DB, tk *task.Task, status task.Status, names ...string) error {
+	t.Helper()
+	children := nodeChildren(t, database, tk.ID)
+	for _, n := range names {
+		finishChild(t, database, children[n].ID, status, nodeContext(n))
+	}
+	return engine.RunTask(context.Background(), resumeParent(t, database, tk), nil)
+}
+
+// driveNodes runs the parent, finishing every unfinished child with
+// outcome(node) and resuming, until the parent stops suspending. It returns
+// the last RunTask error.
+func driveNodes(t *testing.T, engine *Engine, database *db.DB, tk *task.Task, outcome func(node string) task.Status) error {
+	t.Helper()
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		return err
+	}
+	for pass := 0; reloadTask(t, database, tk).Status == task.StatusAwaitingChildren; pass++ {
+		if pass > 20 {
+			t.Fatal("parent never stopped suspending")
+		}
+		for name, c := range nodeChildren(t, database, tk.ID) {
+			if !c.Status.IsTerminal() {
+				finishChild(t, database, c.ID, outcome(name), nodeContext(name))
+			}
+		}
+		if err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func failing(names ...string) func(string) task.Status {
+	return func(n string) task.Status {
+		for _, f := range names {
+			if n == f {
+				return task.StatusFailed
+			}
+		}
+		return task.StatusCompleted
+	}
+}
+
+func TestFanoutNodesOrdering(t *testing.T) {
+	engine, tk, _, database, host := newFanoutTestEngine(t, nodesWorkflow(""))
+	runToSuspend(t, engine, database, tk)
+	if got := spawnedNodes(host, 0); strings.Join(got, ",") != "api,ui,schema,docs,infra" {
+		t.Fatalf("first pass spawned %v, want the 5 roots", got)
+	}
+
+	if err := resumeNodes(t, engine, database, tk, task.StatusCompleted, "api", "ui"); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if got := spawnedNodes(host, 5); len(got) != 0 {
+		t.Fatalf("spawned %v with schema pending, want nothing", got)
+	}
+
+	if err := resumeNodes(t, engine, database, tk, task.StatusCompleted, "schema"); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if got := spawnedNodes(host, 5); strings.Join(got, ",") != "integrate" {
+		t.Fatalf("spawned %v after schema, want integrate", got)
+	}
+	children := nodeChildren(t, database, tk.ID)
+	if children["docs"].Status.IsTerminal() || children["infra"].Status.IsTerminal() {
+		t.Fatal("docs/infra should still be pending")
+	}
+
+	for _, n := range []string{"integrate", "docs"} {
+		if err := resumeNodes(t, engine, database, tk, task.StatusCompleted, n); err != nil {
+			t.Fatalf("RunTask: %v", err)
+		}
+		if got := spawnedNodes(host, 6); len(got) != 0 {
+			t.Fatalf("spawned %v after %s, want nothing until infra completes", got, n)
+		}
+	}
+	if err := resumeNodes(t, engine, database, tk, task.StatusCompleted, "infra"); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if got := spawnedNodes(host, 6); strings.Join(got, ",") != "release-prep" {
+		t.Fatalf("spawned %v after infra, want release-prep", got)
+	}
+	for _, c := range host.calls {
+		if len(c.BlockedBy) != 0 {
+			t.Errorf("%s spawned with blocked_by %v, want none", c.Item, c.BlockedBy)
+		}
+		if c.Workflow != "unit" {
+			t.Errorf("%s workflow = %q, want unit", c.Item, c.Workflow)
+		}
+	}
+}
+
+func TestFanoutNodesInputAndRows(t *testing.T) {
+	engine, tk, runner, database, host := newFanoutTestEngine(t, nodesWorkflow(""))
+	if err := driveNodes(t, engine, database, tk, failing()); err != nil {
+		t.Fatalf("driveNodes: %v", err)
+	}
+	var integrate *FanoutSpawnRequest
+	for i := range host.calls {
+		if host.calls[i].Item == "integrate" {
+			integrate = &host.calls[i]
+		}
+	}
+	if integrate == nil || integrate.Input != "Join: API ctx UI ctx SCHEMA ctx" {
+		t.Fatalf("integrate request = %+v, want the three need contexts rendered", integrate)
+	}
+	if len(host.calls) != len(nodeNames) {
+		t.Errorf("spawns = %d, want %d", len(host.calls), len(nodeNames))
+	}
+
+	rows, err := database.GetTaskStepContexts(tk.ID, nodeNames)
+	if err != nil {
+		t.Fatalf("GetTaskStepContexts: %v", err)
+	}
+	for _, n := range nodeNames {
+		if rows[n] != nodeContext(n) {
+			t.Errorf("row %s = %q, want %q", n, rows[n], nodeContext(n))
+		}
+	}
+
+	children := nodeChildren(t, database, tk.ID)
+	want := "fanout build: 7/7 completed (require all)"
+	for _, n := range nodeNames {
+		want += fmt.Sprintf("\n- %s #%d completed — %s", n, children[n].ID, nodeContext(n))
+	}
+	after := runner.callsFor("after")
+	if len(after) != 1 || after[0].prompt != want+"\nAPI: API ctx" {
+		t.Errorf("after prompt = %+v, want\n%s\nAPI: API ctx", after, want)
+	}
+	if got := reloadTask(t, database, tk).Status; got == task.StatusAwaitingChildren || got == task.StatusFailed {
+		t.Errorf("parent status = %q, want it past the fanout", got)
+	}
+}
+
+func TestFanoutNodesSkipRequireAll(t *testing.T) {
+	engine, tk, runner, database, host := newFanoutTestEngine(t, nodesWorkflow(""))
+	err := driveNodes(t, engine, database, tk, failing("api"))
+	children := nodeChildren(t, database, tk.ID)
+	wantMsg := fmt.Sprintf(`fanout "build": 4/7 nodes completed (require all); failed: api #%d, integrate (skipped), release-prep (skipped)`, children["api"].ID)
+	if err == nil || err.Error() != wantMsg {
+		t.Fatalf("error = %v, want %q", err, wantMsg)
+	}
+	if got := reloadTask(t, database, tk).ErrorMessage; got != wantMsg {
+		t.Errorf("error_message = %q, want %q", got, wantMsg)
+	}
+	for _, c := range host.calls {
+		if c.Item == "integrate" || c.Item == "release-prep" {
+			t.Errorf("skipped node %s got a spawn request", c.Item)
+		}
+	}
+	if len(runner.callsFor("after")) != 0 {
+		t.Error("after ran despite the failed join")
+	}
+
+	items := []task.PublishedItem{{Slug: "api"}, {Slug: "integrate"}}
+	got := FormatFanoutAggregate("build", "all", items, map[string]*task.Task{"api": {ID: 3, Status: task.StatusFailed}}, nil, map[string]string{"integrate": "api"})
+	if want := "fanout build: 0/2 completed (require all)\n- api #3 failed — (failed: failed)\n- integrate (skipped: need api failed)"; got != want {
+		t.Errorf("aggregate =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestFanoutNodesSkipRequireAnyAndN(t *testing.T) {
+	for _, require := range []string{"any", "4"} {
+		t.Run(require, func(t *testing.T) {
+			engine, tk, runner, database, _ := newFanoutTestEngine(t, nodesWorkflow(require))
+			if err := driveNodes(t, engine, database, tk, failing("api")); err != nil {
+				t.Fatalf("driveNodes: %v", err)
+			}
+			after := runner.callsFor("after")
+			if len(after) != 1 {
+				t.Fatalf("after calls = %d, want 1", len(after))
+			}
+			for _, line := range []string{
+				"fanout build: 4/7 completed (require " + require + ")",
+				"- integrate (skipped: need api failed)",
+				"- release-prep (skipped: need integrate failed)",
+			} {
+				if !strings.Contains(after[0].prompt, line) {
+					t.Errorf("aggregate =\n%s\nwant %q", after[0].prompt, line)
+				}
+			}
+			if !strings.HasSuffix(after[0].prompt, "\nAPI: ") {
+				t.Errorf("after prompt = %q, want the failed api's context empty", after[0].prompt)
+			}
+		})
+	}
+	t.Run("not met", func(t *testing.T) {
+		engine, tk, _, database, _ := newFanoutTestEngine(t, nodesWorkflow("5"))
+		err := driveNodes(t, engine, database, tk, failing("api"))
+		if err == nil || !strings.Contains(err.Error(), "4/7 nodes completed (require 5)") {
+			t.Errorf("error = %v, want the require 5 join failure", err)
+		}
+	})
+}
+
+func TestFanoutNodesPerNodeRetries(t *testing.T) {
+	wf := nodesWorkflow("any")
+	two := 2
+	wf.Steps[0].Fanout.Nodes[0].Retries = &two
+	engine, tk, _, database, host := newFanoutTestEngine(t, wf)
+	if err := driveNodes(t, engine, database, tk, failing("api", "ui")); err != nil {
+		t.Fatalf("driveNodes: %v", err)
+	}
+	children := nodeChildren(t, database, tk.ID)
+	api, ui := children["api"], children["ui"]
+	if len(host.retried) != 2 || host.retried[0] != api.ID || host.retried[1] != api.ID {
+		t.Errorf("retried = %v, want api #%d twice and ui #%d never", host.retried, api.ID, ui.ID)
+	}
+	if api.FanoutAttempts != 2 || ui.FanoutAttempts != 0 {
+		t.Errorf("attempts api=%d ui=%d, want 2 and 0", api.FanoutAttempts, ui.FanoutAttempts)
+	}
+}
+
+func TestFanoutNodesParentRetry(t *testing.T) {
+	engine, tk, runner, database, host := newFanoutTestEngine(t, nodesWorkflow(""))
+	if err := driveNodes(t, engine, database, tk, failing("api")); err == nil {
+		t.Fatal("expected the join to fail")
+	}
+	if err := database.UpdateTaskStatus(tk.ID, task.StatusFailed); err != nil {
+		t.Fatalf("parent -> failed: %v", err)
+	}
+	before := nodeChildren(t, database, tk.ID)
+	if err := database.ResetTaskForRetryAtStep(tk.ID, 0, []string{"build", "after"}); err != nil {
+		t.Fatalf("ResetTaskForRetryAtStep: %v", err)
+	}
+	if err := database.UpdateTaskStatus(tk.ID, task.StatusRunning); err != nil {
+		t.Fatalf("parent -> running: %v", err)
+	}
+
+	runToSuspend(t, engine, database, reloadTask(t, database, tk))
+	if len(host.calls) != 5 {
+		t.Errorf("spawns = %d, want 5 (completed children reused, skipped nodes still waiting)", len(host.calls))
+	}
+	if len(host.retried) != 1 || host.retried[0] != before["api"].ID {
+		t.Errorf("retried = %v, want only api #%d", host.retried, before["api"].ID)
+	}
+	after := nodeChildren(t, database, tk.ID)
+	for _, n := range []string{"ui", "schema", "docs", "infra"} {
+		if after[n].ID != before[n].ID || after[n].Status != task.StatusCompleted {
+			t.Errorf("%s = #%d %s, want #%d completed", n, after[n].ID, after[n].Status, before[n].ID)
+		}
+	}
+
+	if err := driveNodes(t, engine, database, resumeParent(t, database, tk), failing()); err != nil {
+		t.Fatalf("driveNodes: %v", err)
+	}
+	if got := spawnedNodes(host, 5); strings.Join(got, ",") != "integrate,release-prep" {
+		t.Errorf("spawned %v after the retry, want integrate then release-prep", got)
+	}
+	if len(runner.callsFor("after")) != 1 {
+		t.Error("after did not run once")
+	}
+}
+
+func TestFanoutNodesRestartIdempotent(t *testing.T) {
+	engine, tk, _, database, host := newFanoutTestEngine(t, nodesWorkflow(""))
+	host.failAfter = 2
+	if err := engine.RunTask(context.Background(), tk, nil); err == nil || !strings.Contains(err.Error(), "host unavailable") {
+		t.Fatalf("error = %v, want the spawn failure", err)
+	}
+	if n := len(nodeChildren(t, database, tk.ID)); n != 2 {
+		t.Fatalf("children after the failed spawn = %d, want 2", n)
+	}
+
+	cfg := &config.Config{
+		OnComplete: "none",
+		Workflows:  []config.WorkflowConfig{nodesWorkflow("")},
+		Agents:     map[string]config.AgentConfig{"claude": {Command: "true"}},
+	}
+	fresh := NewEngine(cfg, database, nil, engine.repoRoot)
+	fresh.runner = engine.runner
+	freshHost := &fakeFanoutHost{database: database}
+	fresh.SetFanoutHost(freshHost)
+	for range 2 {
+		if err := fresh.RunTask(context.Background(), reloadTask(t, database, tk), nil); err != nil {
+			t.Fatalf("RunTask after restart: %v", err)
+		}
+	}
+	if got := spawnedNodes(freshHost, 0); strings.Join(got, ",") != "schema,docs,infra" {
+		t.Errorf("spawned %v after restart, want only the missing roots once", got)
+	}
+	if n := len(nodeChildren(t, database, tk.ID)); n != 5 {
+		t.Errorf("children = %d, want exactly 5", n)
 	}
 }

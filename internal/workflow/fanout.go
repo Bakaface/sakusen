@@ -81,6 +81,10 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 		return fail("task is at fanout depth %d; nested fanouts are capped at depth %d (MaxFanoutDepth)", depth, config.MaxFanoutDepth)
 	}
 
+	if f.IsNodes() {
+		return e.runFanoutNodes(t, step, tmplCtx, fresh, fail)
+	}
+
 	items, ok, err := e.database.GetPublishedItems(t.ID, f.From)
 	if err != nil {
 		return fail("failed to read items published by step %q: %v", f.From, err)
@@ -190,12 +194,211 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 			failed = append(failed, fmt.Sprintf("%s #%d", it.Slug, c.ID))
 		}
 	}
-	aggregate := FormatFanoutAggregate(step.Name, policy, items, children, contexts)
+	aggregate := FormatFanoutAggregate(step.Name, policy, items, children, contexts, nil)
 	e.appendTaskLog(t.ID, "=== fanout %s: %d/%d children completed (require %s) ===", step.Name, completed, len(items), policy)
 	if completed < required {
 		return fail("%d/%d children completed (require %s); failed: %s", completed, len(items), policy, strings.Join(failed, ", "))
 	}
 	return stepResult{step: step, resultText: aggregate}, nil
+}
+
+// runFanoutNodes runs a `nodes:` fanout: each node's child is spawned only
+// once every node it needs has completed, so its input can render those
+// nodes' contexts via {{steps.<node>.context}}. Children carry no blocked_by
+// edges; the engine itself holds a node back. A node whose need failed for
+// good is skipped and counts as failed at the join.
+//
+// Every pass rebuilds one parent task_steps row per node from its child, so
+// a completed node's context is addressable by later steps and a retried
+// node's stale context is dropped.
+func (e *Engine) runFanoutNodes(t *task.Task, step config.StepConfig, tmplCtx *TemplateContext, fresh bool, fail func(string, ...any) (stepResult, error)) (stepResult, error) {
+	f := step.Fanout
+	nodes := f.Nodes
+	items := make([]task.PublishedItem, len(nodes))
+	for i, n := range nodes {
+		items[i] = task.PublishedItem{Slug: n.Name, Title: n.Name, Needs: n.Needs}
+	}
+	policy := f.EffectiveRequire()
+	required := f.RequiredCount(len(nodes))
+	if required > len(nodes) {
+		return fail("require %s exceeds the %d declared node(s)", policy, len(nodes))
+	}
+	order := f.NodeTopoOrder()
+
+	children, err := e.fanoutChildrenBySlug(t.ID, step.Name)
+	if err != nil {
+		return fail("failed to list children: %v", err)
+	}
+
+	retried, err := e.retryFanoutNodes(f, order, children, fresh)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if retried > 0 {
+		if children, err = e.fanoutChildrenBySlug(t.ID, step.Name); err != nil {
+			return fail("failed to list children: %v", err)
+		}
+	}
+
+	nodeCtx := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		c := children[n.Name]
+		if c != nil && c.Status == task.StatusCompleted {
+			if err := e.database.CreateTaskStep(t.ID, n.Name); err != nil {
+				return fail("failed to record node %q: %v", n.Name, err)
+			}
+			if err := e.database.CompleteTaskStep(t.ID, n.Name, &c.Context, 0); err != nil {
+				return fail("failed to record node %q: %v", n.Name, err)
+			}
+			nodeCtx[n.Name] = c.Context
+			continue
+		}
+		if err := e.database.DeleteTaskStepsFrom(t.ID, []string{n.Name}); err != nil {
+			return fail("failed to clear node %q: %v", n.Name, err)
+		}
+	}
+
+	// Retries ran above, so a terminal non-completed child is failed for good.
+	failedFor := func(c *task.Task) bool {
+		return c != nil && c.Status.IsTerminal() && c.Status != task.StatusCompleted
+	}
+	skipped := make(map[string]string)
+	var ready []int
+	waiting := 0
+	for _, i := range order {
+		n := nodes[i]
+		if children[n.Name] != nil {
+			continue
+		}
+		allDone := true
+		for _, need := range n.Needs {
+			if _, isSkipped := skipped[need]; isSkipped || failedFor(children[need]) {
+				skipped[n.Name] = need
+				break
+			}
+			if c := children[need]; c == nil || c.Status != task.StatusCompleted {
+				allDone = false
+			}
+		}
+		switch {
+		case skipped[n.Name] != "":
+		case allDone:
+			ready = append(ready, i)
+		default:
+			waiting++
+		}
+	}
+
+	for _, i := range ready {
+		n := nodes[i]
+		nodeTmpl := *tmplCtx
+		nodeTmpl.Steps = make(map[string]string, len(tmplCtx.Steps)+len(nodeCtx))
+		for k, v := range tmplCtx.Steps {
+			nodeTmpl.Steps[k] = v
+		}
+		for k, v := range nodeCtx {
+			nodeTmpl.Steps[k] = v
+		}
+		nodeTmpl.Item = ItemVars{Slug: n.Name, Title: n.Name, Index: i + 1}
+		input, err := ResolveTemplate(n.Input, &nodeTmpl)
+		if err != nil {
+			return fail("input for node %q: %v", n.Name, err)
+		}
+		child, spawnErr := e.fanoutHost.SpawnChild(t, FanoutSpawnRequest{
+			Workflow: f.EffectiveNodeWorkflow(i),
+			Input:    input,
+			Title:    n.Name,
+			Item:     n.Name,
+			Step:     step.Name,
+			Merge:    f.EffectiveMerge(),
+			Priority: t.Priority,
+			TrackID:  t.TrackID,
+		})
+		if spawnErr != nil {
+			// The unique (parent, step, item) index rejects a second child, so
+			// a failed spawn may mean one already exists: reuse it.
+			existing, qErr := e.fanoutChildrenBySlug(t.ID, step.Name)
+			if qErr != nil || existing[n.Name] == nil {
+				return fail("failed to spawn child for node %q: %v", n.Name, spawnErr)
+			}
+			child = existing[n.Name]
+		}
+		children[n.Name] = child
+	}
+
+	var pending []int64
+	for _, n := range nodes {
+		if c := children[n.Name]; c != nil && !c.Status.IsTerminal() {
+			pending = append(pending, c.ID)
+		}
+	}
+	if len(pending) > 0 || waiting > 0 {
+		for _, id := range pending {
+			if err := e.database.AddTaskWaitsOn(t.ID, id); err != nil {
+				return fail("failed to record wait on child #%d: %v", id, err)
+			}
+		}
+		if retried > 0 {
+			e.appendTaskLog(t.ID, "=== fanout %s: retrying %d child task(s) ===", step.Name, retried)
+		}
+		e.appendTaskLog(t.ID, "=== fanout %s: waiting on %d child task(s), %d of %d node(s) not yet spawned ===", step.Name, len(pending), waiting, len(nodes))
+		log.Printf("Task #%d suspended at fanout %q: waiting on %d child task(s)", t.ID, step.Name, len(pending))
+		return stepResult{step: step, suspend: true}, nil
+	}
+
+	contexts := make(map[int64]string, len(children))
+	completed := 0
+	var failed []string
+	for _, n := range nodes {
+		c := children[n.Name]
+		switch {
+		case c == nil:
+			failed = append(failed, n.Name+" (skipped)")
+		case c.Status == task.StatusCompleted:
+			contexts[c.ID] = c.Context
+			completed++
+		default:
+			contexts[c.ID] = c.Context
+			failed = append(failed, fmt.Sprintf("%s #%d", n.Name, c.ID))
+		}
+	}
+	aggregate := FormatFanoutAggregate(step.Name, policy, items, children, contexts, skipped)
+	e.appendTaskLog(t.ID, "=== fanout %s: %d/%d nodes completed (require %s) ===", step.Name, completed, len(nodes), policy)
+	if completed < required {
+		return fail("%d/%d nodes completed (require %s); failed: %s", completed, len(nodes), policy, strings.Join(failed, ", "))
+	}
+	return stepResult{step: step, resultText: aggregate}, nil
+}
+
+// retryFanoutNodes resets the failed children of nodes due a retry, in
+// dependency order, and returns how many it reset. On a fresh entry every
+// failed child is retried with its attempts zeroed; on a resume while its
+// attempts are below the node's retries.
+func (e *Engine) retryFanoutNodes(f *config.FanoutConfig, order []int, children map[string]*task.Task, fresh bool) (int, error) {
+	n := 0
+	for _, i := range order {
+		c := children[f.Nodes[i].Name]
+		if c == nil || c.Status != task.StatusFailed {
+			continue
+		}
+		switch {
+		case fresh:
+			if err := e.database.ResetFanoutAttempts(c.ID); err != nil {
+				return n, fmt.Errorf("failed to reset attempts of child #%d: %v", c.ID, err)
+			}
+		case c.FanoutAttempts < f.EffectiveNodeRetries(i):
+			if _, err := e.database.IncrementFanoutAttempts(c.ID); err != nil {
+				return n, fmt.Errorf("failed to count attempt of child #%d: %v", c.ID, err)
+			}
+		default:
+			continue
+		}
+		if err := e.fanoutHost.RetryChild(c.ID); err != nil {
+			return n, fmt.Errorf("failed to retry child #%d: %v", c.ID, err)
+		}
+		n++
+	}
+	return n, nil
 }
 
 // retryFanoutChildren resets the failed children of items that are due a
@@ -286,7 +489,10 @@ func (e *Engine) fanoutChildrenBySlug(parentID int64, step string) (map[string]*
 // item line exceeds 200 runes; the aggregate stays one short line per item
 // however large the fanout. Full outputs are reachable through
 // {{tasks.<id>.context}}.
-func FormatFanoutAggregate(step, policy string, items []task.PublishedItem, children map[string]*task.Task, contexts map[int64]string) string {
+//
+// skipped maps an item that was never spawned to the need that failed, which
+// its line names instead of "(not spawned)".
+func FormatFanoutAggregate(step, policy string, items []task.PublishedItem, children map[string]*task.Task, contexts map[int64]string, skipped map[string]string) string {
 	completed := 0
 	for _, it := range items {
 		if c := children[it.Slug]; c != nil && c.Status == task.StatusCompleted {
@@ -298,6 +504,10 @@ func FormatFanoutAggregate(step, policy string, items []task.PublishedItem, chil
 	for _, it := range items {
 		c := children[it.Slug]
 		if c == nil {
+			if need, ok := skipped[it.Slug]; ok {
+				lines = append(lines, fmt.Sprintf("- %s (skipped: need %s failed)", it.Slug, need))
+				continue
+			}
 			lines = append(lines, fmt.Sprintf("- %s (not spawned)", it.Slug))
 			continue
 		}
