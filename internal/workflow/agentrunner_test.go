@@ -32,6 +32,9 @@ type fakeAgentResult struct {
 	// exact region layout runHeadlessAgent produces, so summarize_chat tests
 	// have something for stepAgentOutput to slice.
 	chatOutput string
+	// onRun, when set, is called with the task the engine handed the runner,
+	// so tests can make an agent write into the worktree it was given.
+	onRun func(t *task.Task)
 }
 
 // fakeAgentCall records the inputs a single runHeadlessStep invocation was
@@ -48,6 +51,8 @@ type fakeAgentCall struct {
 	// that two branches actually overlapped rather than ran back to back.
 	startedAt  time.Time
 	finishedAt time.Time
+	// worktreePath is the t.WorktreePath the call was made with.
+	worktreePath string
 }
 
 // fakeAgentRunner is the AGENT-RUNNER seam's test double (see agentRunner in
@@ -90,6 +95,7 @@ func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *tas
 		stepName: step.Name, prompt: prompt, agent: agent, env: envCopy,
 		spawn: spawn, startedAt: time.Now(),
 	})
+	f.calls[idx].worktreePath = t.WorktreePath
 	var res fakeAgentResult
 	if queue := f.results[step.Name]; len(queue) > 0 {
 		res = queue[0]
@@ -107,6 +113,10 @@ func (f *fakeAgentRunner) runHeadlessStep(ctx context.Context, e *Engine, t *tas
 
 	if res.chatOutput != "" && spawn.LogPath != "" {
 		f.writeFakeRegion(spawn.LogPath, step.Name, t.ID, prompt, res.chatOutput, res.exitCode)
+	}
+
+	if res.onRun != nil {
+		res.onRun(t)
 	}
 
 	switch {

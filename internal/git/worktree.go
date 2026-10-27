@@ -75,6 +75,58 @@ func (r *Repo) CreateWorktree(taskID int64, baseBranch, branchName string) (*Wor
 	}, nil
 }
 
+// EnsureWorktreeAt makes path a worktree checking out branch, without ever
+// discarding an existing one (unlike CreateWorktree). An existing worktree at
+// path is left untouched; a missing one is re-added on branch if the branch
+// survives, otherwise branch is created from baseCommit. created reports
+// whether a worktree was added.
+func (r *Repo) EnsureWorktreeAt(path, branch, baseCommit string) (created bool, err error) {
+	if isWorktreeRoot(path) {
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return false, fmt.Errorf("failed to create worktree directory: %w", err)
+	}
+
+	var args []string
+	if r.BranchExists(branch) {
+		// A worktree deleted from disk stays registered until pruned, and git
+		// refuses to check its branch out again while it is.
+		if err := r.CleanupWorktrees(); err != nil {
+			return false, err
+		}
+		args = []string{"worktree", "add", path, branch}
+	} else {
+		args = []string{"worktree", "add", "-b", branch, path, baseCommit}
+	}
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("failed to create worktree: %w (stderr: %s)", err, stderr.String())
+	}
+	return true, nil
+}
+
+// isWorktreeRoot reports whether path is the top level of a git checkout. A
+// plain directory nested inside another checkout does not count.
+func isWorktreeRoot(path string) bool {
+	want, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = path
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	got, err := filepath.EvalSymlinks(strings.TrimSpace(string(out)))
+	return err == nil && got == want
+}
+
 // BranchExists reports whether branchName exists as a local branch.
 // Internal-only helper used by CheckoutWorktree's fetch-if-missing fallback.
 func (r *Repo) BranchExists(branchName string) bool {

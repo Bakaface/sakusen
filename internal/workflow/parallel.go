@@ -39,8 +39,12 @@ import (
 //     its own branch-<name>.log with the identical region layout, so
 //     stepAgentOutput works on it unchanged. task.log receives only the two
 //     group marker lines.
-//   - Branches share one worktree and run at once, so they are documented as
-//     read-only. Nothing enforces it.
+//   - In a shared group, branches share one worktree and run at once, so they
+//     are documented as read-only. Nothing enforces it.
+//   - In an isolated group (isolation: worktree), each branch runs in its own
+//     worktree on its own git branch, forked from the task worktree's HEAD and
+//     committed on success. Both survive a retry: an existing branch worktree
+//     is reused as-is, a missing one is re-added on the surviving branch.
 
 // BranchLogPath returns the per-branch agent log for a parallel branch. It
 // sits next to the unified task.log in the same per-task log dir and uses the
@@ -55,6 +59,51 @@ func BranchLogPath(dataDir string, taskID int64, branchName string) string {
 // runner.OutputLogFileName, which every concurrent branch would truncate.
 func branchOutputFile(worktreePath, branchName string) string {
 	return filepath.Join(worktreePath, ".sakusen", fmt.Sprintf("output-%s.log", branchName))
+}
+
+// IsolatedBranchWorktreePath returns where an isolated branch's worktree lives:
+// a sibling of the task worktree.
+func IsolatedBranchWorktreePath(taskWorktree, name string) string {
+	return taskWorktree + "-" + name
+}
+
+// IsolatedBranchGitBranch returns the git branch an isolated branch commits to.
+func IsolatedBranchGitBranch(taskBranch, name string) string {
+	return taskBranch + "-" + name
+}
+
+// IsolatedBranchNames returns the name of every branch of every isolated group
+// in wf, in config order.
+func IsolatedBranchNames(wf *config.WorkflowConfig) []string {
+	if wf == nil {
+		return nil
+	}
+	var names []string
+	for _, step := range wf.Steps {
+		if !step.Parallel.IsIsolated() {
+			continue
+		}
+		for _, b := range step.Parallel.Branches {
+			names = append(names, b.Name)
+		}
+	}
+	return names
+}
+
+// isolatedBranchVars builds the {{branches.<name>.*}} map for t.
+func isolatedBranchVars(wf *config.WorkflowConfig, t *task.Task) map[string]IsolatedBranchVars {
+	names := IsolatedBranchNames(wf)
+	if len(names) == 0 {
+		return nil
+	}
+	vars := make(map[string]IsolatedBranchVars, len(names))
+	for _, name := range names {
+		vars[name] = IsolatedBranchVars{
+			Branch:   IsolatedBranchGitBranch(t.Branch, name),
+			Worktree: IsolatedBranchWorktreePath(t.WorktreePath, name),
+		}
+	}
+	return vars
 }
 
 // branchOutcome is one branch's result after the join.
@@ -87,6 +136,25 @@ type branchOutcome struct {
 // matching how an ordinary failed step behaves.
 func (e *Engine) runParallelGroup(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, group config.StepConfig, tmplCtx *TemplateContext, ws workspaceContext, outputFn func([]string)) (stepResult, error) {
 	branches := group.EffectiveBranches()
+	isolated := group.Parallel.IsIsolated()
+
+	// baseCommit is the task worktree's HEAD, the fork point of every isolated
+	// branch; it stays empty for a shared group.
+	var baseCommit string
+	if isolated {
+		if !t.Worktree {
+			errMsg := fmt.Sprintf("parallel group %q: isolation: worktree requires a worktree", group.Name)
+			e.recordExitCode(t.ID, 1, errMsg)
+			return stepResult{}, errors.New(errMsg)
+		}
+		head, err := e.repo.GetLastCommitHash(t.WorktreePath)
+		if err != nil {
+			errMsg := fmt.Sprintf("parallel group %q: %v", group.Name, err)
+			e.recordExitCode(t.ID, 1, errMsg)
+			return stepResult{}, errors.New(errMsg)
+		}
+		baseCommit = head
+	}
 
 	rows, err := e.database.GetTaskStepRows(t.ID)
 	if err != nil {
@@ -127,15 +195,37 @@ func (e *Engine) runParallelGroup(ctx context.Context, t *task.Task, wf *config.
 
 	failFast := group.Parallel.EffectiveRequire() == config.RequireAll
 
+	// An isolated branch's work is kept even when the group has enough
+	// successes, so siblings are only cancelled once the threshold is out of
+	// reach.
+	var (
+		failMu   sync.Mutex
+		failures int
+	)
+	maxFailures := len(branches) - group.Parallel.RequiredCount()
+
 	var wg sync.WaitGroup
 	for _, j := range launched {
 		wg.Add(1)
 		go func(j int) {
 			defer wg.Done()
-			out := e.runBranch(gctx, t, wf, branches[j], tmplCtx, ws, outputFn)
+			out := e.runBranch(gctx, t, wf, branches[j], tmplCtx, ws, baseCommit, outputFn)
 			outcomes[j] = out
-			if out.failReason != "" && failFast {
+			if out.failReason == "" {
+				return
+			}
+			if failFast {
 				cancel()
+				return
+			}
+			if isolated {
+				failMu.Lock()
+				failures++
+				unreachable := failures > maxFailures
+				failMu.Unlock()
+				if unreachable {
+					cancel()
+				}
 			}
 		}(j)
 	}
@@ -188,7 +278,9 @@ func (e *Engine) runParallelGroup(ctx context.Context, t *task.Task, wf *config.
 // that the group's join policy decides what to do with.
 // branch is the EFFECTIVE branch (group fallbacks already applied by
 // EffectiveBranch), so the group itself is not needed here.
-func (e *Engine) runBranch(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, branch config.StepConfig, tmplCtx *TemplateContext, ws workspaceContext, outputFn func([]string)) branchOutcome {
+// baseCommit is non-empty only for an isolated group: the branch then runs in
+// its own worktree forked from it, and its changes are committed on success.
+func (e *Engine) runBranch(ctx context.Context, t *task.Task, wf *config.WorkflowConfig, branch config.StepConfig, tmplCtx *TemplateContext, ws workspaceContext, baseCommit string, outputFn func([]string)) branchOutcome {
 	out := branchOutcome{step: branch}
 
 	if err := e.database.CreateTaskStep(t.ID, branch.Name); err != nil {
@@ -209,6 +301,26 @@ func (e *Engine) runBranch(ctx context.Context, t *task.Task, wf *config.Workflo
 		return fail(agentErr.Error(), 1)
 	}
 
+	// run is the task as the agent sees it: for an isolated branch, a copy
+	// pointed at the branch's own worktree and git branch. Rows, logs and the
+	// manual-context lookup stay keyed on the shared task ID.
+	run := t
+	imageRelPaths := ws.imageRelPaths
+	if baseCommit != "" {
+		bt := *t
+		bt.WorktreePath = IsolatedBranchWorktreePath(t.WorktreePath, branch.Name)
+		bt.Branch = IsolatedBranchGitBranch(t.Branch, branch.Name)
+		if _, err := e.repo.EnsureWorktreeAt(bt.WorktreePath, bt.Branch, baseCommit); err != nil {
+			return fail(fmt.Sprintf("worktree: %v", err), 1)
+		}
+		paths, err := e.populateWorktree(ctx, &bt, wf)
+		if err != nil {
+			return fail(err.Error(), 1)
+		}
+		run = &bt
+		imageRelPaths = paths
+	}
+
 	// Each branch resolves its own prompt from a COPY of the shared context so
 	// {{branch.*}} is branch-local and the snapshot (step contexts, track
 	// chain, children) stays identical across the fan-out.
@@ -218,21 +330,27 @@ func (e *Engine) runBranch(ctx context.Context, t *task.Task, wf *config.Workflo
 	if err != nil {
 		return fail(fmt.Sprintf("prompt: %v", err), 1)
 	}
-	prompt = appendImagesSection(prompt, ws.imageRelPaths)
+	prompt = appendImagesSection(prompt, imageRelPaths)
 
-	env := e.stepEnv(t, branch.Name, agentSlug)
+	env := e.stepEnv(run, branch.Name, agentSlug)
 	spawn := headlessSpawn{
 		LogPath:    BranchLogPath(e.dataDir, t.ID, branch.Name),
-		OutputFile: branchOutputFile(t.WorktreePath, branch.Name),
+		OutputFile: branchOutputFile(run.WorktreePath, branch.Name),
 		Tag:        branch.Name,
 	}
 
-	exitCode, resultText, _, spawnErr := e.runner.runHeadlessStep(ctx, e, t, branch, agentCfg, prompt, env, outputFn, spawn)
+	exitCode, resultText, _, spawnErr := e.runner.runHeadlessStep(ctx, e, run, branch, agentCfg, prompt, env, outputFn, spawn)
 	if spawnErr != nil {
 		return fail(branchFailReason(spawnErr, e.cfg.GetStepTimeout(branch)), 1)
 	}
 	if exitCode != 0 {
 		return fail(fmt.Sprintf("exit %d", exitCode), exitCode)
+	}
+	if baseCommit != "" {
+		msg := fmt.Sprintf("sakusen: task #%d branch %s", t.ID, branch.Name)
+		if err := e.repo.Commit(run.WorktreePath, msg); err != nil {
+			return fail(fmt.Sprintf("commit: %v", err), 1)
+		}
 	}
 
 	out.resultText = resultText

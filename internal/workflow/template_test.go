@@ -353,3 +353,33 @@ func TestResolveTemplateBranchVars(t *testing.T) {
 		t.Errorf("got %q, want empty branch vars outside a branch", got)
 	}
 }
+
+func TestResolveTemplateBranchesVars(t *testing.T) {
+	ctx := &TemplateContext{Branches: map[string]IsolatedBranchVars{
+		"impl-a": {Branch: "task-1-impl-a", Worktree: "/wt/task-1-impl-a"},
+	}}
+	cases := map[string]string{
+		"{{branches.impl-a.branch}}":   "task-1-impl-a",
+		"{{branches.impl-a.worktree}}": "/wt/task-1-impl-a",
+		"{{branches.nope.branch}}":     "",
+		"{{branches.impl-a.context}}":  "",
+		"{{branches.impl-a}}":          "",
+	}
+	for tmpl, want := range cases {
+		got, err := ResolveTemplate(tmpl, ctx)
+		if err != nil {
+			t.Fatalf("ResolveTemplate(%q): %v", tmpl, err)
+		}
+		if got != want {
+			t.Errorf("ResolveTemplate(%q) = %q, want %q", tmpl, got, want)
+		}
+	}
+
+	got, err := ResolveTemplate("[{{branches.impl-a.branch}}]", &TemplateContext{})
+	if err != nil {
+		t.Fatalf("ResolveTemplate with empty map: %v", err)
+	}
+	if got != "[]" {
+		t.Errorf("empty map resolved to %q, want %q", got, "[]")
+	}
+}

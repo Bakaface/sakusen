@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // twoBranchWorkflow is the canonical fan-out shape: one group of two branches
@@ -606,5 +608,254 @@ func TestParallelSummarizeChatBranchRunsAfterJoin(t *testing.T) {
 	}
 	if n := strings.Count(string(data), "x"); n != 1 {
 		t.Errorf("summarizer invocations = %d, want exactly 1", n)
+	}
+}
+
+// isolatedWorkflow is one isolated group feeding a step that templates the
+// first branch's checkout.
+func isolatedWorkflow(require string, names ...string) config.WorkflowConfig {
+	branches := make([]config.StepConfig, len(names))
+	for i, n := range names {
+		branches[i] = config.StepConfig{Name: n, Prompt: "work as {{branch.name}}"}
+	}
+	return config.WorkflowConfig{
+		Name: "default",
+		Steps: []config.StepConfig{
+			{
+				Name: "impl",
+				Parallel: &config.ParallelConfig{
+					Require:   require,
+					Isolation: config.IsolationWorktree,
+					Branches:  branches,
+				},
+			},
+			{Name: "pick", Prompt: "branch={{branches." + names[0] + ".branch}} worktree={{branches." + names[0] + ".worktree}}"},
+		},
+	}
+}
+
+// newIsolatedTestEngine is newFakeRunnerTestEngine on a real git repo with a
+// worktree-mode task, so isolated groups can provision branch worktrees.
+func newIsolatedTestEngine(t *testing.T, wf config.WorkflowConfig) (*Engine, *task.Task, *fakeAgentRunner, *db.DB) {
+	t.Helper()
+	engine, tk, runner, database := newFakeRunnerTestEngine(t, wf)
+	dir := engine.repoRoot
+	runFastTrackGit(t, dir, "init")
+	runFastTrackGit(t, dir, "config", "user.email", "test@test.com")
+	runFastTrackGit(t, dir, "config", "user.name", "Test")
+	runFastTrackGit(t, dir, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".sakusen/\nsynced.env\nsetup-marker\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runFastTrackGit(t, dir, "add", "-A")
+	runFastTrackGit(t, dir, "commit", "-m", "initial commit")
+
+	tk.Worktree = true
+	tk.WorktreePath = ""
+	tk.Branch = fmt.Sprintf("task-%d", tk.ID)
+	return engine, tk, runner, database
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestParallelIsolatedFailsWithoutWorktree(t *testing.T) {
+	engine, tk, runner, database := newFakeRunnerTestEngine(t, isolatedWorkflow("all", "impl-a", "impl-b"))
+
+	err := engine.RunTask(context.Background(), tk, nil)
+	if err == nil || !strings.Contains(err.Error(), `parallel group "impl": isolation: worktree requires a worktree`) {
+		t.Fatalf("err = %v, want the requires-a-worktree failure", err)
+	}
+	if n := len(runner.callsFor("impl-a")) + len(runner.callsFor("impl-b")); n != 0 {
+		t.Errorf("no branch may launch, got %d calls", n)
+	}
+	rows, _ := database.GetTaskStepRows(tk.ID)
+	for _, name := range []string{"impl-a", "impl-b"} {
+		if _, ok := rows[name]; ok {
+			t.Errorf("branch row %q created, want none", name)
+		}
+	}
+}
+
+func TestParallelIsolatedProvisionsBranchWorktrees(t *testing.T) {
+	wf := isolatedWorkflow("all", "impl-a", "impl-b")
+	engine, tk, runner, _ := newIsolatedTestEngine(t, wf)
+	if err := os.WriteFile(filepath.Join(engine.repoRoot, "synced.env"), []byte("SECRET=1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	engine.cfg.full.WorktreeSyncPaths = config.WorktreeSyncPathsConfig{Copy: []string{"synced.env"}}
+	engine.cfg.full.WorktreeSetupCommand = "touch {{worktree_path}}/setup-marker"
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	taskHead := gitOutput(t, tk.WorktreePath, "rev-parse", "HEAD")
+	for _, name := range []string{"impl-a", "impl-b"} {
+		path := IsolatedBranchWorktreePath(tk.WorktreePath, name)
+		branch := IsolatedBranchGitBranch(tk.Branch, name)
+
+		calls := runner.callsFor(name)
+		if len(calls) != 1 {
+			t.Fatalf("%s calls = %d, want 1", name, len(calls))
+		}
+		if calls[0].worktreePath != path {
+			t.Errorf("%s ran in %q, want its own worktree %q", name, calls[0].worktreePath, path)
+		}
+		if got := calls[0].env["SAKUSEN_WORKTREE"]; got != path {
+			t.Errorf("%s SAKUSEN_WORKTREE = %q, want %q", name, got, path)
+		}
+		if got := gitOutput(t, path, "rev-parse", "--abbrev-ref", "HEAD"); got != branch {
+			t.Errorf("%s git branch = %q, want %q", name, got, branch)
+		}
+		if got := gitOutput(t, path, "rev-parse", "HEAD"); got != taskHead {
+			t.Errorf("%s base = %q, want the task HEAD %q", name, got, taskHead)
+		}
+		if _, err := os.Stat(filepath.Join(path, "synced.env")); err != nil {
+			t.Errorf("%s missing synced file: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(path, "setup-marker")); err != nil {
+			t.Errorf("%s missing setup-command marker: %v", name, err)
+		}
+	}
+	if got := runner.callsFor("pick")[0].worktreePath; got != tk.WorktreePath {
+		t.Errorf("the step after the group ran in %q, want the task worktree %q", got, tk.WorktreePath)
+	}
+}
+
+func TestParallelIsolatedCommitsAndExposesBranchVars(t *testing.T) {
+	engine, tk, runner, _ := newIsolatedTestEngine(t, isolatedWorkflow("all", "impl-a", "impl-b"))
+	runner.script("impl-a", fakeAgentResult{resultText: "done", onRun: func(bt *task.Task) {
+		_ = os.WriteFile(filepath.Join(bt.WorktreePath, "a.txt"), []byte("a"), 0644)
+	}})
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	branch := IsolatedBranchGitBranch(tk.Branch, "impl-a")
+	path := IsolatedBranchWorktreePath(tk.WorktreePath, "impl-a")
+	if log := gitOutput(t, engine.repoRoot, "log", "--format=%s", branch, "--", "a.txt"); !strings.Contains(log, "branch impl-a") {
+		t.Errorf("git log %s -- a.txt = %q, want the branch commit", branch, log)
+	}
+	if status := gitOutput(t, path, "status", "--porcelain"); status != "" {
+		t.Errorf("branch worktree left dirty after commit:\n%s", status)
+	}
+
+	want := "branch=" + branch + " worktree=" + path
+	if got := runner.callsFor("pick")[0].prompt; got != want {
+		t.Errorf("next step prompt = %q, want %q", got, want)
+	}
+}
+
+func TestParallelIsolatedRequireOneWaitsForAll(t *testing.T) {
+	engine, tk, runner, database := newIsolatedTestEngine(t, isolatedWorkflow("1", "impl-a", "impl-b"))
+	runner.script("impl-a", fakeAgentResult{resultText: "fast"})
+	runner.script("impl-b", fakeAgentResult{resultText: "slow", delay: 200 * time.Millisecond})
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	rows, _ := database.GetTaskStepRows(tk.ID)
+	if rows["impl-b"].Status != "completed" {
+		t.Errorf("slow branch status = %q, want completed (not cancelled by the first success)", rows["impl-b"].Status)
+	}
+}
+
+func TestParallelIsolatedFailsWhenThresholdUnreachable(t *testing.T) {
+	wf := isolatedWorkflow("2", "r1", "r2", "r3")
+	engine, tk, runner, database := newIsolatedTestEngine(t, wf)
+	runner.script("r1", fakeAgentResult{exitCode: 1})
+	runner.script("r2", fakeAgentResult{exitCode: 1})
+	// r3 only returns once cancelled, which must happen as soon as two
+	// failures make require 2 of 3 unreachable.
+	runner.script("r3", fakeAgentResult{block: true})
+
+	err := engine.RunTask(context.Background(), tk, nil)
+	if err == nil || !strings.Contains(err.Error(), "0/3 branches succeeded (require 2)") {
+		t.Fatalf("err = %v, want the 0/3 join failure", err)
+	}
+	if !strings.Contains(err.Error(), "r3: cancelled") {
+		t.Errorf("err = %v, want the blocked branch reported cancelled", err)
+	}
+	rows, _ := database.GetTaskStepRows(tk.ID)
+	if rows["r3"].Status != "failed" {
+		t.Errorf("r3 status = %q, want failed", rows["r3"].Status)
+	}
+}
+
+func TestParallelIsolatedRetryReusesWorktree(t *testing.T) {
+	engine, tk, runner, _ := newIsolatedTestEngine(t, isolatedWorkflow("all", "impl-a", "impl-b"))
+	runner.script("impl-b", fakeAgentResult{exitCode: 1})
+	if err := engine.RunTask(context.Background(), tk, nil); err == nil {
+		t.Fatal("expected the first run to fail on impl-b")
+	}
+
+	path := IsolatedBranchWorktreePath(tk.WorktreePath, "impl-b")
+	if err := os.WriteFile(filepath.Join(path, "committed.txt"), []byte("c"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runFastTrackGit(t, path, "add", "committed.txt")
+	runFastTrackGit(t, path, "commit", "-m", "earlier work")
+	priorHead := gitOutput(t, path, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(path, "untracked.txt"), []byte("u"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var sawUntracked, sawHead bool
+	runner.script("impl-b", fakeAgentResult{resultText: "ok", onRun: func(bt *task.Task) {
+		_, err := os.Stat(filepath.Join(bt.WorktreePath, "untracked.txt"))
+		sawUntracked = err == nil
+		sawHead = gitOutput(t, bt.WorktreePath, "rev-parse", "HEAD") == priorHead
+	}})
+	tk.StepIndex = 0
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("retry RunTask: %v", err)
+	}
+	if !sawUntracked || !sawHead {
+		t.Errorf("retry saw untracked=%v priorHead=%v, want the existing worktree reused", sawUntracked, sawHead)
+	}
+	if n := len(runner.callsFor("impl-a")); n != 1 {
+		t.Errorf("completed impl-a ran %d times, want 1 (skipped on retry)", n)
+	}
+}
+
+func TestParallelIsolatedRetryReprovisionsMissingWorktree(t *testing.T) {
+	engine, tk, runner, database := newIsolatedTestEngine(t, isolatedWorkflow("all", "impl-a", "impl-b"))
+	runner.script("impl-b", fakeAgentResult{resultText: "ok", onRun: func(bt *task.Task) {
+		_ = os.WriteFile(filepath.Join(bt.WorktreePath, "b.txt"), []byte("b"), 0644)
+	}})
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	path := IsolatedBranchWorktreePath(tk.WorktreePath, "impl-b")
+	branchHead := gitOutput(t, path, "rev-parse", "HEAD")
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+	runFastTrackGit(t, engine.repoRoot, "worktree", "prune")
+	if err := database.DeleteTaskStepsFrom(tk.ID, []string{"impl", "impl-b"}); err != nil {
+		t.Fatalf("DeleteTaskStepsFrom: %v", err)
+	}
+
+	tk.StepIndex = 0
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("retry RunTask: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(path, "b.txt")); err != nil {
+		t.Errorf("re-provisioned worktree missing the branch's earlier commit: %v", err)
+	}
+	if got := gitOutput(t, path, "rev-parse", "HEAD"); got != branchHead {
+		t.Errorf("re-provisioned HEAD = %q, want the surviving branch tip %q", got, branchHead)
 	}
 }

@@ -429,6 +429,17 @@ func (e *Engine) prepareWorkspace(ctx context.Context, t *task.Task, wf *config.
 		}
 	}
 
+	imageRelPaths, err := e.populateWorktree(ctx, t, wf)
+	if err != nil {
+		return workspaceContext{}, err
+	}
+	return workspaceContext{imageRelPaths: imageRelPaths}, nil
+}
+
+// populateWorktree fills t.WorktreePath with what an agent expects to find:
+// synced paths and setup commands (worktree mode only), the .sakusen work
+// dirs, and the attached images, whose worktree-relative paths it returns.
+func (e *Engine) populateWorktree(ctx context.Context, t *task.Task, wf *config.WorkflowConfig) ([]string, error) {
 	// Sync configured paths from project root into the worktree. This runs on
 	// every RunTask call (including resumes after approval), not just when
 	// EnsureWorktree actually provisioned a fresh worktree — see
@@ -447,19 +458,19 @@ func (e *Engine) prepareWorkspace(ctx context.Context, t *task.Task, wf *config.
 	if t.Worktree {
 		if setupCmd := e.cfg.GetWorktreeSetupCommand(wf); setupCmd != "" {
 			if err := RunWorktreeSetupCommand(ctx, e.repoRoot, t.WorktreePath, setupCmd); err != nil {
-				return workspaceContext{}, fmt.Errorf("worktree setup failed: %w", err)
+				return nil, fmt.Errorf("worktree setup failed: %w", err)
 			}
 		}
 		if setupCmds := e.cfg.GetWorktreeSetupCommands(wf); len(setupCmds) > 0 {
 			if err := RunWorktreeSetupCommands(ctx, e.repoRoot, t.WorktreePath, setupCmds); err != nil {
-				return workspaceContext{}, fmt.Errorf("worktree setup failed: %w", err)
+				return nil, fmt.Errorf("worktree setup failed: %w", err)
 			}
 		}
 	}
 
 	// Ensure .sakusen directories exist in worktree
 	if err := EnsureWorkDirs(t.WorktreePath); err != nil {
-		return workspaceContext{}, fmt.Errorf("failed to create sakusen dirs: %w", err)
+		return nil, fmt.Errorf("failed to create sakusen dirs: %w", err)
 	}
 
 	// Copy attached images to worktree
@@ -472,7 +483,7 @@ func (e *Engine) prepareWorkspace(ctx context.Context, t *task.Task, wf *config.
 		}
 	}
 
-	return workspaceContext{imageRelPaths: imageRelPaths}, nil
+	return imageRelPaths, nil
 }
 
 // stepResult carries a single step's execution outcome from runStep to
@@ -572,6 +583,9 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		Images:  ws.imageRelPaths,
 	}, stepContexts, loopVars)
 	tmplCtx.Children = childrenVars
+	if t.Worktree {
+		tmplCtx.Branches = isolatedBranchVars(wf, t)
+	}
 
 	// Load the task's track chain fresh at every step launch (not once per
 	// task) so context published mid-run — by this task or by sibling tasks on

@@ -66,6 +66,13 @@ type BranchVars struct {
 	Agent string // resolved agent slug, not the authored ref
 }
 
+// IsolatedBranchVars locates an isolated parallel branch's checkout, exposed as
+// {{branches.<name>.branch}} and {{branches.<name>.worktree}}.
+type IsolatedBranchVars struct {
+	Branch   string
+	Worktree string
+}
+
 // ConflictVars exposes the merge-conflict resolver's working set via
 // {{conflict.files}}. The zero value (any non-resolver context) renders "".
 type ConflictVars struct {
@@ -82,6 +89,9 @@ type TemplateContext struct {
 	Conflict ConflictVars
 	// Branch is set only while resolving a parallel branch's prompt.
 	Branch BranchVars
+	// Branches maps every isolated parallel branch of the workflow to its git
+	// branch and worktree. Nil for non-worktree tasks.
+	Branches map[string]IsolatedBranchVars
 	// TaskLookup resolves a task by ID for {{tasks.<id>.<field>}} references.
 	// When nil, such references resolve to "".
 	TaskLookup func(int64) (*task.Task, error)
@@ -183,6 +193,8 @@ func resolveVars(tmpl string, ctx *TemplateContext) string {
 				return val
 			}
 			return ""
+		case strings.HasPrefix(key, "branches."):
+			return resolveIsolatedBranchRef(key[len("branches."):], ctx.Branches)
 		case strings.HasPrefix(key, "artifacts."):
 			// Backward compatibility: artifacts.<name> still works
 			artifactName := key[len("artifacts."):]
@@ -198,6 +210,28 @@ func resolveVars(tmpl string, ctx *TemplateContext) string {
 			return match // leave unknown placeholders as-is
 		}
 	})
+}
+
+// resolveIsolatedBranchRef resolves "<name>.branch" / "<name>.worktree".
+// Branch names may contain dots, so the field is split off the end. Unknown
+// names and fields resolve to "".
+func resolveIsolatedBranchRef(ref string, branches map[string]IsolatedBranchVars) string {
+	dot := strings.LastIndex(ref, ".")
+	if dot < 0 {
+		return ""
+	}
+	vars, ok := branches[ref[:dot]]
+	if !ok {
+		return ""
+	}
+	switch ref[dot+1:] {
+	case "branch":
+		return vars.Branch
+	case "worktree":
+		return vars.Worktree
+	default:
+		return ""
+	}
 }
 
 // formatConflictFiles renders the conflicted-file list as one markdown bullet

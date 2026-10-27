@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,4 +146,85 @@ func TestCheckoutBranch_AutoCheckoutMainAfterReattach(t *testing.T) {
 
 	// Cleanup
 	runGit(t, repo, "worktree", "remove", worktreePath)
+}
+
+func TestEnsureWorktreeAtCreatesFromBaseCommit(t *testing.T) {
+	repo := initTestRepo(t)
+	r := NewRepo(repo)
+	base := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	path := filepath.Join(t.TempDir(), "wt-branch")
+
+	created, err := r.EnsureWorktreeAt(path, "task-x-a", base)
+	if err != nil {
+		t.Fatalf("EnsureWorktreeAt: %v", err)
+	}
+	if !created {
+		t.Error("created = false, want true for a fresh worktree")
+	}
+	if branch, _ := r.GetCurrentBranch(path); branch != "task-x-a" {
+		t.Errorf("branch = %q, want task-x-a", branch)
+	}
+	if head, _ := r.GetLastCommitHash(path); head != base {
+		t.Errorf("HEAD = %q, want base %q", head, base)
+	}
+}
+
+func TestEnsureWorktreeAtReusesExisting(t *testing.T) {
+	repo := initTestRepo(t)
+	r := NewRepo(repo)
+	base := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	path := filepath.Join(t.TempDir(), "wt-branch")
+
+	if _, err := r.EnsureWorktreeAt(path, "task-x-a", base); err != nil {
+		t.Fatalf("first EnsureWorktreeAt: %v", err)
+	}
+	marker := filepath.Join(path, "untracked.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := r.EnsureWorktreeAt(path, "task-x-a", base)
+	if err != nil {
+		t.Fatalf("second EnsureWorktreeAt: %v", err)
+	}
+	if created {
+		t.Error("created = true, want false when the worktree already exists")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("untracked file did not survive reuse: %v", err)
+	}
+}
+
+func TestEnsureWorktreeAtReaddsMissingWorktreeOnExistingBranch(t *testing.T) {
+	repo := initTestRepo(t)
+	r := NewRepo(repo)
+	base := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	path := filepath.Join(t.TempDir(), "wt-branch")
+
+	if _, err := r.EnsureWorktreeAt(path, "task-x-a", base); err != nil {
+		t.Fatalf("EnsureWorktreeAt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "work.txt"), []byte("done"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, path, "add", "-A")
+	runGit(t, path, "commit", "-m", "branch work")
+	branchHead := strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))
+
+	// Delete the directory without pruning: the stale registration must not
+	// block re-adding the branch.
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := r.EnsureWorktreeAt(path, "task-x-a", base)
+	if err != nil {
+		t.Fatalf("EnsureWorktreeAt after removal: %v", err)
+	}
+	if !created {
+		t.Error("created = false, want true after the worktree was removed")
+	}
+	if head, _ := r.GetLastCommitHash(path); head != branchHead {
+		t.Errorf("HEAD = %q, want the branch's own commit %q", head, branchHead)
+	}
 }
