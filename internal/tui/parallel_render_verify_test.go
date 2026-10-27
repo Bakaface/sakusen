@@ -290,3 +290,87 @@ func TestTasksLoadedRefreshesOpenTaskInfo(t *testing.T) {
 		t.Errorf("task info panel did not pick up the refreshed BranchStatus:\n%s", got.taskInfo.renderMetadata())
 	}
 }
+
+// TestTaskInfoView_ParallelIsolatedWorktreeState renders an isolated group and
+// verifies the isolation badge and per-branch worktree tags, then proves a
+// shared group's rendering ignores BranchWorktrees entirely.
+func TestTaskInfoView_ParallelIsolatedWorktreeState(t *testing.T) {
+	const width = 120
+	wf := &config.WorkflowConfig{
+		Name: "reviewed",
+		Steps: []config.StepConfig{
+			{Name: "implement", Prompt: "i"},
+			{
+				Name: "review",
+				Parallel: &config.ParallelConfig{
+					Isolation: config.IsolationWorktree,
+					Branches: []config.StepConfig{
+						{Name: "review-opus", Agent: "claude:opus", Prompt: "a"},
+						{Name: "review-codex", Agent: "codex", Prompt: "b"},
+					},
+				},
+			},
+		},
+	}
+	wtBase := "/Users/someone/dev/github.com/example/project/.sakusen/worktrees/feat-isolated-parallel-review-worktrees"
+	info := &daemon.TaskInfo{
+		ID: 11, Title: "Isolated task", Status: "running", Workflow: "reviewed",
+		StepIndex: 1, CurrentStep: "review",
+		BranchStatus: map[string]string{"review-opus": "running", "review-codex": "pending"},
+		BranchWorktrees: map[string]daemon.BranchWorktreeInfo{
+			"review-opus": {
+				Path:      wtBase + "-review-opus",
+				GitBranch: "feat/isolated-parallel-review-worktrees-review-opus",
+				State:     daemon.BranchWorktreeProvisioned,
+			},
+			"review-codex": {
+				Path:      wtBase + "-review-codex",
+				GitBranch: "feat/isolated-parallel-review-worktrees-review-codex",
+				State:     daemon.BranchWorktreeMissing,
+			},
+		},
+	}
+	v := newTaskInfoView()
+	v.SetSize(width, 40)
+	v.SetWorkflow(wf)
+	v.SetTask(info)
+	metadata, view := stripANSI(v.renderMetadata()), v.View()
+
+	for _, want := range []string{
+		"[parallel 0/2, require:all, isolation:worktree]",
+		"review-opus [agent:claude:opus] [wt:provisioned feat-isolated-parallel-review-worktrees-review-opus]",
+		"review-codex [agent:codex] [wt:missing feat-isolated-parallel-review-worktrees-review-codex]",
+	} {
+		if !strings.Contains(metadata, want) {
+			t.Errorf("metadata missing %q:\n%s", want, metadata)
+		}
+	}
+	assertViewWidth(t, view, width)
+	assertUniformFrameWidth(t, view)
+
+	shared := func(wts map[string]daemon.BranchWorktreeInfo) string {
+		_, view := renderParallelTaskInfo(t, &daemon.TaskInfo{
+			ID: 7, Title: "Reviewed task", Status: "running", Workflow: "reviewed",
+			StepIndex: 1, CurrentStep: "review",
+			BranchStatus: map[string]string{
+				"review-opus":  "completed",
+				"review-codex": "running",
+				"review-slow":  "failed",
+			},
+			BranchWorktrees: wts,
+		})
+		return view
+	}
+	plain := shared(nil)
+	populated := shared(map[string]daemon.BranchWorktreeInfo{
+		"review-opus": {Path: wtBase + "-review-opus", State: daemon.BranchWorktreeProvisioned},
+	})
+	if plain != populated {
+		t.Errorf("shared group rendering changed with BranchWorktrees set:\n%s\n---\n%s", plain, populated)
+	}
+	for _, out := range []string{plain, populated} {
+		if strings.Contains(out, "isolation") || strings.Contains(out, "wt:") {
+			t.Errorf("shared group must not show worktree state:\n%s", out)
+		}
+	}
+}

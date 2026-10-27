@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -424,5 +427,31 @@ func TestRetryEarlierStepDropsLaterGroupBranches(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Errorf("retry from the first step must clear every row, including completed branch rows of later groups; left: %v", rows)
+	}
+}
+
+func TestTaskToInfoBranchWorktrees(t *testing.T) {
+	s, projID := setupServerWithProject(t)
+	cfg := primeParallelProject(t, s, projID)
+	tk := newParallelTask(t, s, projID)
+	tk.WorktreePath = filepath.Join(t.TempDir(), "task")
+	tk.Branch = "feat/reviewed"
+
+	if info := s.taskToInfo(tk); info.BranchWorktrees != nil {
+		t.Errorf("BranchWorktrees = %v, want nil for a shared group", info.BranchWorktrees)
+	}
+
+	cfg.Workflows[0].Steps[1].Parallel.Isolation = config.IsolationWorktree
+	if err := os.MkdirAll(tk.WorktreePath+"-review-a", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.taskToInfo(tk).BranchWorktrees
+	want := map[string]BranchWorktreeInfo{
+		"review-a": {Path: tk.WorktreePath + "-review-a", GitBranch: "feat/reviewed-review-a", State: BranchWorktreeProvisioned},
+		"review-b": {Path: tk.WorktreePath + "-review-b", GitBranch: "feat/reviewed-review-b", State: BranchWorktreeMissing},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BranchWorktrees = %+v, want %+v", got, want)
 	}
 }

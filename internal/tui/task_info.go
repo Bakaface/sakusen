@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -287,9 +288,13 @@ func (v *taskInfoView) renderMetadata() string {
 				// K/N stays on the row after completion: how many branches
 				// actually produced a review is the interesting fact, and it
 				// is otherwise invisible once the group's icon turns ✓.
-				suffix += fmt.Sprintf(" [parallel %d/%d, require:%s]",
+				isolation := ""
+				if step.Parallel.IsIsolated() {
+					isolation = ", isolation:worktree"
+				}
+				suffix += fmt.Sprintf(" [parallel %d/%d, require:%s%s]",
 					completedBranches(&step, t.BranchStatus), len(step.Parallel.Branches),
-					step.Parallel.EffectiveRequire())
+					step.Parallel.EffectiveRequire(), isolation)
 			}
 
 			b.WriteString(style.Render(fmt.Sprintf("  %s %d. %s%s", icon, i+1, step.Name, suffix)))
@@ -310,6 +315,9 @@ func (v *taskInfoView) renderMetadata() string {
 				agentSuffix := ""
 				if br.Agent != "" {
 					agentSuffix = fmt.Sprintf(" [agent:%s]", br.Agent)
+				}
+				if wt, ok := t.BranchWorktrees[br.Name]; ok && step.Parallel.IsIsolated() {
+					agentSuffix += fmt.Sprintf(" [wt:%s %s]", wt.State, filepath.Base(wt.Path))
 				}
 				b.WriteString(branchRowStyle(status).Render(
 					fmt.Sprintf("      %s %s%s", branchIcon(status), br.Name, agentSuffix)))

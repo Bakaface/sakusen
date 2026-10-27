@@ -3,6 +3,7 @@ package daemon
 import (
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/agent"
@@ -481,6 +482,30 @@ func branchStatuses(wf *config.WorkflowConfig, rows map[string]db.TaskStepRow) m
 	return out
 }
 
+// branchWorktrees reports the worktree of every isolated parallel branch in wf
+// for t, with State from a stat of its path. Nil when wf has no isolated group
+// or t has no worktree.
+func branchWorktrees(wf *config.WorkflowConfig, t *task.Task) map[string]BranchWorktreeInfo {
+	names := workflow.IsolatedBranchNames(wf)
+	if len(names) == 0 || t.WorktreePath == "" {
+		return nil
+	}
+	out := make(map[string]BranchWorktreeInfo, len(names))
+	for _, name := range names {
+		path := workflow.IsolatedBranchWorktreePath(t.WorktreePath, name)
+		state := BranchWorktreeMissing
+		if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+			state = BranchWorktreeProvisioned
+		}
+		out[name] = BranchWorktreeInfo{
+			Path:      path,
+			GitBranch: workflow.IsolatedBranchGitBranch(t.Branch, name),
+			State:     state,
+		}
+	}
+	return out
+}
+
 func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 	info := TaskInfoFromTask(t)
 
@@ -566,6 +591,7 @@ func (s *Server) taskToInfo(t *task.Task) TaskInfo {
 		if rows, err := s.database.GetTaskStepRows(t.ID); err == nil {
 			info.BranchStatus = branchStatuses(wfSnapshot, rows)
 		}
+		info.BranchWorktrees = branchWorktrees(wfSnapshot, t)
 	}
 
 	// tmux_direct tasks have no workflow step but are inherently interactive

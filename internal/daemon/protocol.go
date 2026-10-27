@@ -662,7 +662,11 @@ type TaskInfo struct {
 	// straight off a task refresh, with no extra round trip. Absent for
 	// workflows with no group.
 	BranchStatus map[string]string `json:"branch_status,omitempty"`
-	LatestChat   *ChatInfo         `json:"latest_chat,omitempty"`
+	// BranchWorktrees maps isolated parallel-branch name → its throwaway
+	// worktree. Only for branches of `isolation: worktree` groups; absent
+	// otherwise.
+	BranchWorktrees map[string]BranchWorktreeInfo `json:"branch_worktrees,omitempty"`
+	LatestChat      *ChatInfo                     `json:"latest_chat,omitempty"`
 	// PeriodicID is set when the task was materialized by a routine fire.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
 	// HibernatedAt is set while a tmux task's interactive session has been
@@ -670,6 +674,19 @@ type TaskInfo struct {
 	// and attaching wakes it first.
 	HibernatedAt *time.Time `json:"hibernated_at,omitempty"`
 }
+
+// BranchWorktreeInfo describes an isolated parallel branch's worktree.
+type BranchWorktreeInfo struct {
+	Path      string `json:"path"`
+	GitBranch string `json:"git_branch"`
+	State     string `json:"state"` // BranchWorktreeProvisioned | BranchWorktreeMissing
+}
+
+// BranchWorktreeInfo.State values.
+const (
+	BranchWorktreeProvisioned = "provisioned"
+	BranchWorktreeMissing     = "missing"
+)
 
 // PeriodicInfo is the client-facing projection of a routine: its
 // periodic_definitions row plus the config-only fields (description, input
