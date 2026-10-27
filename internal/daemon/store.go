@@ -85,6 +85,7 @@ type taskStore interface {
 	AddTaskWaitsOn(taskID, waitsOnID int64) error
 	GetTaskWaitsOn(taskID int64) ([]int64, error)
 	AllWaitsOnTerminal(taskID int64) (bool, error)
+	AnyWaitsOnTerminal(taskID int64) (bool, error)
 	GetTasksAwaitingChildren() ([]*task.Task, error)
 	HasCircularWaitsOn(taskID, newWaitsOnID int64) (bool, error)
 

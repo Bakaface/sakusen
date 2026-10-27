@@ -149,16 +149,18 @@ func (s *Server) workdirHeldBy(taskID int64) int64 {
 }
 
 // checkSuspendedParents promotes tasks in StatusAwaitingChildren back to
-// StatusPending once every wait-on child has reached terminal status. The
-// next checkPendingTasks tick re-enqueues the parent, the engine re-runs the
-// same step (step_index is preserved), and loadAndClearChildren in the engine
-// hydrates {{children.*}} from the still-attached wait-on edges before
-// clearing them.
+// StatusPending once every wait-on child has reached terminal status, or, for
+// a parent parked at a `nodes:` fanout, once ANY has (so newly ready nodes
+// spawn without waiting for the slowest sibling). The next checkPendingTasks
+// tick re-enqueues the parent, the engine re-runs the same step (step_index
+// is preserved), and loadAndClearChildren in the engine hydrates
+// {{children.*}} from the still-attached wait-on edges before clearing them.
 //
 // The resume path is project-blind: the parent and its wait-on children may
-// live in different projects. AllWaitsOnTerminal joins on task IDs only, and
+// live in different projects. The waits-on queries join on task IDs only, and
 // the subsequent checkPendingTasks tick re-claims the parent through the same
-// global GetClaimableTasks scan, which has no project filter.
+// global GetClaimableTasks scan, which has no project filter. Only the
+// parent's own project context is consulted, to pick the wake rule.
 func (s *Server) checkSuspendedParents() {
 	suspended, err := s.database.GetTasksAwaitingChildren()
 	if err != nil {
@@ -171,12 +173,18 @@ func (s *Server) checkSuspendedParents() {
 		if s.manager.IsTaskKnown(t.ID) {
 			continue
 		}
-		allDone, err := s.database.AllWaitsOnTerminal(t.ID)
+		nodeFanout := s.parkedAtNodeFanout(t)
+		var ready bool
+		if nodeFanout {
+			ready, err = s.database.AnyWaitsOnTerminal(t.ID)
+		} else {
+			ready, err = s.database.AllWaitsOnTerminal(t.ID)
+		}
 		if err != nil {
 			log.Printf("%sFailed to check waits-on terminal for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 			continue
 		}
-		if !allDone {
+		if !ready {
 			continue
 		}
 		// Failure semantics: even if some children failed, the parent
@@ -185,7 +193,11 @@ func (s *Server) checkSuspendedParents() {
 		// inspects {{children.<id>.status}} on resume and decides whether to
 		// fail, retry, or proceed — see loadAndClearChildren in
 		// internal/workflow/engine.go for how those vars are hydrated.
-		log.Printf("%sTask #%d: all waited-on children terminal, resuming at step %d", s.projectLogPrefix(t.ProjectID), t.ID, t.StepIndex)
+		rule := "all waited-on children terminal"
+		if nodeFanout {
+			rule = "a waited-on fanout node child terminal"
+		}
+		log.Printf("%sTask #%d: %s, resuming at step %d", s.projectLogPrefix(t.ProjectID), t.ID, rule, t.StepIndex)
 		if err := s.database.UpdateTaskStatus(t.ID, task.StatusPending); err != nil {
 			log.Printf("%sFailed to flip task #%d to pending for resume: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 			continue
@@ -197,6 +209,21 @@ func (s *Server) checkSuspendedParents() {
 		// wait-on check sees only NEW edges added during the resumed step.
 		s.broadcastTaskUpdate(t.ID)
 	}
+}
+
+// parkedAtNodeFanout reports whether t's current step is a `nodes:` fanout.
+// Any lookup failure yields false, i.e. the all-terminal wake rule.
+func (s *Server) parkedAtNodeFanout(t *task.Task) bool {
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		return false
+	}
+	wf := pc.cfg.GetTaskWorkflow(t.Workflow)
+	if wf == nil || t.StepIndex < 0 || t.StepIndex >= len(wf.Steps) {
+		return false
+	}
+	step := &wf.Steps[t.StepIndex]
+	return step.IsFanout() && len(step.Fanout.Nodes) > 0
 }
 
 func (s *Server) startTaskAgent(t *task.Task) error {

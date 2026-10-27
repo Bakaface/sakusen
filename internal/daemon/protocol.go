@@ -368,13 +368,23 @@ type ParallelStepSummary struct {
 }
 
 // FanoutStepSummary projects a `fanout:` step for ListWorkflows, with
-// defaults applied.
+// defaults applied. Exactly one of From and Nodes is set.
 type FanoutStepSummary struct {
-	From     string `json:"from"`
-	Workflow string `json:"workflow"`
-	Merge    string `json:"merge"`   // "base" | "parent"
-	Require  string `json:"require"` // "all" | "any" | "<N>"
-	Retries  int    `json:"retries"`
+	From     string              `json:"from,omitempty"`
+	Nodes    []FanoutNodeSummary `json:"nodes,omitempty"`
+	Workflow string              `json:"workflow"`
+	Merge    string              `json:"merge"`   // "base" | "parent"
+	Require  string              `json:"require"` // "all" | "any" | "<N>"
+	Retries  int                 `json:"retries"`
+}
+
+// FanoutNodeSummary projects one declared node of a `nodes:` fanout, with the
+// step-level workflow and retries applied.
+type FanoutNodeSummary struct {
+	Name     string   `json:"name"`
+	Workflow string   `json:"workflow"`
+	Needs    []string `json:"needs,omitempty"`
+	Retries  int      `json:"retries"`
 }
 
 // WorkflowSummary describes a single workflow available in a project. It

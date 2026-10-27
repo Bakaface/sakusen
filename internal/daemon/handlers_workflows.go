@@ -109,6 +109,14 @@ func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) [
 					Require:  step.Fanout.EffectiveRequire(),
 					Retries:  step.Fanout.Retries,
 				}
+				for k := range step.Fanout.Nodes {
+					entry.Fanout.Nodes = append(entry.Fanout.Nodes, FanoutNodeSummary{
+						Name:     step.Fanout.Nodes[k].Name,
+						Workflow: step.Fanout.EffectiveNodeWorkflow(k),
+						Needs:    step.Fanout.Nodes[k].Needs,
+						Retries:  step.Fanout.EffectiveNodeRetries(k),
+					})
+				}
 			}
 			summary.Steps = append(summary.Steps, entry)
 		}

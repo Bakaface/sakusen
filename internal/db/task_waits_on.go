@@ -94,6 +94,37 @@ func (db *DB) AllWaitsOnTerminal(taskID int64) (bool, error) {
 	return true, nil
 }
 
+// AnyWaitsOnTerminal returns true iff at least one child of taskID has reached
+// a terminal status. Empty wait set returns true, as for AllWaitsOnTerminal.
+//
+// Intentionally project-blind, like AllWaitsOnTerminal.
+func (db *DB) AnyWaitsOnTerminal(taskID int64) (bool, error) {
+	rows, err := db.sqlDB.Query(`
+		SELECT t.status FROM task_waits_on w
+		JOIN tasks t ON t.id = w.waits_on_id
+		WHERE w.task_id = ?`, taskID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	empty := true
+	for rows.Next() {
+		empty = false
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			return false, err
+		}
+		if task.Status(status).IsTerminal() {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return empty, nil
+}
+
 // GetTasksAwaitingChildren returns all tasks currently in StatusAwaitingChildren.
 // Used by the poller to find candidates for resume.
 func (db *DB) GetTasksAwaitingChildren() ([]*task.Task, error) {

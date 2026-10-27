@@ -11,6 +11,7 @@ import (
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/db"
 	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/workflow"
 )
 
 // TestRecoverOrphanedTasks_FinalizingRestartsAgent verifies that tasks killed
@@ -288,8 +289,9 @@ func initRecoveryTestRepo(t *testing.T) string {
 
 // --- Cross-project resume --------------------------------------------------
 //
-// checkSuspendedParents never touches getProjectContext, so these need no git
-// repo: they exercise the project-blind AllWaitsOnTerminal join directly.
+// These prime no project context, so checkSuspendedParents falls back to the
+// all-terminal rule: they exercise the project-blind AllWaitsOnTerminal join
+// directly and need no git repo.
 
 // suspendedParentWithChildren builds a parent in projA at StatusAwaitingChildren
 // with stepIndex, plus one child in projB per status, wired with wait-on edges.
@@ -401,5 +403,118 @@ func TestCheckSuspendedParents_DoesNotResumeWhileCrossProjectChildRunning(t *tes
 	}
 	if got.Status != task.StatusAwaitingChildren {
 		t.Errorf("parent status = %q, want awaiting-children (one child still running)", got.Status)
+	}
+}
+
+// --- Node-fanout wake-on-any -------------------------------------------------
+
+// primeNodeFanoutProject caches a project whose "graph" workflow is
+// prep → nodes (fanout a, b; c needs a and b), "dynamic" is plan → units
+// (fanout from: plan), and "plain" has no fanout.
+func primeNodeFanoutProject(t *testing.T, s *Server, projID int64) {
+	t.Helper()
+	cfg := &config.Config{Workflows: []config.WorkflowConfig{
+		{Name: "unit", Steps: []config.StepConfig{{Name: "build", Prompt: "build"}}},
+		{Name: "graph", Steps: []config.StepConfig{
+			{Name: "prep", Prompt: "prep"},
+			{Name: "nodes", Fanout: &config.FanoutConfig{Workflow: "unit", Nodes: []config.FanoutNodeConfig{
+				{Name: "a", Input: "a"},
+				{Name: "b", Input: "b"},
+				{Name: "c", Input: "c", Needs: []string{"a", "b"}},
+			}}},
+		}},
+		{Name: "dynamic", Steps: []config.StepConfig{
+			{Name: "plan", Prompt: "plan"},
+			{Name: "units", Fanout: &config.FanoutConfig{From: "plan", Workflow: "unit"}},
+		}},
+		{Name: "plain", Steps: []config.StepConfig{
+			{Name: "spawn", Prompt: "spawn"},
+			{Name: "after", Prompt: "after"},
+		}},
+	}}
+	repoRoot := "/tmp/sakusen-test"
+	s.projectsMu.Lock()
+	s.projects[projID] = &projectContext{
+		cfg:                     cfg,
+		engine:                  workflow.NewEngine(cfg, s.database, s.notifier, repoRoot),
+		repoRoot:                repoRoot,
+		tracksFingerprint:       tracksFingerprint(repoRoot),
+		globalConfigFingerprint: globalConfigFingerprint(),
+	}
+	s.projectsMu.Unlock()
+}
+
+// suspendedWorkflowParent builds a parent running workflow wf, suspended at
+// stepIndex, waiting on one same-project child per status.
+func suspendedWorkflowParent(t *testing.T, s *Server, projID int64, wf string, stepIndex int, childStatuses ...task.Status) *task.Task {
+	t.Helper()
+	parent, err := s.database.CreateTaskWithPriority(
+		projID, "parent", "parent work", "parent", wf, "", "branch-parent", "", "",
+		task.StatusRunning, task.PriorityMedium, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if err := s.database.UpdateTaskStep(parent.ID, stepIndex, ""); err != nil {
+		t.Fatalf("set parent step index: %v", err)
+	}
+	if err := s.database.UpdateTaskStatus(parent.ID, task.StatusAwaitingChildren); err != nil {
+		t.Fatalf("suspend parent: %v", err)
+	}
+	for i, st := range childStatuses {
+		name := fmt.Sprintf("child-%d", i)
+		c, err := s.database.CreateTaskWithPriority(
+			projID, name, "child work", name, "unit", "", "branch-"+name, "", "",
+			task.StatusRunning, task.PriorityMedium, false, nil, nil,
+		)
+		if err != nil {
+			t.Fatalf("create child %d: %v", i, err)
+		}
+		if err := s.database.UpdateTaskStatus(c.ID, st); err != nil {
+			t.Fatalf("set child %d status: %v", i, err)
+		}
+		if err := s.database.AddTaskWaitsOn(parent.ID, c.ID); err != nil {
+			t.Fatalf("AddTaskWaitsOn child %d: %v", i, err)
+		}
+	}
+	return parent
+}
+
+func TestCheckSuspendedParents_NodeFanout(t *testing.T) {
+	tests := []struct {
+		name      string
+		workflow  string
+		stepIndex int
+		children  []task.Status
+		want      task.Status
+	}{
+		{"node fanout wakes on one terminal child", "graph", 1,
+			[]task.Status{task.StatusCompleted, task.StatusRunning}, task.StatusPending},
+		{"node fanout stays while all running", "graph", 1,
+			[]task.Status{task.StatusRunning, task.StatusRunning}, task.StatusAwaitingChildren},
+		{"from fanout waits for all", "dynamic", 1,
+			[]task.Status{task.StatusCompleted, task.StatusRunning}, task.StatusAwaitingChildren},
+		{"create_tasks_and_wait waits for all", "plain", 0,
+			[]task.Status{task.StatusCompleted, task.StatusRunning}, task.StatusAwaitingChildren},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, projID := setupServerWithProject(t)
+			primeNodeFanoutProject(t, s, projID)
+			parent := suspendedWorkflowParent(t, s, projID, tt.workflow, tt.stepIndex, tt.children...)
+
+			s.checkSuspendedParents()
+
+			got, err := s.database.GetTask(parent.ID)
+			if err != nil {
+				t.Fatalf("get parent: %v", err)
+			}
+			if got.Status != tt.want {
+				t.Errorf("parent status = %q, want %q", got.Status, tt.want)
+			}
+			if got.StepIndex != tt.stepIndex {
+				t.Errorf("parent StepIndex = %d, want %d", got.StepIndex, tt.stepIndex)
+			}
+		})
 	}
 }

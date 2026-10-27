@@ -117,6 +117,37 @@ func TestAllWaitsOnTerminal(t *testing.T) {
 	}
 }
 
+func TestAnyWaitsOnTerminal(t *testing.T) {
+	db := openTestDBForWaits(t)
+	projID := mustProject(t, db, "/tmp/proj-waits-any")
+	parent := mustCreateTaskForWaits(t, db, projID, "parent")
+	c1 := mustCreateTaskForWaits(t, db, projID, "c1")
+	c2 := mustCreateTaskForWaits(t, db, projID, "c2")
+
+	// No edges → trivially unblocked
+	anyDone, err := db.AnyWaitsOnTerminal(parent.ID)
+	if err != nil || !anyDone {
+		t.Fatalf("empty wait set: anyDone=%v err=%v", anyDone, err)
+	}
+
+	db.AddTaskWaitsOn(parent.ID, c1.ID)
+	db.AddTaskWaitsOn(parent.ID, c2.ID)
+
+	anyDone, err = db.AnyWaitsOnTerminal(parent.ID)
+	if err != nil || anyDone {
+		t.Fatalf("none terminal: anyDone=%v err=%v", anyDone, err)
+	}
+
+	mustClaim(t, db, c1.ID)
+	if err := db.UpdateTaskStatus(c1.ID, task.StatusCompleted); err != nil {
+		t.Fatalf("update c1: %v", err)
+	}
+	anyDone, err = db.AnyWaitsOnTerminal(parent.ID)
+	if err != nil || !anyDone {
+		t.Fatalf("one of two terminal: anyDone=%v err=%v", anyDone, err)
+	}
+}
+
 func TestRemoveAllTaskWaitsOn(t *testing.T) {
 	db := openTestDBForWaits(t)
 	projID := mustProject(t, db, "/tmp/proj-waits-3")

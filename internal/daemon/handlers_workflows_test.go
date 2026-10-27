@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -196,16 +197,53 @@ func TestSummarizeWorkflows_Fanout(t *testing.T) {
 		t.Errorf("plan.Fanout = %+v, want nil", steps[0].Fanout)
 	}
 	want := FanoutStepSummary{From: "plan", Workflow: "unit", Merge: "parent", Require: "2", Retries: 1}
-	if got := steps[1].Fanout; got == nil || *got != want {
+	if got := steps[1].Fanout; got == nil || !reflect.DeepEqual(*got, want) {
 		t.Errorf("units.Fanout = %+v, want %+v", got, want)
 	}
 	wantDefaults := FanoutStepSummary{From: "plan", Workflow: "unit", Merge: "base", Require: "all", Retries: 0}
-	if got := steps[2].Fanout; got == nil || *got != wantDefaults {
+	if got := steps[2].Fanout; got == nil || !reflect.DeepEqual(*got, wantDefaults) {
 		t.Errorf("defaults.Fanout = %+v, want %+v", got, wantDefaults)
 	}
 	for _, st := range steps[1:] {
 		if st.Agent != "" || st.Tmux {
 			t.Errorf("%s: agent=%q tmux=%v, want no agent", st.Name, st.Agent, st.Tmux)
 		}
+	}
+}
+
+// TestSummarizeWorkflows_FanoutNodes verifies the `nodes:` projection: nodes
+// are listed in declaration order with the step's workflow and retries applied
+// unless overridden, and From stays empty.
+func TestSummarizeWorkflows_FanoutNodes(t *testing.T) {
+	cfg := &config.Config{DefaultAgent: "worker", Agents: map[string]config.AgentConfig{"worker": {Command: "run-worker"}}}
+	two := 2
+	in := []config.WorkflowConfig{{
+		Name: "graph",
+		Steps: []config.StepConfig{
+			{Name: "units", Fanout: &config.FanoutConfig{Workflow: "unit", Retries: 1, Nodes: []config.FanoutNodeConfig{
+				{Name: "a", Input: "a", Workflow: "special"},
+				{Name: "b", Input: "b", Retries: &two},
+				{Name: "c", Input: "c", Needs: []string{"a", "b"}},
+			}}},
+		},
+	}}
+
+	st := summarizeWorkflows(cfg, in)[0].Steps[0]
+	want := FanoutStepSummary{
+		Nodes: []FanoutNodeSummary{
+			{Name: "a", Workflow: "special", Retries: 1},
+			{Name: "b", Workflow: "unit", Retries: 2},
+			{Name: "c", Workflow: "unit", Needs: []string{"a", "b"}, Retries: 1},
+		},
+		Workflow: "unit",
+		Merge:    "base",
+		Require:  "all",
+		Retries:  1,
+	}
+	if st.Fanout == nil || !reflect.DeepEqual(*st.Fanout, want) {
+		t.Errorf("units.Fanout = %+v, want %+v", st.Fanout, want)
+	}
+	if st.Agent != "" || st.Tmux {
+		t.Errorf("agent=%q tmux=%v, want no agent", st.Agent, st.Tmux)
 	}
 }
