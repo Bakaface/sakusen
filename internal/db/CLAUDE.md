@@ -14,6 +14,7 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 - **Track slug uniqueness is per-scope via partial unique indexes** (`idx_tracks_project_slug` / `idx_tracks_global_slug`) — a plain `UNIQUE(project_id, slug)` would NOT cover global tracks because SQLite treats NULLs as distinct
 - **Track slugs cannot be empty or purely numeric** — numeric refs resolve as track IDs everywhere (`resolveTrackRef`, `--track`, `--parent`), so a numeric slug would be unreachable; rejected in `CreateTrack`
 - **Track parent scope rule + depth cap (10) are enforced in `CreateTrack`** — parents must be same-or-broader scope (project child → global parent OK, never the reverse, never cross-project); creation-time depth check is the only cycle guard because tracks cannot be re-parented
+- **Fanout identity is written in the child's INSERT** (`CreateFanoutChildTask`), never patched on afterwards, and is unique on `(fanout_parent_id, fanout_step, fanout_item)` via the partial index `idx_tasks_fanout_item`
 - **Track context append is a single SQL statement** (`context = CASE ... context || char(10) || char(10) || ?`) — no read-modify-write race under concurrent agents
 
 ## File Map
@@ -26,6 +27,8 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 | `task.go` | Task create/claim/query/update/reset/delete, commit tracking, dependency edges (`task_dependencies`, BFS cycle check) |
 | `task_steps.go` | Per-step results (`task_steps`): create/complete/fail/context read+overwrite/delete |
 | `task_waits_on.go` | Parent → child suspension edges (`task_waits_on`) |
+| `fanout.go` | Fanout children by parent/step, fanout depth (bounded recursive CTE over `fanout_parent_id`), attempt counter |
+| `published_items.go` | Item lists a task's step published for a fanout step (`task_published_items`, one row per task+step, replaced on re-publish) |
 | `track.go` | Tracks: create (slug/scope/depth validation), lookup by slug with project-shadows-global, chain, context/description updates |
 | `chat.go` | `chats` rows linking task steps to agent chat sessions (used for resume) |
 | `periodic.go` | Routine rows (`periodic_definitions`) and their run history; an empty `cadence` marks an after:-triggered or on-demand routine, excluded from the due-query and the claim; `after_name`/`after_last_task_id` drive `after:` routines (`ListAfterPeriodics`, `ClaimAfterFire`) |

@@ -68,12 +68,20 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- step cursor and agent conversation are intact). NULL = live session.
     hibernated_at DATETIME,
     -- Earliest time (UTC) the poller may claim this pending task. NULL = now.
-    not_before DATETIME
+    not_before DATETIME,
+    -- Fanout child identity: the parent task, its fanout step and the
+    -- published item slug this task was spawned for. Written in the child's
+    -- INSERT; unique per (parent, step, item) via idx_tasks_fanout_item.
+    fanout_parent_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+    fanout_step TEXT NOT NULL DEFAULT '',
+    fanout_item TEXT NOT NULL DEFAULT '',
+    fanout_attempts INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_periodic_id ON tasks(periodic_id) WHERE periodic_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_fanout_item ON tasks(fanout_parent_id, fanout_step, fanout_item) WHERE fanout_parent_id IS NOT NULL;
 
 -- periodic_definitions stores routines reconciled from the top-level routines:
 -- section of .sakusen.yml. A fire materializes an ordinary tasks row
@@ -127,6 +135,17 @@ CREATE TABLE IF NOT EXISTS task_waits_on (
     PRIMARY KEY (task_id, waits_on_id)
 );
 CREATE INDEX IF NOT EXISTS idx_task_waits_on_waits_on ON task_waits_on(waits_on_id);
+
+-- task_published_items holds the latest item list a task's step published for
+-- a fanout step to spawn children from: one row per (task, step), replaced on
+-- re-publish. items_json is a JSON array of task.PublishedItem.
+CREATE TABLE IF NOT EXISTS task_published_items (
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    step_name TEXT NOT NULL,
+    items_json TEXT NOT NULL,
+    published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (task_id, step_name)
+);
 
 CREATE TABLE IF NOT EXISTS task_steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

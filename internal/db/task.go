@@ -16,6 +16,17 @@ func (db *DB) CreateTask(projectID int64, title, input, slug, workflow, branch s
 }
 
 func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64) (*task.Task, error) {
+	return db.createTask(projectID, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch, status, priority, worktree, images, trackID, nil)
+}
+
+// CreateFanoutChildTask creates a task carrying its fanout origin in the same
+// INSERT, so a child is never visible without its parent link. A second child
+// for the same (parent, step, item) fails on idx_tasks_fanout_item.
+func (db *DB) CreateFanoutChildTask(projectID int64, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64, origin task.FanoutOrigin) (*task.Task, error) {
+	return db.createTask(projectID, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch, status, priority, worktree, images, trackID, &origin)
+}
+
+func (db *DB) createTask(projectID int64, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch string, status task.Status, priority task.Priority, worktree bool, images []string, trackID *int64, origin *task.FanoutOrigin) (*task.Task, error) {
 	var imagesJSON *string
 	if len(images) > 0 {
 		data, err := json.Marshal(images)
@@ -31,9 +42,17 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workfl
 		worktreeInt = 1
 	}
 
+	var fanoutParentID *int64
+	var fanoutStep, fanoutItem string
+	if origin != nil {
+		fanoutParentID = &origin.ParentID
+		fanoutStep = origin.Step
+		fanoutItem = origin.Item
+	}
+
 	result, err := db.sqlDB.Exec(
-		`INSERT INTO tasks (project_id, title, input, slug, workflow, branch_name, branch, target_branch, checkout_branch, status, priority, worktree, images, track_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		projectID, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch, status, priority, worktreeInt, imagesJSON, trackID,
+		`INSERT INTO tasks (project_id, title, input, slug, workflow, branch_name, branch, target_branch, checkout_branch, status, priority, worktree, images, track_id, fanout_parent_id, fanout_step, fanout_item) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		projectID, title, input, slug, workflow, branchName, branch, targetBranch, checkoutBranch, status, priority, worktreeInt, imagesJSON, trackID, fanoutParentID, fanoutStep, fanoutItem,
 	)
 	if err != nil {
 		return nil, err
@@ -49,7 +68,8 @@ func (db *DB) CreateTaskWithPriority(projectID int64, title, input, slug, workfl
 
 const taskColumns = `id, project_id, track_id, title, input, slug, workflow, status, priority, step_index, current_step, loop_iteration,
 	branch_name, branch, target_branch, checkout_branch, worktree, worktree_path, worktree_detached, workdir, exit_code, error_message, context, images, commits, periodic_id,
-	created_at, started_at, completed_at, updated_at, hibernated_at, not_before`
+	created_at, started_at, completed_at, updated_at, hibernated_at, not_before,
+	fanout_parent_id, fanout_step, fanout_item, fanout_attempts`
 
 func (db *DB) GetTask(id int64) (*task.Task, error) {
 	row := db.sqlDB.QueryRow(fmt.Sprintf(`SELECT %s FROM tasks WHERE id = ?`, taskColumns), id)
@@ -860,12 +880,14 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	var worktreeDetached int
 	var startedAt, completedAt sql.NullTime
 	var updatedAt, hibernatedAt, notBefore sql.NullTime
+	var fanoutParentID sql.NullInt64
 
 	err := s.Scan(
 		&t.ID, &projectID, &trackID, &title, &t.Input, &slug, &workflow, &t.Status, &priority,
 		&t.StepIndex, &currentStep, &t.LoopIteration,
 		&branchName, &branch, &targetBranch, &checkoutBranch, &worktreeInt, &worktreePath, &worktreeDetached, &t.Workdir, &exitCode, &errorMessage, &taskContext, &imagesJSON, &commitsJSON, &periodicID,
 		&t.CreatedAt, &startedAt, &completedAt, &updatedAt, &hibernatedAt, &notBefore,
+		&fanoutParentID, &t.FanoutStep, &t.FanoutItem, &t.FanoutAttempts,
 	)
 	if err != nil {
 		return nil, err
@@ -952,6 +974,10 @@ func scanTaskRow(s scanner) (*task.Task, error) {
 	if notBefore.Valid {
 		nb := notBefore.Time.UTC()
 		t.NotBefore = &nb
+	}
+	if fanoutParentID.Valid {
+		id := fanoutParentID.Int64
+		t.FanoutParentID = &id
 	}
 
 	return &t, nil

@@ -88,6 +88,7 @@ var migrations = []func(db *DB) error{
 	migrateV24,
 	migrateV25,
 	migrateV26,
+	migrateV27,
 }
 
 // latestSchemaVersion is the schema version a fresh install lands on after
@@ -526,6 +527,40 @@ func migrateV26(db *DB) error {
 		if _, err := db.sqlDB.Exec(`ALTER TABLE periodic_definitions ADD COLUMN after_last_task_id INTEGER`); err != nil {
 			return fmt.Errorf("failed to add after_last_task_id column: %w", err)
 		}
+	}
+	return nil
+}
+
+// migrateV27 adds the fanout child identity columns on tasks, their unique
+// index, and the task_published_items table.
+func migrateV27(db *DB) error {
+	hasParent, err := db.tasksHasColumn("fanout_parent_id")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tasks columns: %w", err)
+	}
+	if !hasParent {
+		for _, stmt := range []string{
+			`ALTER TABLE tasks ADD COLUMN fanout_parent_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL`,
+			`ALTER TABLE tasks ADD COLUMN fanout_step TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE tasks ADD COLUMN fanout_item TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE tasks ADD COLUMN fanout_attempts INTEGER NOT NULL DEFAULT 0`,
+		} {
+			if _, err := db.sqlDB.Exec(stmt); err != nil {
+				return fmt.Errorf("failed to add fanout columns: %w", err)
+			}
+		}
+	}
+	if _, err := db.sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_fanout_item ON tasks(fanout_parent_id, fanout_step, fanout_item) WHERE fanout_parent_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("failed to create idx_tasks_fanout_item index: %w", err)
+	}
+	if _, err := db.sqlDB.Exec(`CREATE TABLE IF NOT EXISTS task_published_items (
+		task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		step_name TEXT NOT NULL,
+		items_json TEXT NOT NULL,
+		published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (task_id, step_name)
+	)`); err != nil {
+		return fmt.Errorf("failed to create task_published_items table: %w", err)
 	}
 	return nil
 }

@@ -140,6 +140,14 @@ type Task struct {
 	HibernatedAt *time.Time
 	// NotBefore is the earliest time a pending task may be claimed (UTC).
 	NotBefore *time.Time
+	// FanoutParentID, FanoutStep and FanoutItem identify the parent task,
+	// fanout step and published item slug this child was spawned for. nil
+	// parent = not a fanout child (or the parent was deleted).
+	FanoutParentID *int64
+	FanoutStep     string
+	FanoutItem     string
+	// FanoutAttempts is the fanout child's attempt counter (0 = never counted).
+	FanoutAttempts int
 }
 
 // ParseNotBefore parses a not-before time. Only RFC3339 (with an explicit

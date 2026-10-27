@@ -3,6 +3,8 @@ package db
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // TestLatestSchemaVersionMatchesMigrationLadder guards the single-sourcing
@@ -112,5 +114,56 @@ func TestMigrateV21AddsTrackDescription(t *testing.T) {
 	}
 	if tr.Context != "kept" {
 		t.Errorf("context = %q, want %q", tr.Context, "kept")
+	}
+}
+
+// TestMigrateV27AddsFanoutStorage rolls a database back to version 26 by
+// dropping the fanout columns, index and table, then checks migrate()
+// restores them and existing rows read the column defaults.
+func TestMigrateV27AddsFanoutStorage(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+
+	pid := mustProject(t, database, "/p")
+	seeded := mustCreateTaskForWaits(t, database, pid, "legacy")
+
+	for _, stmt := range []string{
+		`DROP INDEX idx_tasks_fanout_item`,
+		`DROP TABLE task_published_items`,
+		`ALTER TABLE tasks DROP COLUMN fanout_parent_id`,
+		`ALTER TABLE tasks DROP COLUMN fanout_step`,
+		`ALTER TABLE tasks DROP COLUMN fanout_item`,
+		`ALTER TABLE tasks DROP COLUMN fanout_attempts`,
+		`UPDATE schema_version SET version = 26`,
+	} {
+		if _, err := database.sqlDB.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+
+	if err := database.migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	got, err := database.GetTask(seeded.ID)
+	if err != nil {
+		t.Fatalf("GetTask after migrate: %v", err)
+	}
+	if got.FanoutParentID != nil || got.FanoutAttempts != 0 || got.FanoutStep != "" || got.FanoutItem != "" {
+		t.Errorf("pre-existing row fanout fields = (%v, %q, %q, %d), want column defaults", got.FanoutParentID, got.FanoutStep, got.FanoutItem, got.FanoutAttempts)
+	}
+
+	origin := task.FanoutOrigin{ParentID: seeded.ID, Step: "s", Item: "a"}
+	mustCreateFanoutChild(t, database, pid, origin)
+	if _, err := database.CreateFanoutChildTask(pid, "dup", "dup", "a", "wf", "", "", "", "", task.StatusPending, task.PriorityMedium, true, nil, nil, origin); err == nil {
+		t.Error("duplicate fanout child insert succeeded; idx_tasks_fanout_item missing")
+	}
+
+	if err := database.PublishItems(seeded.ID, "s", []task.PublishedItem{{Slug: "a", Input: "x"}}); err != nil {
+		t.Errorf("PublishItems after migrate: %v", err)
 	}
 }
