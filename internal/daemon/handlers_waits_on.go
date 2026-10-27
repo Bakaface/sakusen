@@ -84,6 +84,18 @@ func (s *Server) handleCreateTasksAndWait(conn net.Conn, req CreateTasksAndWaitR
 		if childReq.Track == "" && parent.TrackID != nil && childProj.ID == parent.ProjectID {
 			childReq.Track = strconv.FormatInt(*parent.TrackID, 10)
 		}
+		if childReq.MergeIntoParent {
+			target, terr := task.ParentMergeTarget(parent, childProj.ID)
+			if terr != nil {
+				s.sendError(conn, fmt.Sprintf("child task %d/%d: merge_into_parent: %v", i+1, len(req.Tasks), terr))
+				return
+			}
+			if childReq.TargetBranch != "" && childReq.TargetBranch != target {
+				s.sendError(conn, fmt.Sprintf("child task %d/%d: merge_into_parent targets the parent's branch %s, but target_branch is %s", i+1, len(req.Tasks), target, childReq.TargetBranch))
+				return
+			}
+			childReq.TargetBranch = target
+		}
 		child, _, err := s.createTaskFromRequest(childReq)
 		if err != nil {
 			s.sendError(conn, fmt.Sprintf("failed to create child task %d/%d: %v", i+1, len(req.Tasks), err))

@@ -1531,7 +1531,8 @@ func textOf(res *mcp.CallToolResult) string {
 }
 
 // TestMCP_CreateTasksAndWait_PassesSlugThrough verifies the optional per-child
-// slug reaches the daemon request untouched (normalization happens daemon-side).
+// slug (and workdir / merge_into_parent) reaches the daemon request untouched
+// (normalization happens daemon-side).
 func TestMCP_CreateTasksAndWait_PassesSlugThrough(t *testing.T) {
 	fake := newFakeDaemon(t)
 
@@ -1555,7 +1556,7 @@ func TestMCP_CreateTasksAndWait_PassesSlugThrough(t *testing.T) {
 			Arguments: map[string]any{
 				"parent_task_id": 1,
 				"tasks": []map[string]any{
-					{"input": "child a", "workflow": "implement", "slug": "child-a", "workdir": "sub/a"},
+					{"input": "child a", "workflow": "implement", "slug": "child-a", "workdir": "sub/a", "merge_into_parent": true},
 					{"input": "child b", "workflow": "implement"},
 				},
 			},
@@ -1572,6 +1573,9 @@ func TestMCP_CreateTasksAndWait_PassesSlugThrough(t *testing.T) {
 	}
 	if captured.Tasks[0].Slug != "child-a" {
 		t.Errorf("child a slug = %q, want child-a", captured.Tasks[0].Slug)
+	}
+	if !captured.Tasks[0].MergeIntoParent || captured.Tasks[1].MergeIntoParent {
+		t.Errorf("child merge_into_parent = %v/%v, want true and false", captured.Tasks[0].MergeIntoParent, captured.Tasks[1].MergeIntoParent)
 	}
 	if captured.Tasks[0].Workdir != "sub/a" || captured.Tasks[1].Workdir != "" {
 		t.Errorf("child workdirs = %q/%q, want sub/a and empty", captured.Tasks[0].Workdir, captured.Tasks[1].Workdir)

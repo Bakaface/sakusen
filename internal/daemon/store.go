@@ -170,4 +170,5 @@ type taskStore interface {
 	GetWaitsOnChildren(taskID int64) ([]*task.Task, error)
 	RemoveAllTaskWaitsOn(taskID int64) error
 	AppendTaskCommit(id int64, commitHash string) error
+	GetWorktreeTasksOnBranch(projectID int64, branch string) ([]*task.Task, error)
 }

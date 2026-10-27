@@ -218,3 +218,19 @@ func Slugify(title string) string {
 	}
 	return s
 }
+
+// ParentMergeTarget returns the branch a child of parent must use as its base
+// and merge target to land on the parent's branch instead of the project base
+// branch. The parent must be a worktree task with a resolved branch in the
+// child's project, since merges into it run in the parent's own worktree.
+func ParentMergeTarget(parent *Task, childProjectID int64) (string, error) {
+	switch {
+	case !parent.Worktree:
+		return "", fmt.Errorf("parent task #%d does not run in a worktree, so it has no branch to merge into", parent.ID)
+	case parent.Branch == "":
+		return "", fmt.Errorf("parent task #%d has no branch yet", parent.ID)
+	case parent.ProjectID != childProjectID:
+		return "", fmt.Errorf("parent task #%d is in a different project, so its branch is not reachable from the child", parent.ID)
+	}
+	return parent.Branch, nil
+}

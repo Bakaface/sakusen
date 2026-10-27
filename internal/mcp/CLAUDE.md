@@ -44,6 +44,10 @@ irrecoverably destructive operations**.
   checked, and is the fallback when no marker is found). The CLI (`config.Load`) and the TUI
   go through the same helper, so tasks land on the same project row. A `.sakusen.yml` in a
   subdirectory of a repo therefore owns its own project without an explicit `project_path`.
+- **`create_tasks_and_wait` children merge into the project base branch by default**; a
+  per-child `merge_into_parent: true` is forwarded as `CreateTaskRequest.MergeIntoParent` and
+  resolved daemon-side to the parent's branch (`task.ParentMergeTarget`) — the MCP layer
+  never computes a target branch itself.
 - **Daemon connection held for the MCP process lifetime**: `Serve()` connects once at start
   (fails fast if the daemon isn't running) and reuses that `*client.Client`. The one
   exception is `wait_for_task_status`, which opens a dedicated connection per call: the

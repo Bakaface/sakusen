@@ -92,7 +92,23 @@ func NewEngine(cfg *config.Config, database taskStore, notifier *notify.Notifier
 		database.UpdateTaskStatusError,
 		e.notifyMergeBlocked,
 	)
+	e.coord.SetTargetWorktrees(e.targetWorktrees)
 	return e
+}
+
+// targetWorktrees lists the project's task worktrees on branch, so a task
+// whose target branch is another task's branch (a child merging into its
+// parent) lands in that task's worktree.
+func (e *Engine) targetWorktrees(t *task.Task, branch string) ([]merge.TargetWorktree, error) {
+	tasks, err := e.database.GetWorktreeTasksOnBranch(t.ProjectID, branch)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]merge.TargetWorktree, 0, len(tasks))
+	for _, wt := range tasks {
+		out = append(out, merge.TargetWorktree{TaskID: wt.ID, Path: wt.WorktreePath, Status: wt.Status})
+	}
+	return out, nil
 }
 
 // notifyMergeBlocked posts the desktop notification for a task entering

@@ -184,6 +184,9 @@ type CreateTaskRequest struct {
 	// "none" means explicitly trackless — meaningful for create_tasks_and_wait
 	// children, which otherwise inherit the parent task's track.
 	Track string `json:"track,omitempty"`
+	// MergeIntoParent, honoured only for create_tasks_and_wait children, sets
+	// TargetBranch to the parent task's branch (see task.ParentMergeTarget).
+	MergeIntoParent bool `json:"merge_into_parent,omitempty"`
 	// PeriodicID is set by the fire path when a routine materializes a task.
 	PeriodicID *int64 `json:"periodic_id,omitempty"`
 	// NotBefore keeps the task pending until this time; nil means no wait.

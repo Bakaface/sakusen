@@ -11,24 +11,26 @@ import (
 )
 
 // ChildTaskSpec mirrors the create_task arg surface but is reused in arrays.
-// Kept structurally identical to CreateTaskArgs (sans WaitForReady) so agents
-// can copy-paste a spec between tools without remapping fields.
+// Kept structurally identical to CreateTaskArgs (sans WaitForReady, plus
+// MergeIntoParent) so agents can copy-paste a spec between tools without
+// remapping fields.
 type ChildTaskSpec struct {
-	Input          string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
-	ProjectPath    string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sakusen.yml and workflows."`
-	Title          string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
-	Slug           string   `json:"slug,omitempty" jsonschema:"Skip AI slug generation and use this slug (short kebab-case, e.g. 'fix-login-redirect'). Normalized to lowercase letters, digits and dashes and capped at 24 characters."`
-	Workflow       string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every child except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch children still run their workflow steps, so the requirement applies to them too."`
-	Priority       string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent."`
-	BranchName     string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'."`
-	TargetBranch   string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override."`
-	CheckoutBranch string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one."`
-	Worktree       *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree."`
-	Workdir        string   `json:"workdir,omitempty" jsonschema:"Subdirectory, relative to the task's worktree (or main checkout when worktree is false), where agents and tmux sessions start. Must be a relative path inside the checkout and exist when the agent starts. Defaults to the workflow's workdir pin, else the checkout root."`
-	TmuxDirect     bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
-	Images         []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
-	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this child runs."`
-	Track          string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). Empty inherits the parent task's track ONLY when the child is in the parent's project — a child in a different project starts trackless unless you pass an explicit track, which is resolved in the child's own project. Pass 'none' to explicitly detach."`
+	Input           string   `json:"input,omitempty" jsonschema:"The child task input — what the child agent should do. Required unless checkout_branch is set or the workflow's first step is tmux."`
+	ProjectPath     string   `json:"project_path,omitempty" jsonschema:"Absolute path to the project repo root. Defaults to the parent task's project. May point at a DIFFERENT project than the parent — the parent still suspends until the child reaches terminal status, and the child runs under its own project's .sakusen.yml and workflows."`
+	Title           string   `json:"title,omitempty" jsonschema:"Skip AI title generation and use this title verbatim."`
+	Slug            string   `json:"slug,omitempty" jsonschema:"Skip AI slug generation and use this slug (short kebab-case, e.g. 'fix-login-redirect'). Normalized to lowercase letters, digits and dashes and capped at 24 characters."`
+	Workflow        string   `json:"workflow" jsonschema:"Workflow name to run — call list_workflows to see available workflows. Required for every child except tmux_direct ones (tmux_direct skips the workflow entirely, so the field is ignored there). checkout_branch children still run their workflow steps, so the requirement applies to them too."`
+	Priority        string   `json:"priority,omitempty" jsonschema:"Task priority: low, medium, high, or urgent."`
+	BranchName      string   `json:"branch_name,omitempty" jsonschema:"Branch template, e.g. 'feat/{{task.slug}}'."`
+	TargetBranch    string   `json:"target_branch,omitempty" jsonschema:"Base/merge branch override."`
+	MergeIntoParent bool     `json:"merge_into_parent,omitempty" jsonschema:"Branch the child from the parent task's branch and merge it back into that branch (in the parent's worktree) instead of the project base branch, so nothing reaches main before the parent's own steps. The parent must be a worktree task in the same project, and target_branch, if set, must equal the parent's branch. The merge waits (merge-blocked) until the parent is suspended or otherwise idle and its worktree is clean, so commit the parent's own work before spawning. Default false: the child merges into the project base branch."`
+	CheckoutBranch  string   `json:"checkout_branch,omitempty" jsonschema:"Check out an existing branch instead of creating a new one."`
+	Worktree        *bool    `json:"worktree,omitempty" jsonschema:"Run in an isolated git worktree."`
+	Workdir         string   `json:"workdir,omitempty" jsonschema:"Subdirectory, relative to the task's worktree (or main checkout when worktree is false), where agents and tmux sessions start. Must be a relative path inside the checkout and exist when the agent starts. Defaults to the workflow's workdir pin, else the checkout root."`
+	TmuxDirect      bool     `json:"tmux_direct,omitempty" jsonschema:"Skip the workflow and drop straight into an interactive agent session in tmux."`
+	Images          []string `json:"images,omitempty" jsonschema:"Absolute paths to image attachments for the initial prompt."`
+	BlockedBy       []int64  `json:"blocked_by,omitempty" jsonschema:"Task IDs that must complete before this child runs."`
+	Track           string   `json:"track,omitempty" jsonschema:"Track to attach (slug or numeric ID). Empty inherits the parent task's track ONLY when the child is in the parent's project — a child in a different project starts trackless unless you pass an explicit track, which is resolved in the child's own project. Pass 'none' to explicitly detach."`
 }
 
 // CreateTasksAndWaitArgs is the input schema for create_tasks_and_wait.
@@ -72,7 +74,8 @@ func registerCreateTasksAndWait(s *server.MCPServer, c *client.Client) {
 				"The calling step is paused on the daemon side; this tool returns immediately with the child task IDs. "+
 				"When the children all finish, the calling step is re-run from the same step index — the agent must check {{children.<id>.status}} to detect failures and decide whether to proceed, retry, or abort. "+
 				"Children may be created in a different project via project_path; the parent suspends and resumes identically. On resume, check {{children.<id>.status}} — it is 'completed' or 'failed' regardless of which project the child ran in. "+
-				"Each child spec must name a workflow (call list_workflows to see available workflows); only tmux_direct children may omit it.",
+				"Each child spec must name a workflow (call list_workflows to see available workflows); only tmux_direct children may omit it. "+
+				"By default a child merges into the project base branch; set merge_into_parent on a child to land it on the parent task's branch instead — its worktree branches from the parent branch's tip, its merge fast-forwards the parent's worktree while the parent is suspended, and on resume the parent's worktree contains every merged child's commits.",
 		),
 		mcp.WithInputSchema[CreateTasksAndWaitArgs](),
 	)
@@ -123,21 +126,22 @@ func handleCreateTasksAndWait(c *client.Client, args CreateTasksAndWaitArgs) (*m
 			projectPath = abs
 		}
 		reqs[i] = daemon.CreateTaskRequest{
-			Title:          t.Title,
-			Slug:           t.Slug,
-			Input:          t.Input,
-			Workflow:       t.Workflow,
-			Priority:       t.Priority,
-			BranchName:     t.BranchName,
-			TargetBranch:   t.TargetBranch,
-			CheckoutBranch: t.CheckoutBranch,
-			ProjectPath:    projectPath,
-			Worktree:       t.Worktree,
-			Workdir:        t.Workdir,
-			TmuxDirect:     t.TmuxDirect,
-			Images:         t.Images,
-			BlockedBy:      t.BlockedBy,
-			Track:          t.Track,
+			Title:           t.Title,
+			Slug:            t.Slug,
+			Input:           t.Input,
+			Workflow:        t.Workflow,
+			Priority:        t.Priority,
+			BranchName:      t.BranchName,
+			TargetBranch:    t.TargetBranch,
+			MergeIntoParent: t.MergeIntoParent,
+			CheckoutBranch:  t.CheckoutBranch,
+			ProjectPath:     projectPath,
+			Worktree:        t.Worktree,
+			Workdir:         t.Workdir,
+			TmuxDirect:      t.TmuxDirect,
+			Images:          t.Images,
+			BlockedBy:       t.BlockedBy,
+			Track:           t.Track,
 		}
 	}
 

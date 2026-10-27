@@ -17,6 +17,16 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
   `baseBranch`) is checked before the merge and re-checked under the lock; a failed re-check
   re-enters the wait without consuming a merge attempt. The merge is `--ff-only` and conflicts are
   resolved in the task worktree, so nothing is ever left half-applied in main.
+- **The merge target may be a task worktree** — when the main checkout is not on `baseBranch`,
+  `targetCheckout` asks the engine-wired `TargetWorktreeLister` (`SetTargetWorktrees`; the
+  engine lists the project's worktree tasks whose branch is `baseBranch`) for the task worktree
+  that has it checked out, and fast-forwards THERE (a child merging into its parent's branch).
+  Same lock, same invariants: never discard or switch, readiness = clean outside
+  `Config.IgnorePaths` and on `baseBranch`, re-checked under the lock; verify, rebase and
+  conflict resolution run in the merging task's worktree exactly as for main. The owning task
+  must be idle (`acceptsMerges`: awaiting-children, awaiting-approval or terminal) — a running,
+  tmux, finalizing (etc.) owner is a merge-blocked blocker, never touched. With no lister, or no
+  task worktree on the branch, only the main checkout can take the merge (today's blocker).
 - **`merge-blocked` means "waiting, nothing touched on main"** — the wait sets it with the
   blocker (wrong branch, or the blocking paths) as the status detail (`error_message`), and on
   success restores the prior `t.Status` with an empty detail. `Config.CleanTargetTimeout` (0 =
@@ -35,10 +45,11 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
 
 | File | Purpose |
 |------|---------|
-| `coordinator.go` | `Coordinator`, `Config`, `Lock`, `Locks`, the `Finalize` pipeline, conflict-retry, `waitForReadyTarget`, commit-recorder hooks |
+| `coordinator.go` | `Coordinator`, `Config`, `Lock`, `Locks`, the `Finalize` pipeline, conflict-retry, `waitForReadyTarget`, `targetCheckout` / `targetWorktree` (target resolution), commit-recorder hooks |
 | `verify.go` | Pre-merge verify command: `verify`, `runVerifyCommand`, `ErrVerifyFailed`, output tail capping |
 | `coordinator_test.go` | Unit tests for the pipeline + locking |
 | `verify_test.go` | Verify pass/fail/timeout and re-verify after rebase |
+| `task_worktree_target_test.go` | Merges into a branch checked out in a task worktree: ff, dirty/busy blocking, sibling sequence |
 
 ## Patterns
 

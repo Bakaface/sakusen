@@ -31,7 +31,7 @@ Unix socket server, request handlers, task polling, agent lifecycle. Protocol is
 | `handlers_task.go` | Task CRUD & metadata: create (async title/slug via `summarizer:`), get, list, delete, retry, priority/field/dependency updates, revert, step contexts |
 | `handlers_agent.go` | List/start/stop agents, output, subscribe/unsubscribe, logs |
 | `handlers_continue.go` | Continue/advance/finalize, retry-merge, worktree/branch management, tmux setup, detach/attach branch |
-| `handlers_waits_on.go` | `create_tasks_and_wait` / `wait_for_tasks`: child creation + `task_waits_on` edges; parent suspends to `StatusAwaitingChildren` |
+| `handlers_waits_on.go` | `create_tasks_and_wait` / `wait_for_tasks`: child creation + `task_waits_on` edges; parent suspends to `StatusAwaitingChildren`. A child's `merge_into_parent` sets its `TargetBranch` to the parent's branch via `task.ParentMergeTarget` (same-project worktree parent only; a differing explicit `target_branch` is rejected), so the child branches from and merges into the parent's worktree (see `internal/merge`); without it children keep the project base branch |
 | `handlers_cleanup.go` | Worktree/branch/log cleanup for completed/failed tasks (task ID 0 = all eligible) |
 | `handlers_periodic.go` | List/get/pause/runs/run-now for routines, all addressed by (project path, name) |
 | `handlers_tracks.go` | Track create/get/list/set-context, `resolveTrackRef`, `trackToInfo` |

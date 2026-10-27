@@ -373,6 +373,88 @@ func TestHandleCreateTasksAndWait_ErrorPaths(t *testing.T) {
 	})
 }
 
+func TestHandleCreateTasksAndWait_MergeIntoParent(t *testing.T) {
+	newWorktreeParent := func(t *testing.T, s *Server, projA int64) *task.Task {
+		t.Helper()
+		parent, err := s.database.CreateTaskWithPriority(
+			projA, "parent", "parent work", "parent", "", "", "feat/parent", "", "",
+			task.StatusRunning, task.PriorityMedium, true, nil, nil,
+		)
+		if err != nil {
+			t.Fatalf("create parent: %v", err)
+		}
+		return parent
+	}
+
+	t.Run("child targets the parent's branch, siblings keep the default", func(t *testing.T) {
+		s, projA := setupServerWithProject(t)
+		parent := newWorktreeParent(t, s, projA)
+
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleCreateTasksAndWait(serverConn, CreateTasksAndWaitRequest{
+			ParentTaskID: parent.ID,
+			Tasks: []CreateTaskRequest{
+				{Title: "into parent", Input: "a", MergeIntoParent: true},
+				{Title: "explicit same target", Input: "b", MergeIntoParent: true, TargetBranch: "feat/parent"},
+				{Title: "default", Input: "c"},
+			},
+		})
+		msg := readOneMessage(t, clientConn)
+		mustNotError(t, msg)
+		resp := decodePayload[CreateTasksAndWaitResponse](t, msg)
+		if len(resp.Children) != 3 {
+			t.Fatalf("got %d children, want 3", len(resp.Children))
+		}
+		for i, want := range []string{"feat/parent", "feat/parent", ""} {
+			waitTaskLeavesInit(t, s, resp.Children[i].ID)
+			child, err := s.database.GetTask(resp.Children[i].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if child.TargetBranch != want {
+				t.Errorf("child %d TargetBranch = %q, want %q", i, child.TargetBranch, want)
+			}
+		}
+	})
+
+	t.Run("conflicting target_branch is rejected", func(t *testing.T) {
+		s, projA := setupServerWithProject(t)
+		parent := newWorktreeParent(t, s, projA)
+
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleCreateTasksAndWait(serverConn, CreateTasksAndWaitRequest{
+			ParentTaskID: parent.ID,
+			Tasks:        []CreateTaskRequest{{Title: "c", Input: "c", MergeIntoParent: true, TargetBranch: "main"}},
+		})
+		expectError(t, readOneMessage(t, clientConn), "merge_into_parent targets the parent's branch feat/parent, but target_branch is main")
+	})
+
+	t.Run("non-worktree parent is rejected", func(t *testing.T) {
+		s, projA := setupServerWithProject(t)
+		parent := newParent(t, s, projA, nil)
+
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleCreateTasksAndWait(serverConn, CreateTasksAndWaitRequest{
+			ParentTaskID: parent.ID,
+			Tasks:        []CreateTaskRequest{{Title: "c", Input: "c", MergeIntoParent: true}},
+		})
+		expectError(t, readOneMessage(t, clientConn), "does not run in a worktree")
+	})
+
+	t.Run("cross-project child is rejected", func(t *testing.T) {
+		s, projA := setupServerWithProject(t)
+		mustOtherProject(t, s)
+		parent := newWorktreeParent(t, s, projA)
+
+		clientConn, serverConn := pipeForHandler(t)
+		go s.handleCreateTasksAndWait(serverConn, CreateTasksAndWaitRequest{
+			ParentTaskID: parent.ID,
+			Tasks:        []CreateTaskRequest{{Title: "c", Input: "c", ProjectPath: projBPath, MergeIntoParent: true}},
+		})
+		expectError(t, readOneMessage(t, clientConn), "different project")
+	})
+}
+
 func TestHandleWaitForTasks_ErrorPaths(t *testing.T) {
 	t.Run("empty child_task_ids is rejected", func(t *testing.T) {
 		s, projA := setupServerWithProject(t)

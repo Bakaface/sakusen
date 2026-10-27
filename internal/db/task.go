@@ -224,6 +224,22 @@ func (db *DB) GetActiveNonWorktreeTasks(projectID int64) ([]*task.Task, error) {
 	return active, nil
 }
 
+// GetWorktreeTasksOnBranch returns the project's worktree tasks whose branch
+// is branch and that still have a worktree path recorded, newest first.
+func (db *DB) GetWorktreeTasksOnBranch(projectID int64, branch string) ([]*task.Task, error) {
+	rows, err := db.sqlDB.Query(fmt.Sprintf(`
+		SELECT %s FROM tasks
+		WHERE project_id = ? AND branch = ? AND worktree = 1
+		AND worktree_path IS NOT NULL AND worktree_path != ''
+		ORDER BY id DESC
+	`, taskColumns), projectID, branch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
 func (db *DB) getTasksByStatus(status task.Status) ([]*task.Task, error) {
 	rows, err := db.sqlDB.Query(fmt.Sprintf(`
 		SELECT %s FROM tasks WHERE status = ? ORDER BY id ASC

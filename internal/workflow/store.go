@@ -32,6 +32,9 @@ type taskStore interface {
 	UpdateTaskContext(id int64, taskContext string) error
 	UpdateTaskLoopIteration(id int64, iteration int) error
 	AppendTaskCommit(id int64, commitHash string) error
+	// GetWorktreeTasksOnBranch backs the merge coordinator's lookup of a task
+	// worktree that has the merge target branch checked out.
+	GetWorktreeTasksOnBranch(projectID int64, branch string) ([]*task.Task, error)
 
 	// Per-step execution tracking (task_steps table).
 	CreateTaskStep(taskID int64, stepName string) error

@@ -100,6 +100,9 @@ func (f *fakeTaskStore) CreateTaskStep(taskID int64, stepName string) error    {
 func (f *fakeTaskStore) CompleteTaskStep(taskID int64, stepName string, context *string, exitCode int) error {
 	return nil
 }
+func (f *fakeTaskStore) GetWorktreeTasksOnBranch(projectID int64, branch string) ([]*task.Task, error) {
+	return nil, nil
+}
 func (f *fakeTaskStore) UpdateTaskStepContext(taskID int64, stepName string, context string) error {
 	return nil
 }

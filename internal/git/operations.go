@@ -93,6 +93,12 @@ func (r *Repo) HasChanges() (bool, error) {
 // line, e.g. "?? scratch.txt" or "M docs/a.md". Paths matching any of the
 // ignore glob pathspecs (relative to the repo root) are left out.
 func (r *Repo) ChangedPaths(ignore []string) ([]string, error) {
+	return r.ChangedPathsIn(r.root, ignore)
+}
+
+// ChangedPathsIn is ChangedPaths for the checkout at dir (the repo root or a
+// task worktree); ignore pathspecs are relative to that checkout's root.
+func (r *Repo) ChangedPathsIn(dir string, ignore []string) ([]string, error) {
 	args := []string{"status", "--porcelain"}
 	if len(ignore) > 0 {
 		args = append(args, "--", ".")
@@ -101,7 +107,7 @@ func (r *Repo) ChangedPaths(ignore []string) ([]string, error) {
 		}
 	}
 	cmd := exec.Command("git", args...)
-	cmd.Dir = r.root
+	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -131,8 +137,14 @@ func (r *Repo) ChangedPaths(ignore []string) ([]string, error) {
 // discards changes: the caller must ensure the root is clean and on the base
 // branch. If not, git refuses the fast-forward rather than clobbering edits.
 func (r *Repo) MergeBranch(branch string) error {
+	return r.MergeBranchIn(r.root, branch)
+}
+
+// MergeBranchIn is MergeBranch for the checkout at dir: it fast-forwards the
+// branch checked out there (the repo root or a task worktree) to branch.
+func (r *Repo) MergeBranchIn(dir, branch string) error {
 	mergeCmd := exec.Command("git", "merge", "--ff-only", branch)
-	mergeCmd.Dir = r.root
+	mergeCmd.Dir = dir
 
 	var stderr bytes.Buffer
 	mergeCmd.Stderr = &stderr

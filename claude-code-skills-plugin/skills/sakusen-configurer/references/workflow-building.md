@@ -1045,7 +1045,7 @@ and self-advance.
 |---|---|
 | `list_workflows` | List a project's workflows (name, description, pins, `fully_spec`, `first_step_is_tmux`, per-step name + description). Call before `create_task`. |
 | `create_task` | Queue a new task. `workflow` is required except for `tmux_direct` tasks. Optional `workdir` sets the agent start subdirectory (overrides the workflow's pin). |
-| `create_tasks_and_wait` | Spawn child tasks and suspend the calling step until all reach a terminal status. Each child spec accepts `workdir` like `create_task`. |
+| `create_tasks_and_wait` | Spawn child tasks and suspend the calling step until all reach a terminal status. Each child spec accepts `workdir` like `create_task`, plus `merge_into_parent` to land the child on the parent's branch instead of the base branch. |
 | `wait_for_tasks` | Same suspension, for pre-existing task IDs (any project). |
 | `get_task` | Task detail; `include_*` flags opt into per-step state, captured step contexts, and recent agent output. |
 | `list_tasks` | Compact task summaries, project-scoped or `all_projects=true`. |
@@ -1093,6 +1093,24 @@ identically, and `{{children.<id>.status}}` is `completed`/`failed` regardless o
 child ran. One caveat: a cross-project child does **not** inherit the parent's track (tracks
 are project-scoped), so pass an explicit `track` if you want one — it resolves in the child's
 own project.
+
+**Children merge into the project base branch by default** — each child finalizes under its own
+workflow's `on_complete`, so with `merge` its work reaches main before the parent's later
+steps (audit, review, human approval) have run. To gate it behind the parent, set
+`merge_into_parent: true` on the child spec:
+
+- The child's worktree branches from the parent branch's current tip, and its merge
+  fast-forwards the parent's branch **in the parent's worktree** (same per-repo lock, verify
+  command, rebase and conflict resolution as a merge into main), so siblings merging one after
+  another rebase onto each other's results. Main is untouched until the parent itself merges.
+- The merge waits in `merge-blocked` while the parent is still running a step (it lands once the
+  parent is suspended at `awaiting-children`) and while the parent's worktree has uncommitted
+  changes outside `merge.ignore_paths` — so have the parent commit its own edits before
+  spawning, and keep `.sakusen-output.log` gitignored (`sakusen init` does). Past
+  `merge.clean_target_timeout` the child goes `merge-failed`.
+- On resume the parent's worktree contains every merged child's commits.
+- The parent must be a worktree task in the same project; an explicit `target_branch` must equal
+  the parent's branch (passing the parent's branch as `target_branch` behaves the same).
 
 Unknown IDs and unsupported fields resolve to empty. On the first (pre-spawn) run of the step
 these are all empty — a typical orchestrator prompt branches on that:

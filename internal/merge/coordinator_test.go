@@ -587,7 +587,7 @@ type statusWrite struct {
 	detail string
 }
 
-// newDirtyCoordinator builds a fake-backed Coordinator whose ChangedPaths
+// newDirtyCoordinator builds a fake-backed Coordinator whose ChangedPathsIn
 // returns the scripted results in order (the last one repeats), recording
 // every status-detail write and onBlocked call.
 func newDirtyCoordinator(cfg Config, script ...[]string) (*Coordinator, *fakeGitRepo, *[]statusWrite, *[][]string) {
@@ -714,7 +714,7 @@ func TestBlockedDetailTruncatesPaths(t *testing.T) {
 	for i := 0; i < 13; i++ {
 		paths = append(paths, fmt.Sprintf("?? f%d", i))
 	}
-	got := blockedDetail(paths)
+	got := blockedDetail("target checkout", paths)
 	if !strings.HasSuffix(got, "?? f9, and 3 more") || strings.Contains(got, "f10") {
 		t.Errorf("unexpected truncated detail: %q", got)
 	}
@@ -921,7 +921,7 @@ func runIn(t *testing.T, dir string, args ...string) {
 type fakeGitRepo struct {
 	root string
 
-	// mergeFailCount is how many leading MergeBranch calls should fail
+	// mergeFailCount is how many leading MergeBranchIn calls should fail
 	// (simulating a non-fast-forward) before the call succeeds.
 	mergeFailCount int
 	mergeCalls     int
@@ -931,7 +931,7 @@ type fakeGitRepo struct {
 
 	lastCommitHash string
 
-	// changedScript is returned by successive ChangedPaths calls; the last
+	// changedScript is returned by successive ChangedPathsIn calls; the last
 	// entry repeats. Empty means always clean.
 	changedScript [][]string
 	changedCalls  int
@@ -941,7 +941,7 @@ func (f *fakeGitRepo) Root() string { return f.root }
 
 func (f *fakeGitRepo) Commit(worktreePath, message string) error { return nil }
 
-func (f *fakeGitRepo) MergeBranch(branch string) error {
+func (f *fakeGitRepo) MergeBranchIn(dir, branch string) error {
 	f.mergeCalls++
 	if f.mergeCalls <= f.mergeFailCount {
 		return errors.New("simulated non-fast-forward merge failure")
@@ -972,7 +972,7 @@ func (f *fakeGitRepo) ContinueRebase(worktreePath string) error {
 
 func (f *fakeGitRepo) GetCurrentBranch(dir string) (string, error) { return "main", nil }
 
-func (f *fakeGitRepo) ChangedPaths(ignore []string) ([]string, error) {
+func (f *fakeGitRepo) ChangedPathsIn(dir string, ignore []string) ([]string, error) {
 	if len(f.changedScript) == 0 {
 		return nil, nil
 	}

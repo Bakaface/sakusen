@@ -204,7 +204,9 @@ Before an `on_complete: merge` lands, Sakusen waits until the target repo's main
 uncommitted changes (`git status --porcelain`, so untracked files count). While it waits the task
 is `merge-blocked` and its `error_message` (get_task / list_tasks, the TUI `Error:` line) lists the
 blocking paths; it is cleared when the wait ends. The wait never resets or cleans the main
-checkout. The top-level `merge:` block tunes it:
+checkout. A child task created with `merge_into_parent` waits on its parent's worktree instead
+(same rules, plus the parent must be idle — see workflow-building.md → Child task
+orchestration). The top-level `merge:` block tunes it:
 
 ```yaml
 merge:
