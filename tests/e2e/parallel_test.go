@@ -197,3 +197,133 @@ func TestParallelGroupRequireAll(t *testing.T) {
 		t.Errorf("branch retry error = %q, want the retry-the-group hint", out)
 	}
 }
+
+// parallelIsolatedWorkflowYAML builds the isolated fan-out scenario:
+// implement → a two-branch `isolation: worktree` group → pick, whose prompt
+// references both branches' git branch and worktree. max_workers is 1 so the
+// branches' slots contend with the parent task's own.
+func parallelIsolatedWorkflowYAML(stubPath string) string {
+	return fmt.Sprintf(`default_agent: stub
+agents:
+  stub:
+    mode: headless
+    command: "%s"
+summarizer:
+  command: "%s"
+max_workers: 1
+poll_interval: 100ms
+git:
+  base_branch: main
+on_complete: none
+workflows:
+  - name: explored
+    steps:
+      - name: implement
+        prompt: "Implement the task"
+      - name: explore
+        parallel:
+          isolation: worktree
+          require: 1
+          branches:
+            - name: try-a
+              prompt: "Try approach A"
+            - name: try-b
+              prompt: "Try approach B"
+      - name: pick
+        prompt: |
+          A={{branches.try-a.branch}} @ {{branches.try-a.worktree}}
+          B={{branches.try-b.branch}} @ {{branches.try-b.worktree}}
+`, stubPath, stubPath)
+}
+
+// TestParallelGroupIsolatedWorktree drives an isolated group end to end: each
+// branch runs in its own worktree on its own git branch, its changes are
+// committed there and never reach the shared worktree, later steps can locate
+// both, and cleanup removes the branch worktrees and branches with the task's.
+func TestParallelGroupIsolatedWorktree(t *testing.T) {
+	e := setupE2E(t, "parallel_isolated")
+	e.WriteSakusenYAML(parallelIsolatedWorkflowYAML(e.StubPath))
+	// max_workers is read once at server construction.
+	e.RestartDaemon()
+
+	e.MustSakusen("create", "--title", "parallel isolated", "-w", "explored", "parallel isolated task")
+	// Completing at max_workers: 1 proves the branches do not deadlock on the
+	// slot the parent task holds.
+	e.WaitStatus(1, "completed", 60*time.Second)
+
+	wt := e.TaskField(1, "worktree_path")
+	br := e.TaskField(1, "branch")
+	if wt == "" || br == "" {
+		t.Fatalf("task worktree_path = %q, branch = %q; want both set", wt, br)
+	}
+
+	branchCWD := map[string]string{}
+	for _, c := range e.StubCalls("step") {
+		if c.Step == "try-a" || c.Step == "try-b" {
+			branchCWD[c.Step] = c.CWD
+		}
+	}
+
+	for _, name := range []string{"try-a", "try-b"} {
+		bwt := wt + "-" + name
+		bbr := br + "-" + name
+		file := name + ".txt"
+
+		if _, err := os.Stat(filepath.Join(bwt, file)); err != nil {
+			t.Errorf("branch %q worktree missing %s: %v", name, file, err)
+		}
+		if got, want := realPath(t, branchCWD[name]), realPath(t, bwt); got != want {
+			t.Errorf("branch %q agent cwd = %q, want its worktree %q", name, got, want)
+		}
+		if files := gitInDir(e.ProjectDir, "log", "--name-only", "--format=", bbr); !strings.Contains(files, file) {
+			t.Errorf("git branch %q history does not touch %s:\n%s", bbr, file, files)
+		}
+		if _, err := os.Stat(filepath.Join(wt, file)); !os.IsNotExist(err) {
+			t.Errorf("shared worktree must not contain %s (stat err: %v)", file, err)
+		}
+	}
+
+	db := e.DB()
+	for _, name := range []string{"explore", "try-a", "try-b", "pick"} {
+		var got string
+		if err := db.QueryRow(`SELECT status FROM task_steps WHERE task_id = 1 AND step_name = ?`, name).Scan(&got); err != nil {
+			t.Errorf("task_steps status for %q: %v", name, err)
+			continue
+		}
+		if got != "completed" {
+			t.Errorf("task_steps.status[%q] = %q, want completed", name, got)
+		}
+	}
+
+	prompt := e.CapturedPrompt(1, "pick")
+	for _, want := range []string{
+		fmt.Sprintf("A=%s-try-a @ %s-try-a", br, wt),
+		fmt.Sprintf("B=%s-try-b @ %s-try-b", br, wt),
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("pick prompt missing %q:\n%s", want, prompt)
+		}
+	}
+
+	e.MustSakusen("cleanup", "1")
+	for _, path := range []string{wt, wt + "-try-a", wt + "-try-b"} {
+		e.WaitNoFile(path, 10*time.Second)
+	}
+	// The task's branch was created by sakusen, so its branch git branches go too.
+	e.RefuteBranchExists(br + "-try-a")
+	e.RefuteBranchExists(br + "-try-b")
+}
+
+// realPath resolves symlinks so macOS /var and /private/var compare equal.
+func realPath(t *testing.T, p string) string {
+	t.Helper()
+	if p == "" {
+		return ""
+	}
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Errorf("resolve %q: %v", p, err)
+		return p
+	}
+	return r
+}
