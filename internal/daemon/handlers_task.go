@@ -397,7 +397,44 @@ func (s *Server) cleanupDeletedTaskResources(t *task.Task) {
 	}
 }
 
+// retryTaskFull kills id's tmux sessions and agent, resets it to pending at
+// the first step with every step record cleared, and broadcasts the result.
+func (s *Server) retryTaskFull(id int64) (*task.Task, error) {
+	t, err := s.database.GetTask(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+	agentID := fmt.Sprintf("%d", id)
+	if pc, err := s.getProjectContext(t.ProjectID); err == nil {
+		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID); err != nil {
+			log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), id, err)
+		}
+	}
+	_ = s.manager.StopAgent(agentID)
+
+	if err := s.database.ResetTaskForRetry(id); err != nil {
+		return nil, fmt.Errorf("failed to reset task: %w", err)
+	}
+	refreshed, err := s.database.GetTask(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load task after retry: %w", err)
+	}
+	s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
+	return refreshed, nil
+}
+
 func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
+	// Full retry (legacy path) when no specific step is requested.
+	if req.StepName == "" {
+		refreshed, err := s.retryTaskFull(req.TaskID)
+		if err != nil {
+			s.sendError(conn, err.Error())
+			return
+		}
+		_ = s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
+		return
+	}
+
 	t, err := s.database.GetTask(req.TaskID)
 	if err != nil {
 		s.sendError(conn, fmt.Sprintf("failed to get task: %v", err))
@@ -414,24 +451,6 @@ func (s *Server) handleRetryTask(conn net.Conn, req RetryTaskRequest) {
 
 	// Stop any running agent for this task
 	_ = s.manager.StopAgent(agentID)
-
-	// Full retry (legacy path) when no specific step is requested or the
-	// chosen step is the first step in the workflow — both are semantically
-	// equivalent and the legacy reset is simpler.
-	if req.StepName == "" {
-		if err := s.database.ResetTaskForRetry(req.TaskID); err != nil {
-			s.sendError(conn, fmt.Sprintf("failed to reset task: %v", err))
-			return
-		}
-		refreshed, err := s.database.GetTask(req.TaskID)
-		if err != nil {
-			s.sendError(conn, fmt.Sprintf("failed to load task after retry: %v", err))
-			return
-		}
-		s.broadcastToSubscribers(MsgTaskUpdate, TaskUpdateResponse{Task: s.taskToInfo(refreshed)})
-		_ = s.sendMessage(conn, MsgRetryTask, RetryTaskResponse{Task: s.taskToInfo(refreshed)})
-		return
-	}
 
 	// Per-step retry: look up the workflow, find the chosen step, and reset
 	// state only from that step onward. Earlier completed work is preserved.

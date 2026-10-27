@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -21,6 +22,12 @@ type fakeFanoutHost struct {
 	// failAfter makes every spawn fail once this many have succeeded (0 = never).
 	failAfter int
 	spawned   int
+	retried   []int64
+}
+
+func (h *fakeFanoutHost) RetryChild(id int64) error {
+	h.retried = append(h.retried, id)
+	return h.database.ResetTaskForRetry(id)
 }
 
 func (h *fakeFanoutHost) SpawnChild(parent *task.Task, req FanoutSpawnRequest) (*task.Task, error) {
@@ -216,8 +223,10 @@ func TestFanoutSpawnsSuspendsAndAdvances(t *testing.T) {
 	}
 }
 
-func TestFanoutNeedsWireBlockedBy(t *testing.T) {
-	engine, tk, runner, database, _ := newFanoutTestEngine(t, fanoutWorkflow(""))
+func TestFanoutNeedsOrdering(t *testing.T) {
+	wf := fanoutWorkflow("")
+	wf.Steps[1].Fanout.Retries = 1
+	engine, tk, runner, database, host := newFanoutTestEngine(t, wf)
 	list := items("b", "a")
 	list[0].Needs = []string{"a"}
 	publishOnRun(t, runner, database, tk, list)
@@ -236,6 +245,255 @@ func TestFanoutNeedsWireBlockedBy(t *testing.T) {
 	if len(a.BlockedBy) != 0 {
 		t.Errorf("a blocked_by = %v, want none", a.BlockedBy)
 	}
+
+	claimable := func(id int64) bool {
+		t.Helper()
+		list, err := database.GetClaimableTasks(time.Now())
+		if err != nil {
+			t.Fatalf("GetClaimableTasks: %v", err)
+		}
+		for _, c := range list {
+			if c.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	for _, id := range []int64{a.ID, b.ID} {
+		if err := database.UpdateTaskStatus(id, task.StatusPending); err != nil {
+			t.Fatalf("child #%d -> pending: %v", id, err)
+		}
+	}
+	if !claimable(a.ID) || claimable(b.ID) {
+		t.Errorf("claimable a=%v b=%v while a is pending, want a only", claimable(a.ID), claimable(b.ID))
+	}
+	if err := database.UpdateTaskStatus(a.ID, task.StatusRunning); err != nil {
+		t.Fatalf("a -> running: %v", err)
+	}
+	if claimable(b.ID) {
+		t.Error("b claimable while a is running")
+	}
+
+	// a fails and cascades to b; on resume both go back, and only a pays an attempt.
+	if err := database.UpdateTaskStatusError(a.ID, task.StatusFailed, "boom"); err != nil {
+		t.Fatalf("a -> failed: %v", err)
+	}
+	if _, err := database.FailDependentTasks(a.ID); err != nil {
+		t.Fatalf("FailDependentTasks: %v", err)
+	}
+	if got := childrenBySlug(t, database, tk.ID)["b"]; got.Status != task.StatusFailed || !strings.HasPrefix(got.ErrorMessage, "blocker task #") {
+		t.Fatalf("b = %s %q, want cascade-failed", got.Status, got.ErrorMessage)
+	}
+	if err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil); err != nil {
+		t.Fatalf("resumed RunTask: %v", err)
+	}
+	after := childrenBySlug(t, database, tk.ID)
+	if after["a"].Status != task.StatusPending || after["b"].Status != task.StatusPending {
+		t.Errorf("a=%s b=%s, want both pending", after["a"].Status, after["b"].Status)
+	}
+	if after["a"].FanoutAttempts != 1 || after["b"].FanoutAttempts != 0 {
+		t.Errorf("attempts a=%d b=%d, want 1 and 0", after["a"].FanoutAttempts, after["b"].FanoutAttempts)
+	}
+	if len(host.retried) != 2 || host.retried[0] != a.ID {
+		t.Errorf("retried = %v, want a then b", host.retried)
+	}
+	if got := reloadTask(t, database, tk).Status; got != task.StatusAwaitingChildren {
+		t.Errorf("parent status = %q, want %q", got, task.StatusAwaitingChildren)
+	}
+
+	// Once a completes, b becomes claimable.
+	finishChild(t, database, a.ID, task.StatusCompleted, "a done")
+	if !claimable(b.ID) {
+		t.Error("b not claimable after a completed")
+	}
+}
+
+func TestFanoutRetriesFailedChild(t *testing.T) {
+	t.Run("retries once", func(t *testing.T) {
+		wf := fanoutWorkflow("all")
+		wf.Steps[1].Fanout.Retries = 1
+		engine, tk, runner, database, host := newFanoutTestEngine(t, wf)
+		publishOnRun(t, runner, database, tk, items("a", "b"))
+		children := runToSuspend(t, engine, database, tk)
+		finishChild(t, database, children["a"].ID, task.StatusCompleted, "a done")
+		finishChild(t, database, children["b"].ID, task.StatusFailed, "")
+
+		if err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil); err != nil {
+			t.Fatalf("resumed RunTask: %v", err)
+		}
+		b := childrenBySlug(t, database, tk.ID)["b"]
+		if b.Status != task.StatusPending || b.FanoutAttempts != 1 {
+			t.Errorf("b = %s attempts %d, want pending with 1 attempt", b.Status, b.FanoutAttempts)
+		}
+		parent := reloadTask(t, database, tk)
+		if parent.Status != task.StatusAwaitingChildren || parent.StepIndex != 1 {
+			t.Errorf("parent = %s at step %d, want %s at 1", parent.Status, parent.StepIndex, task.StatusAwaitingChildren)
+		}
+		if len(runner.callsFor("after")) != 0 {
+			t.Error("after ran while b was being retried")
+		}
+
+		finishChild(t, database, b.ID, task.StatusFailed, "")
+		err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil)
+		wantFailed := fmt.Sprintf("b #%d", b.ID)
+		if err == nil || !strings.Contains(err.Error(), "failed: "+wantFailed) {
+			t.Fatalf("error = %v, want the require all failure naming %s", err, wantFailed)
+		}
+		if got := reloadTask(t, database, tk).ErrorMessage; !strings.Contains(got, wantFailed) {
+			t.Errorf("error_message = %q, want it to name %s", got, wantFailed)
+		}
+		if len(host.retried) != 1 {
+			t.Errorf("retried = %v, want exactly one retry", host.retried)
+		}
+	})
+	t.Run("no retries", func(t *testing.T) {
+		engine, tk, runner, database, host := newFanoutTestEngine(t, fanoutWorkflow("all"))
+		publishOnRun(t, runner, database, tk, items("a", "b"))
+		children := runToSuspend(t, engine, database, tk)
+		finishChild(t, database, children["a"].ID, task.StatusCompleted, "a done")
+		finishChild(t, database, children["b"].ID, task.StatusFailed, "")
+
+		err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil)
+		if err == nil || !strings.Contains(err.Error(), "1/2 children completed (require all)") {
+			t.Fatalf("error = %v, want the require all failure", err)
+		}
+		if len(host.retried) != 0 {
+			t.Errorf("retried = %v, want none", host.retried)
+		}
+	})
+}
+
+// failFanoutJoin runs a retries:1 fanout over a, b, c until the parent fails
+// the join: a and c complete, b fails twice. It returns the children.
+func failFanoutJoin(t *testing.T, engine *Engine, runner *fakeAgentRunner, database *db.DB, tk *task.Task) map[string]*task.Task {
+	t.Helper()
+	publishOnRun(t, runner, database, tk, items("a", "b", "c"))
+	children := runToSuspend(t, engine, database, tk)
+	finishChild(t, database, children["a"].ID, task.StatusCompleted, "a done")
+	finishChild(t, database, children["b"].ID, task.StatusFailed, "")
+	finishChild(t, database, children["c"].ID, task.StatusCompleted, "c done")
+	if err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil); err != nil {
+		t.Fatalf("resumed RunTask: %v", err)
+	}
+	finishChild(t, database, children["b"].ID, task.StatusFailed, "")
+	if err := engine.RunTask(context.Background(), resumeParent(t, database, tk), nil); err == nil {
+		t.Fatal("expected the join to fail")
+	}
+	// The daemon marks a task failed when RunTask errors.
+	if err := database.UpdateTaskStatus(tk.ID, task.StatusFailed); err != nil {
+		t.Fatalf("parent -> failed: %v", err)
+	}
+	return children
+}
+
+func TestFanoutSpawnIdempotentAfterParentRetry(t *testing.T) {
+	retryWorkflow := func() config.WorkflowConfig {
+		wf := fanoutWorkflow("all")
+		wf.Steps[1].Fanout.Retries = 1
+		return wf
+	}
+	// runRetry retries the parent with reset and runs it to suspension.
+	runRetry := func(t *testing.T, engine *Engine, database *db.DB, tk *task.Task, reset func() error) map[string]*task.Task {
+		t.Helper()
+		if err := reset(); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+		if err := database.UpdateTaskStatus(tk.ID, task.StatusRunning); err != nil {
+			t.Fatalf("parent -> running: %v", err)
+		}
+		return runToSuspend(t, engine, database, reloadTask(t, database, tk))
+	}
+	// checkReuse asserts a was reused untouched and b was retried with its
+	// attempts zeroed.
+	checkReuse := func(t *testing.T, host *fakeFanoutHost, before, after map[string]*task.Task) {
+		t.Helper()
+		a := after["a"]
+		if a.ID != before["a"].ID || a.Status != task.StatusCompleted {
+			t.Errorf("a = #%d %s, want #%d completed", a.ID, a.Status, before["a"].ID)
+		}
+		b := after["b"]
+		if b.ID != before["b"].ID || b.Status != task.StatusPending || b.FanoutAttempts != 0 {
+			t.Errorf("b = #%d %s attempts %d, want #%d pending with 0 attempts", b.ID, b.Status, b.FanoutAttempts, before["b"].ID)
+		}
+		for _, id := range host.retried {
+			if id == a.ID {
+				t.Errorf("completed child a #%d was retried", a.ID)
+			}
+		}
+		if host.retried[len(host.retried)-1] != b.ID {
+			t.Errorf("retried = %v, want b #%d last", host.retried, b.ID)
+		}
+		if len(after) > 3 {
+			t.Errorf("children = %d, want <= 3", len(after))
+		}
+	}
+	waitsOn := func(t *testing.T, database *db.DB, parentID, childID int64) bool {
+		t.Helper()
+		waits, err := database.GetTaskWaitsOn(parentID)
+		if err != nil {
+			t.Fatalf("GetTaskWaitsOn: %v", err)
+		}
+		for _, w := range waits {
+			if w == childID {
+				return true
+			}
+		}
+		return false
+	}
+	retryAtUnits := func(database *db.DB, tk *task.Task) func() error {
+		return func() error { return database.ResetTaskForRetryAtStep(tk.ID, 1, []string{"units", "after"}) }
+	}
+
+	t.Run("missing child is spawned", func(t *testing.T) {
+		engine, tk, runner, database, host := newFanoutTestEngine(t, retryWorkflow())
+		before := failFanoutJoin(t, engine, runner, database, tk)
+		if err := database.DeleteTask(before["c"].ID); err != nil {
+			t.Fatalf("DeleteTask: %v", err)
+		}
+		after := runRetry(t, engine, database, tk, retryAtUnits(database, tk))
+		checkReuse(t, host, before, after)
+		c := after["c"]
+		if c == nil || c.ID == before["c"].ID {
+			t.Fatalf("c = %v, want a newly spawned child", c)
+		}
+		if !waitsOn(t, database, tk.ID, c.ID) || !waitsOn(t, database, tk.ID, after["b"].ID) {
+			t.Error("parent does not wait on the new c and the retried b")
+		}
+	})
+	t.Run("non-terminal child is waited on", func(t *testing.T) {
+		engine, tk, runner, database, host := newFanoutTestEngine(t, retryWorkflow())
+		before := failFanoutJoin(t, engine, runner, database, tk)
+		// c was re-queued by hand while the parent sat failed.
+		if err := database.ResetTaskForRetry(before["c"].ID); err != nil {
+			t.Fatalf("ResetTaskForRetry: %v", err)
+		}
+		spawns := len(host.calls)
+		after := runRetry(t, engine, database, tk, retryAtUnits(database, tk))
+		checkReuse(t, host, before, after)
+		if after["c"].ID != before["c"].ID {
+			t.Errorf("c was respawned (#%d -> #%d)", before["c"].ID, after["c"].ID)
+		}
+		if len(host.calls) != spawns {
+			t.Errorf("spawns = %d, want %d (no new children)", len(host.calls), spawns)
+		}
+		if !waitsOn(t, database, tk.ID, after["c"].ID) {
+			t.Error("parent does not wait on the pending c")
+		}
+	})
+	t.Run("full retry republishes", func(t *testing.T) {
+		engine, tk, runner, database, host := newFanoutTestEngine(t, retryWorkflow())
+		before := failFanoutJoin(t, engine, runner, database, tk)
+		publishOnRun(t, runner, database, tk, items("a", "b", "c"))
+		spawns := len(host.calls)
+		after := runRetry(t, engine, database, tk, func() error { return database.ResetTaskForRetry(tk.ID) })
+		if n := len(runner.callsFor("plan")); n != 2 {
+			t.Errorf("plan ran %d times, want 2", n)
+		}
+		checkReuse(t, host, before, after)
+		if len(host.calls) != spawns {
+			t.Errorf("spawns = %d, want %d (no new children)", len(host.calls), spawns)
+		}
+	})
 }
 
 // runFanoutToJoin publishes three items, finishes the children with the given

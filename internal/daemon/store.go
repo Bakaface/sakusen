@@ -181,4 +181,6 @@ type taskStore interface {
 	ClearPublishedItems(taskID int64, step string) error
 	GetFanoutChildren(parentID int64, step string) ([]*task.Task, error)
 	GetFanoutDepth(taskID int64) (int, error)
+	IncrementFanoutAttempts(taskID int64) (int, error)
+	ResetFanoutAttempts(taskID int64) error
 }

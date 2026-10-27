@@ -62,3 +62,9 @@ func (h fanoutHost) SpawnChild(parent *task.Task, req workflow.FanoutSpawnReques
 	log.Printf("%sTask #%d: fanout %q spawned child #%d for item %q", s.projectLogPrefix(parent.ProjectID), parent.ID, req.Step, child.ID, req.Item)
 	return child, nil
 }
+
+// RetryChild resets a terminal child to pending through the full-retry path.
+func (h fanoutHost) RetryChild(id int64) error {
+	_, err := h.s.retryTaskFull(id)
+	return err
+}

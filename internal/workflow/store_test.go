@@ -167,7 +167,9 @@ func (f *fakeTaskStore) ClearPublishedItems(taskID int64, step string) error { r
 func (f *fakeTaskStore) GetFanoutChildren(parentID int64, step string) ([]*task.Task, error) {
 	return nil, nil
 }
-func (f *fakeTaskStore) GetFanoutDepth(taskID int64) (int, error) { return 0, nil }
+func (f *fakeTaskStore) GetFanoutDepth(taskID int64) (int, error)          { return 0, nil }
+func (f *fakeTaskStore) IncrementFanoutAttempts(taskID int64) (int, error) { return 0, nil }
+func (f *fakeTaskStore) ResetFanoutAttempts(taskID int64) error            { return nil }
 
 // TestPromoteSingleStepContextToTaskFakeStore demonstrates the taskStore fake
 // seam: promoteSingleStepContextToTask reads a step's captured context and

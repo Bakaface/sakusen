@@ -30,6 +30,8 @@ type FanoutSpawnRequest struct {
 // go through the same creation path as any other task.
 type FanoutHost interface {
 	SpawnChild(parent *task.Task, req FanoutSpawnRequest) (*task.Task, error)
+	// RetryChild resets a terminal child to pending through the full-retry path.
+	RetryChild(id int64) error
 }
 
 // SetFanoutHost registers the host fanout steps spawn their children through.
@@ -37,6 +39,10 @@ type FanoutHost interface {
 func (e *Engine) SetFanoutHost(h FanoutHost) {
 	e.fanoutHost = h
 }
+
+// cascadeFailurePrefix starts the error_message of a task failed because a
+// blocker failed (db.FailDependentTasks); such a task never ran.
+const cascadeFailurePrefix = "blocker task #"
 
 // fanoutConsumer returns the name of the first fanout step in wf whose
 // `from:` is step, or "" when none is.
@@ -55,7 +61,13 @@ func fanoutConsumer(wf *config.WorkflowConfig, step string) string {
 // terminal it returns the aggregate as the step's result text, or fails the
 // task when fewer children completed than `require` demands. Re-entry is
 // idempotent: children already spawned for an item are reused.
-func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *TemplateContext) (stepResult, error) {
+//
+// Failed children are retried before judging: on a fresh entry (parent
+// retry) every failed child is reset with its attempt counter zeroed; on a
+// resume a child's own failure is retried while its attempts are below
+// `retries`. Either way, children cascade-failed by a retried blocker are
+// reset alongside it.
+func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *TemplateContext, fresh bool) (stepResult, error) {
 	f := step.Fanout
 	fail := func(format string, args ...any) (stepResult, error) {
 		err := fmt.Errorf("fanout %q: "+format, append([]any{step.Name}, args...)...)
@@ -140,6 +152,16 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 		children[it.Slug] = child
 	}
 
+	retried, err := e.retryFanoutChildren(f, items, children, fresh)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if retried > 0 {
+		if children, err = e.fanoutChildrenBySlug(t.ID, step.Name); err != nil {
+			return fail("failed to list children: %v", err)
+		}
+	}
+
 	var pending []int64
 	for _, it := range items {
 		if c := children[it.Slug]; !c.Status.IsTerminal() {
@@ -151,6 +173,9 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 			if err := e.database.AddTaskWaitsOn(t.ID, id); err != nil {
 				return fail("failed to record wait on child #%d: %v", id, err)
 			}
+		}
+		if retried > 0 {
+			e.appendTaskLog(t.ID, "=== fanout %s: retrying %d child task(s) ===", step.Name, retried)
 		}
 		e.appendTaskLog(t.ID, "=== fanout %s: waiting on %d of %d child task(s) ===", step.Name, len(pending), len(items))
 		log.Printf("Task #%d suspended at fanout %q: waiting on %d child task(s)", t.ID, step.Name, len(pending))
@@ -177,6 +202,66 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 		return fail("%d/%d children completed (require %s); failed: %s", completed, len(items), policy, strings.Join(failed, ", "))
 	}
 	return stepResult{step: step, resultText: aggregate}, nil
+}
+
+// retryFanoutChildren resets the failed children of items that are due a
+// retry and returns how many it reset. children must hold a child for every
+// item.
+func (e *Engine) retryFanoutChildren(f *config.FanoutConfig, items []task.PublishedItem, children map[string]*task.Task, fresh bool) (int, error) {
+	retry := make(map[int64]bool)
+	var cascaded []*task.Task
+	for _, it := range items {
+		c := children[it.Slug]
+		if c.Status != task.StatusFailed {
+			continue
+		}
+		switch {
+		case fresh:
+			if err := e.database.ResetFanoutAttempts(c.ID); err != nil {
+				return 0, fmt.Errorf("failed to reset attempts of child #%d: %v", c.ID, err)
+			}
+			retry[c.ID] = true
+		case strings.HasPrefix(c.ErrorMessage, cascadeFailurePrefix):
+			cascaded = append(cascaded, c)
+		case c.FanoutAttempts < f.Retries:
+			if _, err := e.database.IncrementFanoutAttempts(c.ID); err != nil {
+				return 0, fmt.Errorf("failed to count attempt of child #%d: %v", c.ID, err)
+			}
+			retry[c.ID] = true
+		}
+	}
+
+	// A cascade-failed child never ran: it goes back with its blocker, at no
+	// cost to its own attempts. Repeat until stable so chains are covered.
+	for changed := true; changed; {
+		changed = false
+		for _, c := range cascaded {
+			if retry[c.ID] {
+				continue
+			}
+			for _, b := range c.BlockedBy {
+				if retry[b] {
+					retry[c.ID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	// Blockers first, so a dependent is never pending behind a failed blocker.
+	n := 0
+	for _, i := range task.TopoOrder(items) {
+		c := children[items[i].Slug]
+		if !retry[c.ID] {
+			continue
+		}
+		if err := e.fanoutHost.RetryChild(c.ID); err != nil {
+			return n, fmt.Errorf("failed to retry child #%d: %v", c.ID, err)
+		}
+		n++
+	}
+	return n, nil
 }
 
 // fanoutChildrenBySlug returns the children parentID's fanout step spawned,

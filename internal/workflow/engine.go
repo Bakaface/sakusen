@@ -549,6 +549,20 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 		log.Printf("Warning: failed to load waits-on children for task #%d: %v", t.ID, err)
 	}
 
+	// A fanout whose row is still running is resuming a suspended join; any
+	// other state means the step is being entered afresh (first run, retry,
+	// loop). Read before CreateTaskStep overwrites the row.
+	fanoutFresh := true
+	if step.IsFanout() {
+		rows, err := e.database.GetTaskStepRows(t.ID)
+		if err != nil {
+			log.Printf("Warning: failed to read step rows for task #%d: %v", t.ID, err)
+		}
+		if row, ok := rows[step.Name]; ok && row.Status == "running" {
+			fanoutFresh = false
+		}
+	}
+
 	// Record step start in task_steps table
 	if err := e.database.CreateTaskStep(t.ID, step.Name); err != nil {
 		log.Printf("Warning: failed to create task step record: %v", err)
@@ -643,7 +657,7 @@ func (e *Engine) runStep(ctx context.Context, t *task.Task, wf *config.WorkflowC
 	}
 	// A fanout runs no agent either: it spawns child tasks. See fanout.go.
 	if step.IsFanout() {
-		return e.runFanoutStep(t, step, tmplCtx)
+		return e.runFanoutStep(t, step, tmplCtx, fanoutFresh)
 	}
 
 	// A {{prompt.<name>}} include that can't be read (file deleted since the
