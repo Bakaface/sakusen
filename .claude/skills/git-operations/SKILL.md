@@ -66,6 +66,15 @@ outside the path convention:
   branch worktree, prunes, then force-deletes the branch git branches only when the task has no
   `CheckoutBranch`. Paths come from the workflow config and the task, not DB rows, so renaming or
   removing an isolated branch in config orphans its old worktree.
+- Template vars: `{{branches.<name>.branch}}` resolves to `<task branch>-<name>` and
+  `{{branches.<name>.worktree}}` to the branch worktree path; both are `""` for unknown names and
+  shared-group branches. This is how a later pick step finds a branch to `git merge`.
+- Worker accounting: branches acquire slots from `agent.Manager.AcquireBranchSlot` via the
+  engine's `SetBranchSlots` seam. A task's first held slot borrows its own `max_workers` slot, so
+  `max_workers: 1` runs branches serially without deadlock; further slots count against the
+  limit, and waiting branches are served before pending tasks.
+- Join policy: `require: all` stays fail-fast (the first failure cancels siblings);
+  `require: N`/`any` never cancels on success and cancels the rest once N becomes unreachable.
 
 ## Critical Invariants
 

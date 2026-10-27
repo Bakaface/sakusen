@@ -20,6 +20,6 @@ Worktree management, merge/rebase, conflict resolution, branch operations. Every
 ## Conventions
 
 - Worktree path: `<repoRoot>/.sakusen/worktrees/<branch with slashes as dashes>`.
-- Isolated parallel branches (`isolation: worktree`) bypass the path convention: their worktree is `<task worktree>-<name>` on branch `<task branch>-<name>`, created via `EnsureWorktreeAt` (names derived in `internal/workflow/parallel.go`).
+- Isolated parallel branches (`isolation: worktree`) bypass the path convention: their worktree is `<task worktree>-<name>` on branch `<task branch>-<name>`, created via `EnsureWorktreeAt` (names derived in `internal/workflow/parallel.go`). After exit 0 a branch is committed via `Repo.Commit` (`sakusen: task #N branch <name>`; no-op on a clean tree, failed branches stay uncommitted) and later steps reach it via `{{branches.<name>.branch}}` / `{{branches.<name>.worktree}}`; its slot counts against `max_workers` (the first borrows the task's own), `require: all` is fail-fast while `require: N`/`any` never cancels on success and cancels the rest once N is unreachable, and `workflow.RemoveIsolatedBranchWorktrees` removes the worktrees with the task worktree, force-deleting the branches only when `CheckoutBranch == ""`. Details in the `/git-operations` skill.
 - Conflict helpers leave the merge in progress on purpose; the workflow engine's conflict-resolution step runs an agent against the markers, then calls complete or abort.
 - `HasMeaningfulChanges` takes an `excludeFiles` list; the caller decides what to ignore.
