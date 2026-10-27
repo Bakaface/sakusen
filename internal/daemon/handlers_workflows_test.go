@@ -177,3 +177,35 @@ func TestSummarizeWorkflows_Advance(t *testing.T) {
 		}
 	}
 }
+
+// TestSummarizeWorkflows_Fanout verifies the fanout projection: configured
+// fields are reported, defaults are filled in, and no agent is attributed.
+func TestSummarizeWorkflows_Fanout(t *testing.T) {
+	cfg := &config.Config{DefaultAgent: "worker", Agents: map[string]config.AgentConfig{"worker": {Command: "run-worker"}}}
+	in := []config.WorkflowConfig{{
+		Name: "planner",
+		Steps: []config.StepConfig{
+			{Name: "plan"},
+			{Name: "units", Fanout: &config.FanoutConfig{From: "plan", Workflow: "unit", Merge: config.FanoutMergeParent, Require: "2", Retries: 1}},
+			{Name: "defaults", Fanout: &config.FanoutConfig{From: "plan", Workflow: "unit"}},
+		},
+	}}
+
+	steps := summarizeWorkflows(cfg, in)[0].Steps
+	if steps[0].Fanout != nil {
+		t.Errorf("plan.Fanout = %+v, want nil", steps[0].Fanout)
+	}
+	want := FanoutStepSummary{From: "plan", Workflow: "unit", Merge: "parent", Require: "2", Retries: 1}
+	if got := steps[1].Fanout; got == nil || *got != want {
+		t.Errorf("units.Fanout = %+v, want %+v", got, want)
+	}
+	wantDefaults := FanoutStepSummary{From: "plan", Workflow: "unit", Merge: "base", Require: "all", Retries: 0}
+	if got := steps[2].Fanout; got == nil || *got != wantDefaults {
+		t.Errorf("defaults.Fanout = %+v, want %+v", got, wantDefaults)
+	}
+	for _, st := range steps[1:] {
+		if st.Agent != "" || st.Tmux {
+			t.Errorf("%s: agent=%q tmux=%v, want no agent", st.Name, st.Agent, st.Tmux)
+		}
+	}
+}

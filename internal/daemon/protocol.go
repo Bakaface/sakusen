@@ -356,6 +356,8 @@ type WorkflowStepSummary struct {
 	// nested here rather than flattened into the parent list, because a group
 	// occupies exactly one workflow step slot.
 	Parallel *ParallelStepSummary `json:"parallel,omitempty"`
+	// Fanout is set when this step is a fanout step.
+	Fanout *FanoutStepSummary `json:"fanout,omitempty"`
 }
 
 // ParallelStepSummary projects a `parallel:` group for ListWorkflows: the join
@@ -363,6 +365,16 @@ type WorkflowStepSummary struct {
 type ParallelStepSummary struct {
 	Require  string                `json:"require"` // "all" | "any" | "<N>"
 	Branches []WorkflowStepSummary `json:"branches"`
+}
+
+// FanoutStepSummary projects a `fanout:` step for ListWorkflows, with
+// defaults applied.
+type FanoutStepSummary struct {
+	From     string `json:"from"`
+	Workflow string `json:"workflow"`
+	Merge    string `json:"merge"`   // "base" | "parent"
+	Require  string `json:"require"` // "all" | "any" | "<N>"
+	Retries  int    `json:"retries"`
 }
 
 // WorkflowSummary describes a single workflow available in a project. It
@@ -693,6 +705,40 @@ type TaskInfo struct {
 	// hibernated: the status is still "tmux", but no agent process is running
 	// and attaching wakes it first.
 	HibernatedAt *time.Time `json:"hibernated_at,omitempty"`
+	// PublishedItems, FanoutChildren and FanoutParent are filled only by
+	// get_task; broadcasts and listings never carry them.
+	// PublishedItems maps a step name to the items it published.
+	PublishedItems map[string][]PublishedItemInfo `json:"published_items,omitempty"`
+	// FanoutChildren lists every child this task's fanout steps spawned, in
+	// creation order.
+	FanoutChildren []FanoutChildInfo `json:"fanout_children,omitempty"`
+	// FanoutParent is set when this task is a fanout child.
+	FanoutParent *FanoutParentInfo `json:"fanout_parent,omitempty"`
+}
+
+// PublishedItemInfo is one item a step published for a fanout step.
+type PublishedItemInfo struct {
+	Slug  string   `json:"slug"`
+	Title string   `json:"title,omitempty"`
+	Input string   `json:"input"`
+	Needs []string `json:"needs,omitempty"`
+}
+
+// FanoutChildInfo is a child task spawned by a fanout step for one item.
+type FanoutChildInfo struct {
+	Step     string `json:"step"`
+	Slug     string `json:"slug"` // published item slug
+	TaskID   int64  `json:"task_id"`
+	Status   string `json:"status"`
+	Attempts int    `json:"attempts"`
+}
+
+// FanoutParentInfo identifies the parent task, fanout step and item a child
+// task was spawned for.
+type FanoutParentInfo struct {
+	TaskID int64  `json:"task_id"`
+	Step   string `json:"step"`
+	Item   string `json:"item"`
 }
 
 // BranchWorktreeInfo describes an isolated parallel branch's worktree.

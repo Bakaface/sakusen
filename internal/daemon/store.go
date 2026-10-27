@@ -141,6 +141,8 @@ type taskStore interface {
 
 	// Fanout published items (task_published_items table).
 	PublishItems(taskID int64, step string, items []task.PublishedItem) error
+	GetAllPublishedItems(taskID int64) (map[string][]task.PublishedItem, error)
+	GetAllFanoutChildren(parentID int64) ([]*task.Task, error)
 
 	// Chat session tracking (tmux steps). SetChatSessionID is likewise absent
 	// here (see the "forwarded" group below): correcting a tmux step's

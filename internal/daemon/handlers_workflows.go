@@ -98,6 +98,18 @@ func summarizeWorkflows(cfg *config.Config, workflows []config.WorkflowConfig) [
 					})
 				}
 			}
+			if step.IsFanout() {
+				// A fanout runs no agent itself; its children do.
+				entry.Agent = ""
+				entry.Tmux = false
+				entry.Fanout = &FanoutStepSummary{
+					From:     step.Fanout.From,
+					Workflow: step.Fanout.Workflow,
+					Merge:    step.Fanout.EffectiveMerge(),
+					Require:  step.Fanout.EffectiveRequire(),
+					Retries:  step.Fanout.Retries,
+				}
+			}
 			summary.Steps = append(summary.Steps, entry)
 		}
 		out = append(out, summary)

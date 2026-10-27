@@ -2106,3 +2106,54 @@ func TestMCP_WaitForTaskStatus_ReturnsResultShape(t *testing.T) {
 		}
 	}
 }
+
+func TestMCP_GetTask_CarriesFanoutFields(t *testing.T) {
+	fake := newFakeDaemon(t)
+	fake.handle(daemon.MsgGetTask, func(msg *daemon.Message) *daemon.Message {
+		var req daemon.GetTaskRequest
+		_ = msg.DecodePayload(&req)
+		info := daemon.TaskInfo{ID: req.TaskID, Title: "t", Status: "running"}
+		if req.TaskID == 1 {
+			info.PublishedItems = map[string][]daemon.PublishedItemInfo{"plan": {{Slug: "a", Input: "do a"}}}
+			info.FanoutChildren = []daemon.FanoutChildInfo{{Step: "units", Slug: "a", TaskID: 2, Status: "pending", Attempts: 1}}
+		} else {
+			info.FanoutParent = &daemon.FanoutParentInfo{TaskID: 1, Step: "units", Item: "a"}
+		}
+		resp, _ := daemon.NewMessage(daemon.MsgGetTask, daemon.GetTaskResponse{Task: info})
+		return resp
+	})
+	c := startMCPServer(t, fake)
+
+	call := func(id int64) *daemon.TaskInfo {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		res, err := c.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{
+			Name:      "get_task",
+			Arguments: map[string]any{"task_id": id},
+		}})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("tool returned error: %v", textOf(res))
+		}
+		var out GetTaskResult
+		if err := json.Unmarshal([]byte(textOf(res)), &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out.Task
+	}
+
+	parent := call(1)
+	if items := parent.PublishedItems["plan"]; len(items) != 1 || items[0].Slug != "a" {
+		t.Errorf("published_items = %+v", parent.PublishedItems)
+	}
+	if ch := parent.FanoutChildren; len(ch) != 1 || ch[0] != (daemon.FanoutChildInfo{Step: "units", Slug: "a", TaskID: 2, Status: "pending", Attempts: 1}) {
+		t.Errorf("fanout_children = %+v", ch)
+	}
+	child := call(2)
+	if p := child.FanoutParent; p == nil || *p != (daemon.FanoutParentInfo{TaskID: 1, Step: "units", Item: "a"}) {
+		t.Errorf("fanout_parent = %+v", p)
+	}
+}

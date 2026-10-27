@@ -37,7 +37,7 @@ type taskOutput struct {
 func registerGetTask(s *server.MCPServer, c *client.Client) {
 	tool := mcp.NewTool(
 		"get_task",
-		mcp.WithDescription("Get detailed information about a sakusen task: its TaskInfo (status, branch, current step, etc.), and optionally per-step state, captured step contexts, and recent agent output. Use include_* flags to opt into extra sections."),
+		mcp.WithDescription("Get detailed information about a sakusen task: its TaskInfo (status, branch, current step, etc.), and optionally per-step state, captured step contexts, and recent agent output. Use include_* flags to opt into extra sections. A task with fanout steps also carries published_items (step → items) and fanout_children (step, item slug, task_id, status, attempts); a fanout child carries fanout_parent (task_id, step, item)."),
 		mcp.WithInputSchema[GetTaskArgs](),
 	)
 	s.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, args GetTaskArgs) (*mcp.CallToolResult, error) {

@@ -75,7 +75,49 @@ func (s *Server) handleGetTask(conn net.Conn, req GetTaskRequest) {
 	}
 
 	info := s.taskToInfo(t)
+	if err := s.fillFanoutInfo(&info, t); err != nil {
+		s.sendError(conn, fmt.Sprintf("failed to get fanout info: %v", err))
+		return
+	}
 	_ = s.sendMessage(conn, MsgGetTask, GetTaskResponse{Task: info})
+}
+
+// fillFanoutInfo adds t's published items, fanout children and fanout parent
+// to info.
+func (s *Server) fillFanoutInfo(info *TaskInfo, t *task.Task) error {
+	published, err := s.database.GetAllPublishedItems(t.ID)
+	if err != nil {
+		return err
+	}
+	if len(published) > 0 {
+		info.PublishedItems = make(map[string][]PublishedItemInfo, len(published))
+	}
+	for step, items := range published {
+		out := make([]PublishedItemInfo, 0, len(items))
+		for _, it := range items {
+			out = append(out, PublishedItemInfo{Slug: it.Slug, Title: it.Title, Input: it.Input, Needs: it.Needs})
+		}
+		info.PublishedItems[step] = out
+	}
+
+	children, err := s.database.GetAllFanoutChildren(t.ID)
+	if err != nil {
+		return err
+	}
+	for _, c := range children {
+		info.FanoutChildren = append(info.FanoutChildren, FanoutChildInfo{
+			Step:     c.FanoutStep,
+			Slug:     c.FanoutItem,
+			TaskID:   c.ID,
+			Status:   string(c.Status),
+			Attempts: c.FanoutAttempts,
+		})
+	}
+
+	if t.FanoutParentID != nil {
+		info.FanoutParent = &FanoutParentInfo{TaskID: *t.FanoutParentID, Step: t.FanoutStep, Item: t.FanoutItem}
+	}
+	return nil
 }
 
 func (s *Server) handleCreateTask(conn net.Conn, req CreateTaskRequest) {
