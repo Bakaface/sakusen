@@ -17,6 +17,7 @@ pins, step fields, prompts, template variables, loops, tracks, and MCP orchestra
 - [Step Summarization](#step-summarization)
 - [Loops](#loops)
 - [Parallel Groups](#parallel-groups)
+- [Fan-out Steps](#fan-out-steps)
 - [Prompt Formatting](#prompt-formatting)
 - [Wrapping Multi-Line Interpolations](#wrapping-multi-line-interpolations)
 - [Template Variables](#template-variables)
@@ -385,10 +386,12 @@ steps:
     require_context: false # true = fail the task if summarize_chat context can't be captured
     loop: {...}            # jump back to an earlier step or repeat this one (see Loops)
     parallel: {...}        # fan out to concurrent branches instead of running a prompt (see Parallel Groups)
+    fanout: {...}          # spawn one child task per published item, then join (see Fan-out Steps)
 ```
 
-A step sets EITHER `prompt:` OR `parallel:`, never both — a `parallel:` step is a container, not
-a step that runs an agent. See [Parallel Groups](#parallel-groups).
+A step sets EITHER `prompt:`, `parallel:` OR `fanout:` — a `parallel:` step is a container and a
+`fanout:` step spawns child tasks; neither runs an agent itself. See
+[Parallel Groups](#parallel-groups) and [Fan-out Steps](#fan-out-steps).
 
 - **`description:`** is pure metadata. It is surfaced through the MCP `list_workflows` tool
   (each step entry carries its own `name` and `description`) so an orchestrating agent can
@@ -800,17 +803,91 @@ whole workflow.
 - Branch agent output goes to a per-branch log (`.sakusen/logs/<task>/branch-<name>.log`), not
   the unified task log, which records only the `=== parallel <group>: ... ===` markers.
 
-### Parallel group vs. child tasks
+### Parallel group vs. fanout vs. child tasks
 
 A shared parallel group is for **one task doing several things at once on one branch**: several
 readers of the same diff, whose outputs are combined into one prompt. It costs no extra worktrees,
 branches, or task rows, and the branches cannot write. An `isolation: worktree` group lets the
 branches write (best-of-N, competing attempts) while staying one task with one merge.
 
+A [fanout step](#fan-out-steps) is for **a declared fan-out that produces changes**: an earlier
+step publishes a list of items with `publish_items`, and the engine spawns one child task per
+item, each in its own worktree running its own workflow. Retries and the `require` policy are
+config, not prose. The NEXT step reads every child's result through `{{steps.<fanout>.context}}`.
+
 Use `create_tasks_and_wait` (see [MCP Orchestration Patterns](#mcp-orchestration-patterns))
-instead when the concurrent work needs to **produce changes** — separate worktrees, separate
-branches, separate merges — or when each unit needs its own multi-step workflow. Their results
-come back as `{{children.summary}}`, the sibling shape of the group aggregate.
+for **ad-hoc spawning** that an agent decides on at run time. The calling step suspends and is
+re-run when the children finish, so its prompt must handle both the plan pass and the check pass.
+The children's results come back to that same re-run step as `{{children.summary}}`.
+
+---
+
+## Fan-out Steps
+
+A `fanout:` step runs no agent. It spawns one child task per item that an earlier step published, waits for all of them, then advances to the next step. That step reads every child's result through the fanout's aggregate context.
+
+```yaml
+- name: inventory
+  agent: planner            # publishes items via the publish_items MCP tool
+- name: units
+  fanout:
+    from: inventory         # earlier step whose published items drive this fan-out
+    workflow: fast-and-furious
+    input: "{{steps.inventory.context}}\n\nYour unit:\n{{item.input}}"
+    merge: parent           # children base on and merge into this task's branch
+    require: all            # all | any | N
+    retries: 1              # automatic re-runs of a failed child before the join judges it
+- name: finishing
+  prompt: |
+    The units are done:
+    {{steps.units.context}}
+```
+
+| Key | Default | Notes |
+|---|---|---|
+| `from` | required | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
+| `workflow` | required | The workflow each child runs. It must exist and have no `human:` step or step that resolves to a tmux-mode agent, because children run unattended. |
+| `input` | `{{item.input}}` | Child task input template. Sees the normal variables plus `{{item.*}}`. |
+| `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
+| `require` | `all` | Join policy: `all`, `any`, or an integer `N >= 1` (at least N children must complete). |
+| `retries` | `0` | How many times a failed child is re-run automatically before the join judges it. |
+
+A fanout step cannot set `prompt`, `agent`, `loop`, `human`, `advance`, `parallel`, `summarization_strategy`, `summarization_prompt` or `require_context`. No loop's `goto` range may contain a fanout step, because re-running it would spawn its children again. Config loading and `sakusen validate` reject every one of these.
+
+**Publishing items.** The `from:` step's agent calls the `publish_items` MCP tool, or runs `sakusen publish-items`. The task and step default to `$SAKUSEN_TASK_ID` / `$SAKUSEN_STEP`. Each item is `{input, slug?, title?, needs?}`:
+
+- `input` is required and non-empty.
+- `slug` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` and be unique. A missing slug becomes `item-<n>` (1-based position).
+- `needs` lists slugs of other items whose children must complete first. It becomes the child's `blocked_by`. Unknown slugs, self-references and cycles are rejected.
+
+The call is validated at once and errors go back to the model. The step must be running, and a later fanout must name it in `from:`. Publishing again replaces the list. Every fresh run of the `from:` step clears its earlier list. A headless `from:` step that completes without publishing fails the task. A tmux one that publishes nothing fails at the fanout instead.
+
+**Spawn.** On entry the fanout creates one child per item in the parent's project, in dependency order:
+
+- each child gets the rendered `input`, the parent's track and priority, and a title (the item's `title`, or its slug if it has none);
+- `needs` become `blocked_by` edges between the children;
+- the parent then sits in `awaiting-children`.
+
+A `require: N` larger than the number of items fails the step before anything spawns. Each child records its parent, fanout step and item. A unique index on those three keeps spawning idempotent across a daemon restart.
+
+**Join.** The parent resumes once every child is terminal:
+
+- A failed child is re-run while it has retries left. Dependents that were cascade-failed by a retried blocker never ran, so they are reset alongside it without spending their own attempts.
+- `require` is then applied. If it is met, the aggregate becomes `{{steps.<fanout>.context}}` and the task advances to the next step; the fanout step itself is not re-run. If not, the task fails with an error listing the failed items as `<slug> #<child id>`.
+- Retrying the parent reuses completed children and re-runs failed ones, with their attempt counters reset.
+
+**Depth cap.** A child workflow may itself fan out, down to `MaxFanoutDepth` = 3 levels. A task already at that depth fails its fanout step at spawn time.
+
+**Aggregate context.** One header line, then one line per item in published order:
+
+```
+fanout units: 2/3 completed (require all)
+- api #12 completed — Added the endpoint and its tests
+- ui #13 completed — (no context)
+- docs #14 failed — (failed: step "write" exited with code 1)
+```
+
+Each summary is the first non-empty line of the child's context with whitespace collapsed, truncated to 120 runes (ending in `…`). Children with no context show `(no context)`. A failed child shows `(failed: <first line of its error>)`. This keeps the aggregate compact at hundreds of children. Full per-child results stay reachable via `get_task` on the listed IDs, or via `{{tasks.<id>.context}}`.
 
 ---
 
@@ -909,6 +986,7 @@ see [Wrapping Multi-Line Interpolations](#wrapping-multi-line-interpolations).
 | `{{children.summary}}` | Digest of all child tasks after a `create_tasks_and_wait` resume **(multi-line — wrap in `<children-summary>`)** |
 | `{{children.<id>.<field>}}` | Field of a specific child task. Fields: `id`, `title`, `status` (`completed`/`failed`), `context`. See [MCP Orchestration Patterns](#mcp-orchestration-patterns). |
 | `{{prompt.<name>}}` | Contents of a shared prompt file. See [Prompt Includes](#prompt-includes). |
+| `{{item.input}}`, `{{item.slug}}`, `{{item.title}}`, `{{item.index}}` | The published item a fanout child is spawned for (`index` is 1-based). **Only in a fanout step's `input:`.** See [Fan-out Steps](#fan-out-steps). |
 
 Unknown placeholders are left in the rendered prompt verbatim, so a typo shows up as literal
 `{{taks.id}}` text rather than an error. `{{prompt.<name>}}` is the one exception — it must
@@ -1103,6 +1181,7 @@ and self-advance.
 | `get_task` | Task detail; `include_*` flags opt into per-step state, captured step contexts, and recent agent output. |
 | `list_tasks` | Compact task summaries, project-scoped or `all_projects=true`. |
 | `update_step_context` | Publish the calling task's active-step context verbatim (see below). |
+| `publish_items` | Publish the items a later `fanout:` step spawns children from. Call from the running `from:` step; each call replaces the list. See [Fan-out Steps](#fan-out-steps). |
 | `advance_task` | Mark a paused tmux step done — resume at the next step or finalize. |
 | `update_task_input` | Replace a task's input (re-validates `{{tasks.<id>.<field>}}` refs, auto-adds blockers). |
 | `update_task_dependencies` | Add/remove `blocked_by` edges. Removals apply before additions; cycles rejected. |

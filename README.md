@@ -218,6 +218,7 @@ sakusen routines pause|resume <name>  # triggered (cadence/after) routines only
 | `human` | bool | Pause and wait for explicit approval in the TUI. |
 | `summarization_strategy` | enum | `last_message`, `summarize_chat` (default; runs your `summarizer:` command over the chat log), or `none` (no context captured). |
 | `loop` | object | Jump back to an earlier step, or repeat this one. See below. |
+| `fanout` | object | Spawn one child task per item an earlier step published, then join on them. Replaces `prompt`/`agent`. See [Fan-out steps](#fan-out-steps). |
 
 ### Loops
 
@@ -261,6 +262,73 @@ Prefer an affirmative form (`step_context_contains` or `command`): `step_context
 
 `goto` may name an earlier step or the loop step itself; a self-loop (`goto: batch` on the `batch` step) repeats that one step until its exit condition holds. Loops can't jump forward, can't be `human:` or resolve to a tmux-mode agent, and can't overlap with or nest inside other loops.
 
+### Fan-out steps
+
+A `fanout:` step runs no agent. It spawns one child task per item that an earlier step published, waits for all of them, then advances to the next step. That step reads every child's result through the fanout's aggregate context.
+
+```yaml
+- name: inventory
+  agent: planner            # publishes items via the publish_items MCP tool
+- name: units
+  fanout:
+    from: inventory         # earlier step whose published items drive this fan-out
+    workflow: fast-and-furious
+    input: "{{steps.inventory.context}}\n\nYour unit:\n{{item.input}}"
+    merge: parent           # children base on and merge into this task's branch
+    require: all            # all | any | N
+    retries: 1              # automatic re-runs of a failed child before the join judges it
+- name: finishing
+  prompt: |
+    The units are done:
+    {{steps.units.context}}
+```
+
+| Key | Default | Notes |
+|---|---|---|
+| `from` | required | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
+| `workflow` | required | The workflow each child runs. It must exist and have no `human:` step or step that resolves to a tmux-mode agent, because children run unattended. |
+| `input` | `{{item.input}}` | Child task input template. Sees the normal variables plus `{{item.*}}`. |
+| `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
+| `require` | `all` | Join policy: `all`, `any`, or an integer `N >= 1` (at least N children must complete). |
+| `retries` | `0` | How many times a failed child is re-run automatically before the join judges it. |
+
+A fanout step cannot set `prompt`, `agent`, `loop`, `human`, `advance`, `parallel`, `summarization_strategy`, `summarization_prompt` or `require_context`. No loop's `goto` range may contain a fanout step, because re-running it would spawn its children again. Config loading and `sakusen validate` reject every one of these.
+
+**Publishing items.** The `from:` step's agent calls the `publish_items` MCP tool, or runs `sakusen publish-items`. The task and step default to `$SAKUSEN_TASK_ID` / `$SAKUSEN_STEP`. Each item is `{input, slug?, title?, needs?}`:
+
+- `input` is required and non-empty.
+- `slug` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` and be unique. A missing slug becomes `item-<n>` (1-based position).
+- `needs` lists slugs of other items whose children must complete first. It becomes the child's `blocked_by`. Unknown slugs, self-references and cycles are rejected.
+
+The call is validated at once and errors go back to the model. The step must be running, and a later fanout must name it in `from:`. Publishing again replaces the list. Every fresh run of the `from:` step clears its earlier list. A headless `from:` step that completes without publishing fails the task. A tmux one that publishes nothing fails at the fanout instead.
+
+**Spawn.** On entry the fanout creates one child per item in the parent's project, in dependency order:
+
+- each child gets the rendered `input`, the parent's track and priority, and a title (the item's `title`, or its slug if it has none);
+- `needs` become `blocked_by` edges between the children;
+- the parent then sits in `awaiting-children`.
+
+A `require: N` larger than the number of items fails the step before anything spawns. Each child records its parent, fanout step and item. A unique index on those three keeps spawning idempotent across a daemon restart.
+
+**Join.** The parent resumes once every child is terminal:
+
+- A failed child is re-run while it has retries left. Dependents that were cascade-failed by a retried blocker never ran, so they are reset alongside it without spending their own attempts.
+- `require` is then applied. If it is met, the aggregate becomes `{{steps.<fanout>.context}}` and the task advances to the next step; the fanout step itself is not re-run. If not, the task fails with an error listing the failed items as `<slug> #<child id>`.
+- Retrying the parent reuses completed children and re-runs failed ones, with their attempt counters reset.
+
+**Depth cap.** A child workflow may itself fan out, down to `MaxFanoutDepth` = 3 levels. A task already at that depth fails its fanout step at spawn time.
+
+**Aggregate context.** One header line, then one line per item in published order:
+
+```
+fanout units: 2/3 completed (require all)
+- api #12 completed — Added the endpoint and its tests
+- ui #13 completed — (no context)
+- docs #14 failed — (failed: step "write" exited with code 1)
+```
+
+Each summary is the first non-empty line of the child's context with whitespace collapsed, truncated to 120 runes (ending in `…`). Children with no context show `(no context)`. A failed child shows `(failed: <first line of its error>)`. This keeps the aggregate compact at hundreds of children. Full per-child results stay reachable via `get_task` on the listed IDs, or via `{{tasks.<id>.context}}`.
+
 ### Template variables
 
 Available in any step `prompt`:
@@ -279,6 +347,8 @@ Available in any step `prompt`:
 - `{{git.base_branch}}`
 - `{{steps.<step_name>.context}}` — captured output of a prior step
 - `{{loop.iteration}}`, `{{loop.max_iterations}}` (inside a loop body)
+- `{{item.input}}`, `{{item.slug}}`, `{{item.title}}`, `{{item.index}}` (1-based) — the published item a
+  child is spawned for. Available only in a fanout step's `input:`.
 - `{{prompt.<name>}}` — inlines the contents of a shared prompt file, so several workflows can reuse
   one passage of text (craft guidance, review rules, commit hygiene) without duplicating it.
   `<name>` is a file basename (`[A-Za-z0-9_-]+`, kebab-case by convention) resolved to `<name>.md`,
@@ -481,6 +551,7 @@ sakusen agents [--json]        # list running agents
 sakusen depends-on add <id> <blocked-by-id>     # mark <id> as blocked by another task
 sakusen depends-on rm  <id> <blocked-by-id>     # remove a dependency
 sakusen depends-on list <id>                    # list tasks blocking <id>
+sakusen publish-items [--task N] [--step S] [--file F|-]  # publish fanout items (JSON array; defaults to $SAKUSEN_TASK_ID/$SAKUSEN_STEP, stdin)
 ```
 
 **Routines**

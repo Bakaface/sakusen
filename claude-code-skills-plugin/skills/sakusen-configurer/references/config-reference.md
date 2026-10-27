@@ -508,7 +508,10 @@ reference. It covers step fields (`description`, `timeout`, `human`, `advance`, 
 summarization strategies), step context flow, execution mode, loops and their validation
 rules, [parallel groups](workflow-building.md#parallel-groups) (the `parallel:` step field —
 concurrent headless branches on one worktree, joined by a `require:` policy into one aggregated
-step context), [cross-task references](workflow-building.md#cross-task-references)
+step context), [fan-out steps](workflow-building.md#fan-out-steps) (the `fanout:` step field —
+`from` and `workflow` required; `input` defaults to `{{item.input}}`, `merge` to `base`, `require` to
+`all`, `retries` to `0`; one child task per item the `from:` step publishes with `publish_items`),
+[cross-task references](workflow-building.md#cross-task-references)
 (`{{tasks.<id>.<field>}}`), and
 [MCP orchestration patterns](workflow-building.md#mcp-orchestration-patterns) including child
 task orchestration (`{{children.*}}`).

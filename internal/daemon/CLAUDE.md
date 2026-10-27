@@ -28,14 +28,16 @@ Unix socket server, request handlers, task polling, agent lifecycle. Protocol is
 | `broadcast.go` | `onAgentStateChange` → `MsgAgentUpdate` to subscribers; terminal states update the task, fire notifications (per-task switches via `taskNotifications`: routine → workflow → global; `notify_if` evaluated in `notifyCompleted` from `task_steps`), `checkProjectTasksDone` (skipped when the trigger's own notification was silenced by an override) |
 | `tmux_monitor.go` | Background tmux activity loop, broadcasts activity changes |
 | `agent_spawn.go` | `spawnInteractiveSession` / `interactiveAgent` (see invariants) |
-| `handlers_task.go` | Task CRUD & metadata: create (async title/slug via `summarizer:`), get, list, delete, retry, priority/field/dependency updates, revert, step contexts |
+| `handlers_task.go` | Task CRUD & metadata: create (async title/slug via `summarizer:`), get, list, delete, retry, priority/field/dependency updates, revert, step contexts; `get_task`'s TaskInfo adds the fanout fields `published_items`, `fanout_children` and `fanout_parent` |
 | `handlers_agent.go` | List/start/stop agents, output, subscribe/unsubscribe, logs |
 | `handlers_continue.go` | Continue/advance/finalize, retry-merge, worktree/branch management, tmux setup, detach/attach branch |
 | `handlers_waits_on.go` | `create_tasks_and_wait` / `wait_for_tasks`: child creation + `task_waits_on` edges; parent suspends to `StatusAwaitingChildren`. A child's `merge_into_parent` sets its `TargetBranch` to the parent's branch via `task.ParentMergeTarget` (same-project worktree parent only; a differing explicit `target_branch` is rejected), so the child branches from and merges into the parent's worktree (see `internal/merge`); without it children keep the project base branch |
+| `handlers_publish_items.go` | `publish_items`: validates the list (`task.NormalizeItems`: non-empty inputs, slug regex + `item-<n>` defaults, unique slugs, known `needs`, no cycles), requires the step to be RUNNING and named in a later fanout step's `from:` (`IsFanoutSource`), then replaces the stored list (`PublishItems`) |
+| `fanout_host.go` | `fanoutHost` — the `workflow.FanoutHost` the engine spawns fanout children through. `SpawnChild` goes through `createTaskFromRequest` (same validation, `blocked_by` wiring and async title refinement as any task) with the parent's track and priority and a `FanoutOrigin` (parent, step, item); `merge: parent` sets `TargetBranch` via `task.ParentMergeTarget`. `RetryChild` resets a terminal child through `retryTaskFull` |
 | `handlers_cleanup.go` | Worktree/branch/log cleanup for completed/failed tasks (task ID 0 = all eligible) |
 | `handlers_periodic.go` | List/get/pause/runs/run-now for routines, all addressed by (project path, name) |
 | `handlers_tracks.go` | Track create/get/list/set-context, `resolveTrackRef`, `trackToInfo` |
-| `handlers_workflows.go` | `list_workflows` — flat listing across projects |
+| `handlers_workflows.go` | `list_workflows` — flat listing across projects; a fanout step carries a `fanout` summary (`from`, `workflow`, `merge`, `require`, `retries`) |
 
 ## Conventions
 

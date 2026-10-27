@@ -6,17 +6,20 @@ irrecoverably destructive operations**.
 
 ## Critical Invariants
 
-- **No irrecoverable operations**: the 20-tool surface is `create_task`,
+- **No irrecoverable operations**: the 21-tool surface is `create_task`,
   `create_tasks_and_wait`, `wait_for_tasks`, `wait_for_task_status`, `get_task`,
   `list_tasks`, `list_workflows`, `list_routines`, `run_routine`, `retry_task`,
   `retry_merge`, `advance_task`, `stop_task`, `continue_task`, `update_task`,
-  `update_step_context`, `create_track`, `get_track`, `update_track`, `list_tracks`. Do not
+  `update_step_context`, `publish_items`, `create_track`, `get_track`, `update_track`, `list_tracks`. Do not
   add `delete_task`, `revert_task`, or `cleanup` here without an explicit design decision — every exposed mutation must be recoverable (re-editable DB
   state or a re-queued task; `retry_task` stops only the task's own agent and preserves worktree/branch).
   `retry_merge` is admitted because the daemon accepts it only for `merge-failed` tasks and
   it runs the same finalization the task would have run anyway; a repeat failure keeps the
   worktree and branch. `update_step_context` is admitted because the daemon enforces that it
   can only write to the calling task's currently-active step (see `handleUpdateActiveStepContext`).
+  `publish_items` is admitted on similar grounds: the daemon accepts it only for a RUNNING step
+  that a later `fanout:` step names in `from:` (see `handlePublishItems`), and a re-publish
+  replaces the stored list.
   `advance_task` is admitted because the daemon only accepts it for tasks in tmux state and
   a premature advance is recoverable via `retry_task`. `stop_task` is admitted on the same
   grounds as `retry_task`: it stops only the task's own agent and deletes nothing (the task
@@ -33,9 +36,9 @@ irrecoverably destructive operations**.
   `terminal_only` on the daemon request and the daemon rejects any non-terminal task
   *before* that routing. Keep the check daemon-side — an MCP-side status pre-check would be
   raceable. `advance_task`'s tmux-state-only admission is the other half of this rule.
-- **Env-var defaulting**: `create_tasks_and_wait`, `wait_for_tasks`, `update_step_context`
-  and `update_track` default their identity args from `$SAKUSEN_TASK_ID` (and
-  `update_step_context`'s `step_name` from `$SAKUSEN_STEP`) via `env.go`. Explicit
+- **Env-var defaulting**: `create_tasks_and_wait`, `wait_for_tasks`, `update_step_context`,
+  `publish_items` and `update_track` default their identity args from `$SAKUSEN_TASK_ID` (and
+  `update_step_context`'s / `publish_items`' `step_name` from `$SAKUSEN_STEP`) via `env.go`. Explicit
   arguments always win. This is a convenience only — the daemon's own-task/own-step/
   own-track checks are what make the tools safe, not the caller's honesty.
 - **Project resolution is per-call**: when `project_path` is omitted, `resolveProjectPath()`
@@ -64,7 +67,7 @@ irrecoverably destructive operations**.
 | `tool_create_task.go` | `create_task` tool definition + handler; `jsonResult` helper |
 | `tool_create_tasks_and_wait.go` | `create_tasks_and_wait` + `wait_for_tasks` tool definitions + handlers |
 | `tool_wait_for_task_status.go` | `wait_for_task_status` tool — read-only any-of status wait for non-task callers (no `$SAKUSEN_TASK_ID`), over `client.WaitForTaskStatus` |
-| `tool_get_task.go` | `get_task` tool definition + handler |
+| `tool_get_task.go` | `get_task` tool definition + handler; the TaskInfo carries the fanout fields `published_items` (step → items), `fanout_children` (step, slug, task_id, status, attempts) and `fanout_parent` (task_id, step, item) |
 | `tool_list_tasks.go` | `list_tasks` tool — project-scoped or global compact summaries, status/track filters, newest-first limit |
 | `tool_list_workflows.go` | `list_workflows` tool definition + handler |
 | `tool_retry_task.go` | `retry_task` tool — full or from-step retry |
@@ -74,6 +77,7 @@ irrecoverably destructive operations**.
 | `tool_continue_task.go` | `continue_task` tool — re-run a terminal task under a required workflow (always `terminal_only`) |
 | `tool_update_task.go` | `update_task` envelope — input/title/priority/track/not_before/blocked_by edits |
 | `tool_update_step_context.go` | `update_step_context` tool definition + handler |
+| `tool_publish_items.go` | `publish_items` tool — items (`input`, optional `slug`/`title`/`needs`) a later `fanout:` step spawns children from; validation is daemon-side (`task.NormalizeItems`) |
 | `tool_create_track.go` | `create_track` tool definition + handler |
 | `tool_get_track.go` | `get_track` tool — full own context, ancestor chain, rendered `{{track.context}}` |
 | `tool_update_track.go` | `update_track` envelope — own-track context and/or description |
