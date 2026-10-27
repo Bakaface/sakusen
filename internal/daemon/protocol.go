@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 type MessageType string
@@ -48,6 +50,7 @@ const (
 	MsgUpdateStepContext       MessageType = "update_step_context"
 	MsgUpdateActiveStepContext MessageType = "update_active_step_context"
 	MsgGetTaskSteps            MessageType = "get_task_steps"
+	MsgPublishItems            MessageType = "publish_items"
 	MsgListWorkflows           MessageType = "list_workflows"
 	MsgStopTask                MessageType = "stop_task"
 	MsgCleanup                 MessageType = "cleanup"
@@ -311,6 +314,21 @@ type UpdateActiveStepContextRequest struct {
 	StepName string `json:"step_name"`
 	Context  string `json:"context"`
 	Mode     string `json:"mode,omitempty"` // "replace" (default) or "append"
+}
+
+// PublishItemsRequest is the payload for MsgPublishItems: the items a running
+// step publishes for a later fanout step (whose `from:` names it) to spawn.
+type PublishItemsRequest struct {
+	TaskID   int64                `json:"task_id"`
+	StepName string               `json:"step_name"`
+	Items    []task.PublishedItem `json:"items"`
+}
+
+// PublishItemsResponse returns the stored, normalized items (missing slugs
+// filled in).
+type PublishItemsResponse struct {
+	Count int                  `json:"count"`
+	Items []task.PublishedItem `json:"items"`
 }
 
 // ListWorkflowsRequest asks the daemon to return all workflows configured for

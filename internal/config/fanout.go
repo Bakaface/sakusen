@@ -27,3 +27,14 @@ func validateFanoutTargets(cfg *Config) error {
 	}
 	return nil
 }
+
+// IsFanoutSource reports whether any fanout step in the workflow names step in
+// its `from:`.
+func (wf *WorkflowConfig) IsFanoutSource(step string) bool {
+	for i := range wf.Steps {
+		if wf.Steps[i].IsFanout() && wf.Steps[i].Fanout.From == step {
+			return true
+		}
+	}
+	return false
+}

@@ -843,6 +843,14 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 		}
 		s.handleUpdateActiveStepContext(conn, req)
 
+	case MsgPublishItems:
+		var req PublishItemsRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handlePublishItems(conn, req)
+
 	case MsgListWorkflows:
 		var req ListWorkflowsRequest
 		if err := msg.DecodePayload(&req); err != nil {

@@ -222,3 +222,16 @@ func TestRequiredCountMatchesParallel(t *testing.T) {
 		}
 	}
 }
+
+func TestFanoutIsFanoutSource(t *testing.T) {
+	wf := &WorkflowConfig{Steps: []StepConfig{
+		{Name: "plan"},
+		{Name: "other"},
+		{Name: "units", Fanout: &FanoutConfig{From: "plan", Workflow: "unit"}},
+	}}
+	for step, want := range map[string]bool{"plan": true, "other": false, "units": false, "missing": false} {
+		if got := wf.IsFanoutSource(step); got != want {
+			t.Errorf("IsFanoutSource(%q) = %v, want %v", step, got, want)
+		}
+	}
+}

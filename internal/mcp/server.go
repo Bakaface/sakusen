@@ -140,6 +140,7 @@ func registerTools(s *server.MCPServer, c *client.Client, cfg *config.Config) {
 	registerContinueTask(s, c)
 	registerUpdateTask(s, c)
 	registerUpdateStepContext(s, c)
+	registerPublishItems(s, c)
 	registerCreateTrack(s, c)
 	registerGetTrack(s, c)
 	registerUpdateTrack(s, c)

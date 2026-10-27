@@ -138,6 +138,9 @@ type taskStore interface {
 	GetAllTaskStepContexts(taskID int64) (map[string]string, error)
 	GetTaskStepRows(taskID int64) (map[string]db.TaskStepRow, error)
 
+	// Fanout published items (task_published_items table).
+	PublishItems(taskID int64, step string, items []task.PublishedItem) error
+
 	// Chat session tracking (tmux steps). SetChatSessionID is likewise absent
 	// here (see the "forwarded" group below): correcting a tmux step's
 	// recorded session from its Stop-hook sentinel routes through

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/daemon"
+	"github.com/Bakaface/sakusen/internal/task"
 )
 
 // errConnectionClosed is the sentinel pushed onto errChan when readLoop exits
@@ -881,6 +882,24 @@ func (c *Client) UpdateActiveStepContext(taskID int64, stepName, context, mode s
 		Context:  context,
 		Mode:     mode,
 	})
+}
+
+// PublishItems stores items as the list step publishes for a later fanout
+// step and returns them normalized (missing slugs filled in).
+func (c *Client) PublishItems(taskID int64, step string, items []task.PublishedItem) ([]task.PublishedItem, error) {
+	msg, err := c.request(daemon.MsgPublishItems, daemon.PublishItemsRequest{
+		TaskID:   taskID,
+		StepName: step,
+		Items:    items,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.PublishItemsResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
 }
 
 // CreateTrack creates a new track (project-scoped unless req.Global) and
