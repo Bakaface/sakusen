@@ -559,6 +559,10 @@ func (s *Server) cleanupWorktreeAndBranch(pc *projectContext, t *task.Task) {
 			if err := pc.repo.CleanupWorktrees(); err != nil {
 				log.Printf("%sWarning: failed to prune worktrees for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
 			}
+			prefix := fmt.Sprintf("%sTask #%d: ", s.projectLogPrefix(t.ProjectID), t.ID)
+			workflow.RemoveIsolatedBranchWorktrees(pc.repo, pc.cfg.GetTaskWorkflow(t.Workflow), t, t.Branch != "" && t.CheckoutBranch == "", func(format string, args ...any) {
+				log.Printf(prefix+format, args...)
+			})
 		}
 		// Only delete branches that sakusen created; preserve user-provided branches
 		if t.Branch != "" && t.CheckoutBranch == "" {

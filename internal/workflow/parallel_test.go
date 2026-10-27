@@ -922,3 +922,44 @@ func TestParallelSharedBranchesDoNotAcquireSlots(t *testing.T) {
 		t.Errorf("shared branches acquired %d slots, want 0", got)
 	}
 }
+
+func TestCleanupMergedWorktreeRemovesBranchWorktrees(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		checkoutBranch bool
+	}{
+		{"sakusen branch", false},
+		{"user checkout branch", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, tk, _, _ := newIsolatedTestEngine(t, isolatedWorkflow("all", "impl-a", "impl-b"))
+			if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+				t.Fatalf("RunTask: %v", err)
+			}
+			if tc.checkoutBranch {
+				tk.CheckoutBranch = tk.Branch
+			}
+
+			engine.cleanupMergedWorktree(tk, func(string, ...any) {})
+
+			worktrees := gitOutput(t, engine.repoRoot, "worktree", "list")
+			for _, name := range []string{"impl-a", "impl-b"} {
+				path := IsolatedBranchWorktreePath(tk.WorktreePath, name)
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Errorf("%s worktree still on disk (stat err %v)", name, err)
+				}
+				if strings.Contains(worktrees, path) {
+					t.Errorf("%s worktree still registered:\n%s", name, worktrees)
+				}
+				branch := IsolatedBranchGitBranch(tk.Branch, name)
+				listed := gitOutput(t, engine.repoRoot, "branch", "--list", branch)
+				if tc.checkoutBranch && listed == "" {
+					t.Errorf("%s git branch deleted, want it kept for a user checkout branch", branch)
+				}
+				if !tc.checkoutBranch && listed != "" {
+					t.Errorf("%s git branch survived cleanup: %q", branch, listed)
+				}
+			}
+		})
+	}
+}

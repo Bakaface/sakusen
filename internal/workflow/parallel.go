@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
+	gitpkg "github.com/Bakaface/sakusen/internal/git"
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
@@ -88,6 +89,42 @@ func IsolatedBranchNames(wf *config.WorkflowConfig) []string {
 		}
 	}
 	return names
+}
+
+// RemoveIsolatedBranchWorktrees removes the worktree of every isolated branch
+// in wf for t and, when deleteBranches, force-deletes their git branches.
+// Paths derive from config and t alone, so it works after t's row is gone.
+// Failures are logged through logf, never returned.
+func RemoveIsolatedBranchWorktrees(repo *gitpkg.Repo, wf *config.WorkflowConfig, t *task.Task, deleteBranches bool, logf func(string, ...any)) {
+	names := IsolatedBranchNames(wf)
+	if len(names) == 0 || t.WorktreePath == "" {
+		return
+	}
+	for _, name := range names {
+		path := IsolatedBranchWorktreePath(t.WorktreePath, name)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if err := repo.RemoveWorktree(path); err != nil {
+			logf("Warning: failed to remove branch worktree %s: %v", path, err)
+		}
+	}
+	// git refuses to delete a branch still registered as checked out.
+	if err := repo.CleanupWorktrees(); err != nil {
+		logf("Warning: failed to prune worktrees: %v", err)
+	}
+	if !deleteBranches || t.Branch == "" {
+		return
+	}
+	for _, name := range names {
+		branch := IsolatedBranchGitBranch(t.Branch, name)
+		if !repo.BranchExists(branch) {
+			continue
+		}
+		if err := repo.ForceDeleteBranch(branch); err != nil {
+			logf("Warning: failed to delete branch %s: %v", branch, err)
+		}
+	}
 }
 
 // isolatedBranchVars builds the {{branches.<name>.*}} map for t.

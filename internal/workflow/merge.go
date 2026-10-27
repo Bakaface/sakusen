@@ -125,6 +125,7 @@ func (e *Engine) cleanupMergedWorktree(t *task.Task, logf func(string, ...any)) 
 	if err := e.repo.RemoveWorktree(t.WorktreePath); err != nil {
 		log.Printf("Warning: failed to remove worktree: %v", err)
 	}
+	RemoveIsolatedBranchWorktrees(e.repo, e.cfg.GetTaskWorkflow(t.Workflow), t, t.CheckoutBranch == "", log.Printf)
 	// Prune stale worktree references so git doesn't think the branch
 	// is still checked out in a (now-removed) worktree.
 	if err := e.repo.CleanupWorktrees(); err != nil {
