@@ -709,22 +709,39 @@ func TestFormatFanoutAggregate(t *testing.T) {
 		t.Errorf("aggregate =\n%s\nwant\n%s", got, want)
 	}
 
+	// Worst case: 64-rune slugs, 7-digit IDs and summaries long enough to cut.
 	big := make([]task.PublishedItem, 200)
 	bigChildren := make(map[string]*task.Task, 200)
 	bigContexts := make(map[int64]string, 200)
+	failedChildren := make(map[string]*task.Task, 200)
 	for i := range big {
-		slug := fmt.Sprintf("%03d-%s", i, strings.Repeat("s", 60))
+		slug := fmt.Sprintf("%03d%s", i, strings.Repeat("s", 61))
 		big[i] = task.PublishedItem{Slug: slug}
-		bigChildren[slug] = &task.Task{ID: int64(100000 + i), Status: task.StatusCompleted}
-		bigContexts[int64(100000+i)] = strings.Repeat("word ", 100)
+		id := int64(1000000 + i)
+		bigChildren[slug] = &task.Task{ID: id, Status: task.StatusCompleted}
+		bigContexts[id] = strings.Repeat("word ", 60)
+		failedChildren[slug] = &task.Task{ID: id, Status: task.StatusResolvingConflicts, ErrorMessage: strings.Repeat("oops ", 60)}
 	}
 	lines := strings.Split(FormatFanoutAggregate("units", "all", big, bigChildren, bigContexts), "\n")
 	if len(lines) != 201 {
 		t.Fatalf("lines = %d, want 201", len(lines))
 	}
 	for i, l := range lines {
-		if n := utf8.RuneCountInString(l); n > 210 {
-			t.Errorf("line %d is %d runes, want <= 210", i, n)
+		if n := utf8.RuneCountInString(l); n > 200 {
+			t.Errorf("line %d is %d runes, want <= 200", i, n)
+		}
+	}
+
+	lines = strings.Split(FormatFanoutAggregate("units", "all", big, failedChildren, nil), "\n")
+	if len(lines) != 201 {
+		t.Fatalf("failed lines = %d, want 201", len(lines))
+	}
+	for i, l := range lines {
+		if n := utf8.RuneCountInString(l); n > 200 {
+			t.Errorf("failed line %d is %d runes, want <= 200", i, n)
+		}
+		if i > 0 && !strings.HasSuffix(l, "…)") {
+			t.Errorf("failed line %d = %q, want a cut reason ending in …)", i, l)
 		}
 	}
 }

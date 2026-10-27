@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Bakaface/sakusen/internal/config"
 	"github.com/Bakaface/sakusen/internal/task"
 )
 
-// fanoutSummaryRunes caps each item's summary in the fanout aggregate so a
-// line stays near 200 runes even with a maximal (64-rune) slug.
-const fanoutSummaryRunes = 120
+// fanoutSummaryRunes caps each item's summary in the fanout aggregate, and
+// fanoutLineRunes caps each whole item line, cutting the summary further when
+// a long slug, ID or status leaves less room.
+const (
+	fanoutSummaryRunes = 120
+	fanoutLineRunes    = 200
+)
 
 // FanoutSpawnRequest is one child task a fanout step asks its host to create.
 type FanoutSpawnRequest struct {
@@ -288,8 +293,9 @@ func (e *Engine) fanoutChildrenBySlug(parentID int64, step string) (map[string]*
 //	- docs #14 failed — (failed: step "write" exited with code 1)
 //
 // A summary is the first non-empty line of the child's context with
-// whitespace collapsed, truncated to 120 runes, so the aggregate stays one
-// line per item however large the fanout. Full outputs are reachable through
+// whitespace collapsed, truncated to 120 runes and further if needed so no
+// item line exceeds 200 runes; the aggregate stays one short line per item
+// however large the fanout. Full outputs are reachable through
 // {{tasks.<id>.context}}.
 func FormatFanoutAggregate(step, policy string, items []task.PublishedItem, children map[string]*task.Task, contexts map[int64]string) string {
 	completed := 0
@@ -306,35 +312,40 @@ func FormatFanoutAggregate(step, policy string, items []task.PublishedItem, chil
 			lines = append(lines, fmt.Sprintf("- %s (not spawned)", it.Slug))
 			continue
 		}
+		prefix := fmt.Sprintf("- %s #%d %s — ", it.Slug, c.ID, c.Status)
+		budget := fanoutLineRunes - utf8.RuneCountInString(prefix)
 		var summary string
 		switch {
 		case c.Status != task.StatusCompleted:
-			reason := summaryLine(c.ErrorMessage)
+			const wrap = "(failed: )"
+			reason := summaryLine(c.ErrorMessage, min(fanoutSummaryRunes, budget-len(wrap)))
 			if reason == "" {
 				reason = string(c.Status)
 			}
 			summary = "(failed: " + reason + ")"
 		default:
-			summary = summaryLine(contexts[c.ID])
+			summary = summaryLine(contexts[c.ID], min(fanoutSummaryRunes, budget))
 			if summary == "" {
 				summary = "(no context)"
 			}
 		}
-		lines = append(lines, fmt.Sprintf("- %s #%d %s — %s", it.Slug, c.ID, c.Status, summary))
+		lines = append(lines, prefix+summary)
 	}
 	return strings.Join(lines, "\n")
 }
 
 // summaryLine returns the first non-empty line of s with whitespace collapsed,
-// truncated to fanoutSummaryRunes runes (ending in "…" when cut).
-func summaryLine(s string) string {
+// truncated to limit runes (ending in "…" when cut). A limit below 1 is
+// treated as 1 so non-empty input never yields an empty summary.
+func summaryLine(s string, limit int) string {
+	limit = max(limit, 1)
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.Join(strings.Fields(line), " ")
 		if line == "" {
 			continue
 		}
-		if r := []rune(line); len(r) > fanoutSummaryRunes {
-			line = string(r[:fanoutSummaryRunes-1]) + "…"
+		if r := []rune(line); len(r) > limit {
+			line = string(r[:limit-1]) + "…"
 		}
 		return line
 	}

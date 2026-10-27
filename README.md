@@ -327,7 +327,7 @@ fanout units: 2/3 completed (require all)
 - docs #14 failed — (failed: step "write" exited with code 1)
 ```
 
-Each summary is the first non-empty line of the child's context with whitespace collapsed, truncated to 120 runes (ending in `…`). Children with no context show `(no context)`. A failed child shows `(failed: <first line of its error>)`. This keeps the aggregate compact at hundreds of children. Full per-child results stay reachable via `get_task` on the listed IDs, or via `{{tasks.<id>.context}}`.
+Each summary is the first non-empty line of the child's context with whitespace collapsed, truncated to 120 runes (ending in `…`), and further when needed so no item line exceeds 200 runes. Children with no context show `(no context)`. A failed child shows `(failed: <first line of its error>)`. This keeps the aggregate compact at hundreds of children. Full per-child results stay reachable via `get_task` on the listed IDs, or via `{{tasks.<id>.context}}`.
 
 ### Template variables
 
