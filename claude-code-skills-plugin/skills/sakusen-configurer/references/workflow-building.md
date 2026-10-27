@@ -386,7 +386,7 @@ steps:
     require_context: false # true = fail the task if summarize_chat context can't be captured
     loop: {...}            # jump back to an earlier step or repeat this one (see Loops)
     parallel: {...}        # fan out to concurrent branches instead of running a prompt (see Parallel Groups)
-    fanout: {...}          # spawn one child task per published item, then join (see Fan-out Steps)
+    fanout: {...}          # spawn one child task per published item or declared node, then join (see Fan-out Steps)
 ```
 
 A step sets EITHER `prompt:`, `parallel:` OR `fanout:` — a `parallel:` step is a container and a
@@ -814,6 +814,11 @@ A [fanout step](#fan-out-steps) is for **a declared fan-out that produces change
 step publishes a list of items with `publish_items`, and the engine spawns one child task per
 item, each in its own worktree running its own workflow. Retries and the `require` policy are
 config, not prose. The NEXT step reads every child's result through `{{steps.<fanout>.context}}`.
+When the units are known up front, declare them as [`nodes:`](#declared-nodes) with `needs:`
+instead — a static graph whose nodes start as soon as their needs have merged.
+
+Rule of thumb: a shared `parallel:` group is for read-only branches with inline prompts on the
+task's own worktree; `fanout:` is for isolated child tasks that write.
 
 Use `create_tasks_and_wait` (see [MCP Orchestration Patterns](#mcp-orchestration-patterns))
 for **ad-hoc spawning** that an agent decides on at run time. The calling step suspends and is
@@ -845,7 +850,7 @@ A `fanout:` step runs no agent. It spawns one child task per item that an earlie
 
 | Key | Default | Notes |
 |---|---|---|
-| `from` | required | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
+| `from` | required unless `nodes` is set | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
 | `workflow` | required | The workflow each child runs. It must exist and have no `human:` step or step that resolves to a tmux-mode agent, because children run unattended. |
 | `input` | `{{item.input}}` | Child task input template. Sees the normal variables plus `{{item.*}}`. |
 | `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
@@ -888,6 +893,64 @@ fanout units: 2/3 completed (require all)
 ```
 
 Each summary is the first non-empty line of the child's context with whitespace collapsed, truncated to 120 runes (ending in `…`). Children with no context show `(no context)`. A failed child shows `(failed: <first line of its error>)`. This keeps the aggregate compact at hundreds of children. Full per-child results stay reachable via `get_task` on the listed IDs, or via `{{tasks.<id>.context}}`.
+
+### Declared nodes
+
+When the units are known when you write the workflow, declare them under `nodes:` instead of publishing them at run time. `needs:` orders them as a graph:
+
+```yaml
+- name: planning
+  prompt: Plan the change for {{task.input}}.
+- name: build
+  fanout:
+    workflow: fast-and-furious   # default for every node
+    merge: parent
+    retries: 1                   # default for every node
+    nodes:
+      - name: schema
+        input: "Design the schema.\n\n{{steps.planning.context}}"
+      - name: api
+        input: "Build the API on this schema:\n{{steps.schema.context}}"
+        needs: [schema]
+      - name: ui
+        input: "Build the UI on this schema:\n{{steps.schema.context}}"
+        needs: [schema]
+        retries: 2
+      - name: e2e
+        workflow: test-only
+        input: "Write end-to-end tests.\n{{steps.api.context}}\n{{steps.ui.context}}"
+        needs: [api, ui]
+- name: finishing
+  prompt: |
+    {{steps.build.context}}
+```
+
+| Key | Default | Notes |
+|---|---|---|
+| `name` | required | Node name. It must match the item slug shape (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`). |
+| `workflow` | the step's `workflow` | The workflow this node's child runs. |
+| `input` | required | Child task input template. |
+| `needs` | none | Names of sibling nodes that must complete first. |
+| `retries` | the step's `retries` | Automatic re-runs of this node's failed child. |
+
+Validation rules (config load and `sakusen validate`):
+
+- `from:` and `nodes:` are mutually exclusive, and the step-level `input:` is rejected with `nodes:` (each node carries its own).
+- Node names join the workflow's step namespace (no collisions with steps, parallel branches or other nodes); a node's context is `{{steps.<node>.context}}`.
+- `needs` may only name nodes of the same fanout; cycles are rejected.
+- A node's `input` may reference `{{steps.<name>.context}}` only for its transitive needs or for names declared before the fanout.
+- A node that another node needs must run a child workflow with `on_complete: merge`.
+- A `require: N` larger than the node count is rejected.
+- In a node's input, `{{item.slug}}`/`{{item.title}}` are the node name, `{{item.index}}` its 1-based position in `nodes:`, and `{{item.input}}` is empty.
+
+Run time:
+
+- A node's child spawns only once all its needs have completed (merged), with its input rendered at that moment; under `merge: parent` its worktree already holds its needs' work.
+- Each node retries on its own `retries`.
+- A node whose need failed for good is never spawned, counts as failed at the join, and shows as `- <node> (skipped: need <need> failed)` in the aggregate.
+- Each completed node gets its own step row, readable as `{{steps.<node>.context}}`.
+- The parent wakes whenever any child becomes terminal, so ready nodes start promptly.
+- The TUI lists node rows in dependency order.
 
 ---
 
@@ -986,7 +1049,7 @@ see [Wrapping Multi-Line Interpolations](#wrapping-multi-line-interpolations).
 | `{{children.summary}}` | Digest of all child tasks after a `create_tasks_and_wait` resume **(multi-line — wrap in `<children-summary>`)** |
 | `{{children.<id>.<field>}}` | Field of a specific child task. Fields: `id`, `title`, `status` (`completed`/`failed`), `context`. See [MCP Orchestration Patterns](#mcp-orchestration-patterns). |
 | `{{prompt.<name>}}` | Contents of a shared prompt file. See [Prompt Includes](#prompt-includes). |
-| `{{item.input}}`, `{{item.slug}}`, `{{item.title}}`, `{{item.index}}` | The published item a fanout child is spawned for (`index` is 1-based). **Only in a fanout step's `input:`.** See [Fan-out Steps](#fan-out-steps). |
+| `{{item.input}}`, `{{item.slug}}`, `{{item.title}}`, `{{item.index}}` | The published item a fanout child is spawned for (`index` is 1-based). For a declared node, `slug`/`title` are the node name, `index` its 1-based position in `nodes:`, and `input` is empty. **Only in a fanout step's or node's `input:`.** See [Fan-out Steps](#fan-out-steps). |
 
 Unknown placeholders are left in the rendered prompt verbatim, so a typo shows up as literal
 `{{taks.id}}` text rather than an error. `{{prompt.<name>}}` is the one exception — it must

@@ -218,7 +218,7 @@ sakusen routines pause|resume <name>  # triggered (cadence/after) routines only
 | `human` | bool | Pause and wait for explicit approval in the TUI. |
 | `summarization_strategy` | enum | `last_message`, `summarize_chat` (default; runs your `summarizer:` command over the chat log), or `none` (no context captured). |
 | `loop` | object | Jump back to an earlier step, or repeat this one. See below. |
-| `fanout` | object | Spawn one child task per item an earlier step published, then join on them. Replaces `prompt`/`agent`. See [Fan-out steps](#fan-out-steps). |
+| `fanout` | object | Spawn one child task per item an earlier step published (`from:`), or per node of a declared `nodes:` graph, then join on them. Replaces `prompt`/`agent`. See [Fan-out steps](#fan-out-steps). |
 
 ### Loops
 
@@ -285,7 +285,7 @@ A `fanout:` step runs no agent. It spawns one child task per item that an earlie
 
 | Key | Default | Notes |
 |---|---|---|
-| `from` | required | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
+| `from` | required unless `nodes` is set | An earlier, ordinary top-level step (not a fanout, parallel group or parallel branch). It publishes the items. |
 | `workflow` | required | The workflow each child runs. It must exist and have no `human:` step or step that resolves to a tmux-mode agent, because children run unattended. |
 | `input` | `{{item.input}}` | Child task input template. Sees the normal variables plus `{{item.*}}`. |
 | `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
@@ -328,6 +328,66 @@ fanout units: 2/3 completed (require all)
 ```
 
 Each summary is the first non-empty line of the child's context with whitespace collapsed, truncated to 120 runes (ending in `…`), and further when needed so no item line exceeds 200 runes. Children with no context show `(no context)`. A failed child shows `(failed: <first line of its error>)`. This keeps the aggregate compact at hundreds of children. Full per-child results stay reachable via `get_task` on the listed IDs, or via `{{tasks.<id>.context}}`.
+
+#### Declared nodes
+
+When the units are known when you write the workflow, declare them under `nodes:` instead of publishing them at run time. `needs:` orders them as a graph:
+
+```yaml
+- name: planning
+  prompt: Plan the change for {{task.input}}.
+- name: build
+  fanout:
+    workflow: fast-and-furious   # default for every node
+    merge: parent
+    retries: 1                   # default for every node
+    nodes:
+      - name: schema
+        input: "Design the schema.\n\n{{steps.planning.context}}"
+      - name: api
+        input: "Build the API on this schema:\n{{steps.schema.context}}"
+        needs: [schema]
+      - name: ui
+        input: "Build the UI on this schema:\n{{steps.schema.context}}"
+        needs: [schema]
+        retries: 2
+      - name: e2e
+        workflow: test-only
+        input: "Write end-to-end tests.\n{{steps.api.context}}\n{{steps.ui.context}}"
+        needs: [api, ui]
+- name: finishing
+  prompt: |
+    {{steps.build.context}}
+```
+
+| Key | Default | Notes |
+|---|---|---|
+| `name` | required | Node name. It must match the item slug shape (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`). |
+| `workflow` | the step's `workflow` | The workflow this node's child runs. |
+| `input` | required | Child task input template. |
+| `needs` | none | Names of sibling nodes that must complete first. |
+| `retries` | the step's `retries` | Automatic re-runs of this node's failed child. |
+
+Rules, checked at config load and by `sakusen validate`:
+
+- `from:` and `nodes:` are mutually exclusive, and the step-level `input:` is rejected with `nodes:` (each node carries its own).
+- Node names join the workflow's step namespace, so they must not collide with any step, parallel branch or other node. A node's context is addressable as `{{steps.<node>.context}}`.
+- `needs` may only name nodes of the same fanout, and cycles are rejected.
+- A node's `input` may reference `{{steps.<name>.context}}` only for its transitive needs or for names declared before the fanout.
+- A node that another node needs must run a child workflow with `on_complete: merge`, because its dependents build on its merged work.
+- A `require: N` larger than the node count is rejected.
+- In a node's input, `{{item.slug}}` and `{{item.title}}` are the node name, `{{item.index}}` is its 1-based position in `nodes:`, and `{{item.input}}` is empty.
+
+At run time:
+
+- A node's child is spawned only once all its needs have completed (merged), and its input is rendered at that moment. With `merge: parent`, the node's worktree therefore already holds its needs' work. Nodes get no `blocked_by` edges; the engine holds them back itself.
+- Each node is retried on its own `retries`.
+- A node whose need failed for good is never spawned. It counts as failed at the join and shows as `- <node> (skipped: need <need> failed)` in the aggregate.
+- Each completed node gets its own step row, so later steps read `{{steps.<node>.context}}` as well as the fanout's aggregate.
+- The parent wakes whenever any child becomes terminal, so ready nodes start without waiting for unrelated siblings.
+- The TUI lists the node rows in dependency order.
+
+**`parallel:` or `fanout:`?** Use a shared `parallel:` group for branches with inline prompts that only read, on the task's own worktree (for example, several reviewers of one diff). Use `fanout:` when each unit writes code: every child is an isolated task with its own worktree, workflow, retries and merge.
 
 ### Template variables
 
