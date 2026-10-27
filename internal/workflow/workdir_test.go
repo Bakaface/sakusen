@@ -13,6 +13,7 @@ import (
 	"github.com/Bakaface/sakusen/internal/db"
 	"github.com/Bakaface/sakusen/internal/runner"
 	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
 )
 
 const pwdAgent = `pwd -P > "$SAKUSEN_RESULT_FILE"`
@@ -244,5 +245,33 @@ func TestTmuxStepMissingWorkdirFails(t *testing.T) {
 	}
 	if !strings.Contains(msg, filepath.Join(dir, "nope")) {
 		t.Fatalf("expected failure naming the missing workdir, got err=%v msg=%q", err, msg)
+	}
+}
+
+func TestTmuxStepReplacesLegacySession(t *testing.T) {
+	engine, tk, _ := newTmuxStepEngine(t, "")
+	taskID := fmt.Sprintf("%d", tk.ID)
+	legacy := tmux.SessionName(engine.cfg.ProjectName, taskID, "")
+	slugged := tmux.SessionName(engine.cfg.ProjectName, taskID, tk.Slug)
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", "="+legacy).Run()
+		exec.Command("tmux", "kill-session", "-t", "="+slugged).Run()
+	})
+	if err := exec.Command("tmux", "new-session", "-d", "-s", legacy).Run(); err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if err := exec.Command("tmux", "has-session", "-t", "="+legacy).Run(); err != nil {
+		t.Fatalf("legacy session not live: %v", err)
+	}
+
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	if err := exec.Command("tmux", "has-session", "-t", "="+slugged).Run(); err != nil {
+		t.Errorf("slugged session %s not created: %v", slugged, err)
+	}
+	if err := exec.Command("tmux", "has-session", "-t", "="+legacy).Run(); err == nil {
+		t.Errorf("legacy session %s still alive", legacy)
 	}
 }

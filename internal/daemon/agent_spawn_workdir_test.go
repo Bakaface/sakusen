@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Bakaface/sakusen/internal/task"
+	"github.com/Bakaface/sakusen/internal/tmux"
 )
 
 const restoreYMLWorkflowSetup = `default_agent: interactive
@@ -74,5 +77,93 @@ func TestRestoreTmuxSession_MissingWorkdirFails(t *testing.T) {
 	_, err := s.restoreTmuxSession(tk)
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(projectDir, "missing")) {
 		t.Fatalf("expected error naming the missing workdir, got %v", err)
+	}
+}
+
+func tmuxSessionAlive(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", "="+name).Run() == nil
+}
+
+func TestSpawnInteractiveSessionReplacesLegacySession(t *testing.T) {
+	s, projectDir, tk := setupRestoreProject(t, restoreYMLNoResume)
+	tk.WorktreePath = projectDir
+	pc, err := s.getProjectContext(tk.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := fmt.Sprintf("%d", tk.ID)
+	legacy := tmux.SessionName(pc.cfg.Project.Name, taskID, "")
+	slugged := tmux.SessionName(pc.cfg.Project.Name, taskID, tk.Slug)
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", "="+legacy).Run()
+		exec.Command("tmux", "kill-session", "-t", "="+slugged).Run()
+	})
+	if err := exec.Command("tmux", "new-session", "-d", "-s", legacy).Run(); err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if !tmuxSessionAlive(legacy) {
+		t.Fatalf("legacy session %s not live", legacy)
+	}
+
+	slug, agentCfg, err := interactiveAgent(pc.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.spawnInteractiveSession(pc, tk, interactiveSpawnOpts{label: "continue", slug: slug, agent: agentCfg}); err != nil {
+		t.Fatalf("spawnInteractiveSession: %v", err)
+	}
+
+	if !tmuxSessionAlive(slugged) {
+		t.Errorf("slugged session %s not created", slugged)
+	}
+	if tmuxSessionAlive(legacy) {
+		t.Errorf("legacy session %s still alive", legacy)
+	}
+}
+
+func TestSetupTmuxDirectUsesFinalizedSlug(t *testing.T) {
+	s, projectDir, fixture := setupRestoreProject(t, restoreYMLNoResume)
+	tk, err := s.database.CreateTaskWithPriority(
+		fixture.ProjectID, "", "", "", "", "", "", "", "",
+		task.StatusInit, task.PriorityMedium, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.database.UpdateTaskWorktreePath(tk.ID, projectDir); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := s.getProjectContext(tk.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := interactiveAgent(pc.cfg); err != nil {
+		t.Fatal(err)
+	}
+	taskID := fmt.Sprintf("%d", tk.ID)
+	slugless := tmux.SessionName(pc.cfg.Project.Name, taskID, "")
+	want := tmux.SessionName(pc.cfg.Project.Name, taskID, "rotate-tokens")
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", "="+slugless).Run()
+		exec.Command("tmux", "kill-session", "-t", "="+want).Run()
+	})
+
+	s.setupTmuxDirect(tk.ID, tk.ProjectID, "Rotate tokens")
+
+	if !tmuxSessionAlive(want) {
+		t.Errorf("session %s not created", want)
+	}
+	if tmuxSessionAlive(slugless) {
+		t.Errorf("slugless session %s created", slugless)
+	}
+	got, err := s.database.GetTask(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Slug != "rotate-tokens" {
+		t.Errorf("slug = %q, want rotate-tokens", got.Slug)
+	}
+	if got.Status != task.StatusTmux {
+		t.Errorf("status = %s, want %s", got.Status, task.StatusTmux)
 	}
 }
