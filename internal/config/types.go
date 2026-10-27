@@ -803,15 +803,18 @@ func (ec *LoopExitCondition) EffectiveTimeout() time.Duration {
 // does (name, description, agent, prompt, timeout, summarization_*); the rest
 // are rejected by ValidateSteps.
 //
-// Branches share the task's single worktree and run at the same time, so they
-// are required (by documentation, not enforcement) to be read-only: two
-// branches writing the same files would race.
+// In a shared group, branches share the task's single worktree and run at the
+// same time, so they are required (by documentation, not enforcement) to be
+// read-only: two branches writing the same files would race.
 type ParallelConfig struct {
 	// Require is the join policy: "" / "all" (every branch must succeed;
 	// the first failure cancels its siblings), "any" (one is enough), or a
 	// positive integer in 1..len(branches).
-	Require  string       `yaml:"require,omitempty"`
-	Branches []StepConfig `yaml:"branches"`
+	Require string `yaml:"require,omitempty"`
+	// Isolation is "" / "shared" (branches run in the task's worktree) or
+	// "worktree" (each branch gets its own throwaway worktree).
+	Isolation string       `yaml:"isolation,omitempty"`
+	Branches  []StepConfig `yaml:"branches"`
 }
 
 // RequireAll / RequireAny are the two symbolic `require:` values.
@@ -819,6 +822,17 @@ const (
 	RequireAll = "all"
 	RequireAny = "any"
 )
+
+// IsolationShared / IsolationWorktree are the valid `isolation:` values.
+const (
+	IsolationShared   = "shared"
+	IsolationWorktree = "worktree"
+)
+
+// IsIsolated reports whether each branch runs in its own worktree.
+func (p *ParallelConfig) IsIsolated() bool {
+	return p != nil && p.Isolation == IsolationWorktree
+}
 
 // EffectiveRequire returns the configured join policy with the empty value
 // resolved to its default ("all"). Use it for display; use RequiredCount for
@@ -1127,6 +1141,9 @@ func (wf *WorkflowConfig) ValidateSteps() error {
 					return err
 				}
 			}
+			if step.Parallel.IsIsolated() && wf.Worktree != nil && !*wf.Worktree {
+				return fmt.Errorf("parallel group %q sets isolation: worktree but the workflow pins worktree: false", step.Name)
+			}
 			continue
 		}
 		if !ValidSummarizationStrategies[step.SummarizationStrategy] {
@@ -1145,6 +1162,17 @@ func (wf *WorkflowConfig) ValidateSteps() error {
 		}
 	}
 	return nil
+}
+
+// isolatedGroup returns the name of the workflow's first parallel group that
+// sets isolation: worktree.
+func (wf *WorkflowConfig) isolatedGroup() (string, bool) {
+	for i := range wf.Steps {
+		if wf.Steps[i].IsParallel() && wf.Steps[i].Parallel.IsIsolated() {
+			return wf.Steps[i].Name, true
+		}
+	}
+	return "", false
 }
 
 // validateParallelGroup checks a `parallel:` group entry and each of its
@@ -1188,6 +1216,12 @@ func validateParallelGroup(step *StepConfig) error {
 			return fmt.Errorf("step %q: parallel.require %d is out of range (must be 1..%d, the branch count)",
 				step.Name, n, len(p.Branches))
 		}
+	}
+	switch p.Isolation {
+	case "", IsolationShared, IsolationWorktree:
+	default:
+		return fmt.Errorf("step %q: invalid parallel.isolation %q (must be %q or %q)",
+			step.Name, p.Isolation, IsolationShared, IsolationWorktree)
 	}
 	for j := range p.Branches {
 		b := &p.Branches[j]

@@ -610,3 +610,149 @@ workflows:
 		t.Error("FirstStepIsTmux = true for a group-first workflow, want false")
 	}
 }
+
+func TestParallelIsolationParses(t *testing.T) {
+	for _, tc := range []struct {
+		isolation string
+		isolated  bool
+	}{
+		{"", false},
+		{IsolationShared, false},
+		{IsolationWorktree, true},
+	} {
+		t.Run("isolation="+tc.isolation, func(t *testing.T) {
+			line := ""
+			if tc.isolation != "" {
+				line = "      isolation: " + tc.isolation + "\n"
+			}
+			wf := parseWorkflow(t, `
+name: reviewed
+steps:
+  - name: review
+    parallel:
+`+line+`      branches:
+        - name: a
+          prompt: "a"
+`)
+			if err := wf.ValidateSteps(); err != nil {
+				t.Fatalf("ValidateSteps: %v", err)
+			}
+			if got := wf.Steps[0].Parallel.IsIsolated(); got != tc.isolated {
+				t.Fatalf("IsIsolated() = %v, want %v", got, tc.isolated)
+			}
+		})
+	}
+	var nilParallel *ParallelConfig
+	if nilParallel.IsIsolated() {
+		t.Fatal("nil ParallelConfig must not be isolated")
+	}
+}
+
+func TestParallelIsolationRejectsUnknown(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: reviewed
+steps:
+  - name: review
+    parallel:
+      isolation: fork
+      branches:
+        - name: a
+          prompt: "a"
+`)
+	err := wf.ValidateSteps()
+	if err == nil {
+		t.Fatal("ValidateSteps accepted isolation: fork")
+	}
+	for _, want := range []string{`"review"`, "fork", "shared", "worktree"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %s", err, want)
+		}
+	}
+}
+
+func TestParallelIsolationRejectsWorktreeFalse(t *testing.T) {
+	const isolatedGroup = `
+    steps:
+      - name: review
+        parallel:
+          isolation: worktree
+          branches:
+            - name: a
+              prompt: "a"
+`
+	for _, tc := range []struct {
+		name string
+		body string
+		want []string // nil ⇒ must load cleanly
+	}{
+		{
+			name: "workflow pin",
+			body: `
+workflows:
+  - name: reviewed
+    worktree: false` + isolatedGroup,
+			want: []string{`workflow "reviewed"`, `parallel group "review"`, "worktree: false"},
+		},
+		{
+			name: "routine pin",
+			body: `
+workflows:
+  - name: reviewed` + isolatedGroup + `
+routines:
+  - name: nightly
+    workflow: reviewed
+    worktree: false
+`,
+			want: []string{`routine "nightly"`, `workflow "reviewed"`, `parallel group "review"`, "worktree: false"},
+		},
+		{
+			name: "routine pins worktree true",
+			body: `
+workflows:
+  - name: reviewed` + isolatedGroup + `
+routines:
+  - name: nightly
+    workflow: reviewed
+    worktree: true
+`,
+		},
+		{
+			name: "shared group under worktree false",
+			body: `
+workflows:
+  - name: reviewed
+    worktree: false
+    steps:
+      - name: review
+        parallel:
+          branches:
+            - name: a
+              prompt: "a"
+`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			path := writeParallelProject(t, tc.body)
+			_, loadErr := LoadForProject(filepath.Dir(path))
+			_, diagErr := Diagnose(path)
+			for label, err := range map[string]error{"LoadForProject": loadErr, "Diagnose": diagErr} {
+				if tc.want == nil {
+					if err != nil {
+						t.Errorf("%s: unexpected error %v", label, err)
+					}
+					continue
+				}
+				if err == nil {
+					t.Errorf("%s: accepted the config", label)
+					continue
+				}
+				for _, w := range tc.want {
+					if !strings.Contains(err.Error(), w) {
+						t.Errorf("%s: err = %v, want it to mention %s", label, err, w)
+					}
+				}
+			}
+		})
+	}
+}

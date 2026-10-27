@@ -350,6 +350,8 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 //     Config.RoutineRequiresInput).
 //  7. a notifications override is well-formed and its notify_if names a step
 //     of the bound workflow
+//  8. the effective worktree pin is not false when the workflow has a parallel
+//     group with isolation: worktree
 func validateRoutines(cfg *Config) error {
 	seen := make(map[string]bool, len(cfg.Routines))
 	for i := range cfg.Routines {
@@ -388,6 +390,12 @@ func validateRoutines(cfg *Config) error {
 
 		if err := r.ValidatePins(wf); err != nil {
 			return err
+		}
+		if pins := r.EffectivePins(wf); pins.Worktree != nil && !*pins.Worktree {
+			if group, ok := wf.isolatedGroup(); ok {
+				return fmt.Errorf("routine %q: workflow %q parallel group %q sets isolation: worktree but the routine pins worktree: false",
+					r.Name, r.Workflow, group)
+			}
 		}
 
 		if r.Notifications != nil {
