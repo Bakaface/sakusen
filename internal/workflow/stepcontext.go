@@ -174,7 +174,7 @@ func (e *Engine) captureHeadlessStepContext(ctx context.Context, t *task.Task, w
 	// step's aggregate is engine-built the same way.
 	if step.IsParallel() || step.IsFanout() {
 		if err := e.database.CompleteTaskStep(t.ID, step.Name, &resultText, exitCode); err != nil {
-			log.Printf("Warning: failed to complete parallel group step record: %v", err)
+			log.Printf("Warning: failed to complete aggregate step record %q: %v", step.Name, err)
 		}
 		return
 	}

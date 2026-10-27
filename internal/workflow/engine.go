@@ -781,7 +781,7 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 	// A tmux step publishes from its live session after this point, so the
 	// fanout's own missing-items check covers it instead.
 	if !result.useTmux {
-		if fanout := fanoutConsumer(wf, step.Name); fanout != "" {
+		if fanout := wf.FanoutConsumer(step.Name); fanout != "" {
 			_, published, err := e.database.GetPublishedItems(t.ID, step.Name)
 			if err != nil {
 				return stepOutcome{}, fmt.Errorf("step %q: failed to read published items: %w", step.Name, err)

@@ -49,17 +49,6 @@ func (e *Engine) SetFanoutHost(h FanoutHost) {
 // blocker failed (db.FailDependentTasks); such a task never ran.
 const cascadeFailurePrefix = "blocker task #"
 
-// fanoutConsumer returns the name of the first fanout step in wf whose
-// `from:` is step, or "" when none is.
-func fanoutConsumer(wf *config.WorkflowConfig, step string) string {
-	for i := range wf.Steps {
-		if wf.Steps[i].IsFanout() && wf.Steps[i].Fanout.From == step {
-			return wf.Steps[i].Name
-		}
-	}
-	return ""
-}
-
 // runFanoutStep spawns one child task per item published by the step's
 // `from:` step, then joins on them. While any child is still running it
 // records wait-on edges and returns a suspend result; once every child is
