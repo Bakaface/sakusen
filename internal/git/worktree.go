@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const WorktreePrefix = "sakusen-task-"
@@ -79,8 +80,14 @@ func (r *Repo) CreateWorktree(taskID int64, baseBranch, branchName string) (*Wor
 // discarding an existing one (unlike CreateWorktree). An existing worktree at
 // path is left untouched; a missing one is re-added on branch if the branch
 // survives, otherwise branch is created from baseCommit. created reports
-// whether a worktree was added.
+// whether a worktree was added. Calls are serialized process-wide: the
+// branches of one parallel group provision concurrently, and concurrent
+// `git worktree add`/`prune` in one repo read each other's half-written
+// .git/worktrees entries.
 func (r *Repo) EnsureWorktreeAt(path, branch, baseCommit string) (created bool, err error) {
+	ensureWorktreeMu.Lock()
+	defer ensureWorktreeMu.Unlock()
+
 	if isWorktreeRoot(path) {
 		return false, nil
 	}
@@ -109,6 +116,9 @@ func (r *Repo) EnsureWorktreeAt(path, branch, baseCommit string) (created bool, 
 	}
 	return true, nil
 }
+
+// ensureWorktreeMu serializes EnsureWorktreeAt; see its doc comment.
+var ensureWorktreeMu sync.Mutex
 
 // isWorktreeRoot reports whether path is the top level of a git checkout. A
 // plain directory nested inside another checkout does not count.

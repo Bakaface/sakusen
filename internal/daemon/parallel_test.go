@@ -434,6 +434,7 @@ func TestTaskToInfoBranchWorktrees(t *testing.T) {
 	s, projID := setupServerWithProject(t)
 	cfg := primeParallelProject(t, s, projID)
 	tk := newParallelTask(t, s, projID)
+	tk.Worktree = true
 	tk.WorktreePath = filepath.Join(t.TempDir(), "task")
 	tk.Branch = "feat/reviewed"
 
@@ -453,5 +454,11 @@ func TestTaskToInfoBranchWorktrees(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("BranchWorktrees = %+v, want %+v", got, want)
+	}
+
+	// A worktree:false task runs in the project root; nothing sits beside it.
+	tk.Worktree = false
+	if got := s.taskToInfo(tk).BranchWorktrees; got != nil {
+		t.Errorf("BranchWorktrees = %+v, want nil for a worktree:false task", got)
 	}
 }

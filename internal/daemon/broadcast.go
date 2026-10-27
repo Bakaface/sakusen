@@ -484,10 +484,11 @@ func branchStatuses(wf *config.WorkflowConfig, rows map[string]db.TaskStepRow) m
 
 // branchWorktrees reports the worktree of every isolated parallel branch in wf
 // for t, with State from a stat of its path. Nil when wf has no isolated group
-// or t has no worktree.
+// or t has no worktree (a worktree:false task's WorktreePath is the project
+// root, which has no branch worktrees beside it).
 func branchWorktrees(wf *config.WorkflowConfig, t *task.Task) map[string]BranchWorktreeInfo {
 	names := workflow.IsolatedBranchNames(wf)
-	if len(names) == 0 || t.WorktreePath == "" {
+	if len(names) == 0 || !t.Worktree || t.WorktreePath == "" {
 		return nil
 	}
 	out := make(map[string]BranchWorktreeInfo, len(names))
