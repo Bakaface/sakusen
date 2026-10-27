@@ -80,10 +80,6 @@ func TestRestoreTmuxSession_MissingWorkdirFails(t *testing.T) {
 	}
 }
 
-func tmuxSessionAlive(name string) bool {
-	return exec.Command("tmux", "has-session", "-t", "="+name).Run() == nil
-}
-
 func TestSpawnInteractiveSessionReplacesLegacySession(t *testing.T) {
 	s, projectDir, tk := setupRestoreProject(t, restoreYMLNoResume)
 	tk.WorktreePath = projectDir
@@ -101,7 +97,7 @@ func TestSpawnInteractiveSessionReplacesLegacySession(t *testing.T) {
 	if err := exec.Command("tmux", "new-session", "-d", "-s", legacy).Run(); err != nil {
 		t.Fatalf("create legacy session: %v", err)
 	}
-	if !tmuxSessionAlive(legacy) {
+	if !sessionExistsExactly(t, legacy) {
 		t.Fatalf("legacy session %s not live", legacy)
 	}
 
@@ -113,10 +109,10 @@ func TestSpawnInteractiveSessionReplacesLegacySession(t *testing.T) {
 		t.Fatalf("spawnInteractiveSession: %v", err)
 	}
 
-	if !tmuxSessionAlive(slugged) {
+	if !sessionExistsExactly(t, slugged) {
 		t.Errorf("slugged session %s not created", slugged)
 	}
-	if tmuxSessionAlive(legacy) {
+	if sessionExistsExactly(t, legacy) {
 		t.Errorf("legacy session %s still alive", legacy)
 	}
 }
@@ -150,10 +146,10 @@ func TestSetupTmuxDirectUsesFinalizedSlug(t *testing.T) {
 
 	s.setupTmuxDirect(tk.ID, tk.ProjectID, "Rotate tokens")
 
-	if !tmuxSessionAlive(want) {
+	if !sessionExistsExactly(t, want) {
 		t.Errorf("session %s not created", want)
 	}
-	if tmuxSessionAlive(slugless) {
+	if sessionExistsExactly(t, slugless) {
 		t.Errorf("slugless session %s created", slugless)
 	}
 	got, err := s.database.GetTask(tk.ID)
