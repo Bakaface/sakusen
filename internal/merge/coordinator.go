@@ -75,6 +75,16 @@ type Config struct {
 
 	// VerifyTimeout bounds one VerifyCommand run. Zero means no limit.
 	VerifyTimeout time.Duration
+
+	// CommitMessageCommand, when set, writes the message of every worktree
+	// commit: it runs via `bash -c` in the task worktree with the staged diff
+	// on stdin, and its first non-empty stdout line is the message. Failure,
+	// timeout or empty output falls back to the title-derived message.
+	CommitMessageCommand string
+
+	// CommitMessageTimeout bounds one CommitMessageCommand run. Defaults to
+	// 2m when zero.
+	CommitMessageTimeout time.Duration
 }
 
 // ErrTargetDirtyTimeout is returned (wrapped) when the target checkout stays
@@ -131,6 +141,8 @@ type TargetWorktreeLister func(t *task.Task, branch string) ([]TargetWorktree, e
 // directly.
 type gitRepo interface {
 	Commit(worktreePath, message string) error
+	StageAll(worktreePath string) error
+	StagedDiff(worktreePath string) (string, error)
 	MergeBranchIn(dir, branch string) error
 	AbortRebase(worktreePath string) error
 	RebaseInto(worktreePath, baseBranch string) error
@@ -200,6 +212,9 @@ func newCoordinator(
 	if cfg.BlockedPollInterval <= 0 {
 		cfg.BlockedPollInterval = 10 * time.Second
 	}
+	if cfg.CommitMessageTimeout <= 0 {
+		cfg.CommitMessageTimeout = defaultCommitMessageTimeout
+	}
 	if lock == nil {
 		lock = &Lock{}
 	}
@@ -264,7 +279,7 @@ func (c *Coordinator) Finalize(ctx context.Context, t *task.Task, baseBranch str
 
 	switch action {
 	case ActionCommit:
-		return c.commit(t, logf)
+		return c.commit(ctx, t, logf)
 	case ActionMerge:
 		return c.merge(ctx, t, baseBranch, logf)
 	default:
@@ -275,9 +290,9 @@ func (c *Coordinator) Finalize(ctx context.Context, t *task.Task, baseBranch str
 
 // commit handles on_complete=commit by committing pending changes in the
 // worktree. The base repo is not touched, so no locking or cleanup is needed.
-func (c *Coordinator) commit(t *task.Task, logf LogFunc) error {
+func (c *Coordinator) commit(ctx context.Context, t *task.Task, logf LogFunc) error {
 	logf("Committing changes in worktree...")
-	if err := c.repo.Commit(t.WorktreePath, gitpkg.ConventionalCommitFromTitle(t.Title)); err != nil {
+	if err := c.repo.Commit(t.WorktreePath, c.commitMessage(ctx, t, logf)); err != nil {
 		return err
 	}
 	logf("Commit completed")
@@ -299,7 +314,7 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 	// Commit any uncommitted worktree changes. Safe to do outside the per-repo
 	// lock — this writes only to the worktree's index.
 	logf("Committing changes in worktree before merge...")
-	if err := c.repo.Commit(t.WorktreePath, gitpkg.ConventionalCommitFromTitle(t.Title)); err != nil {
+	if err := c.repo.Commit(t.WorktreePath, c.commitMessage(ctx, t, logf)); err != nil {
 		return fmt.Errorf("commit failed: %w", err)
 	}
 

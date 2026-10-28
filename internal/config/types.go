@@ -404,6 +404,15 @@ type GitConfig struct {
 	// time.ParseDuration; empty inherits the lower tier (default 15m), "0"
 	// disables the limit. The resolved value is Config.GitVerifyTimeout.
 	VerifyTimeout string `yaml:"verify_timeout,omitempty"`
+	// CommitMessageCommand runs via bash in the task worktree when the daemon
+	// commits it, with the staged diff on stdin; the first non-empty stdout
+	// line becomes the commit message. Empty keeps the title-derived message.
+	CommitMessageCommand string `yaml:"commit_message_command,omitempty"`
+	// CommitMessageTimeout bounds one CommitMessageCommand run. Parsed with
+	// time.ParseDuration; empty inherits the lower tier (default 2m) and the
+	// value must be positive. The resolved value is
+	// Config.GitCommitMessageTimeout.
+	CommitMessageTimeout string `yaml:"commit_message_timeout,omitempty"`
 }
 
 // UnmarshalYAML decodes a GitConfig and rejects the removed `on_complete:` field
@@ -1790,6 +1799,9 @@ type Config struct {
 
 	// GitVerifyTimeout is the resolved git.verify_timeout (0 = no limit).
 	GitVerifyTimeout time.Duration
+
+	// GitCommitMessageTimeout is the resolved git.commit_message_timeout.
+	GitCommitMessageTimeout time.Duration
 
 	// From global config
 	Notifications            NotificationsConfig

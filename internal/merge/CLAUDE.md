@@ -38,6 +38,14 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
   (`sh -c` in the worktree root, own process group, `Config.VerifyTimeout`) after the worktree commit
   and again after every `refreshFromBase` that moved the task tip. Failure or timeout returns a wrapped
   `ErrVerifyFailed` before any merge attempt; the daemon records it as `merge-failed`, worktree kept.
+- **The commit message command never blocks a commit** — both worktree commits (`commit()` and the
+  one at the top of `merge()`) take their message from `commitMessage`. With
+  `Config.CommitMessageCommand` set it stages, then runs the command via `bash -c` in the worktree
+  root (own process group, `Config.CommitMessageTimeout`, default 2m) with the staged diff on stdin
+  (capped at `maxCommitDiffBytes`) and `SAKUSEN_TASK_ID`/`SAKUSEN_TASK_TITLE`/`SAKUSEN_WORKTREE`/
+  `SAKUSEN_PROJECT_PATH`/`SAKUSEN_PURPOSE=commit_message` (+ `SAKUSEN_TRACK_ID`); the first
+  non-empty stdout line is the message. Any failure, timeout or empty output logs the reason and
+  falls back to `gitpkg.ConventionalCommitFromTitle`; nothing staged skips the command.
 - **Non-worktree mode short-circuits** — when `task.Worktree == false`, merge is replaced by
   `commit()` (or no-op if `OnComplete` is `none`).
 
@@ -47,6 +55,8 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
 |------|---------|
 | `coordinator.go` | `Coordinator`, `Config`, `Lock`, `Locks`, the `Finalize` pipeline, conflict-retry, `waitForReadyTarget`, `targetCheckout` / `targetWorktree` (target resolution), commit-recorder hooks |
 | `verify.go` | Pre-merge verify command: `verify`, `runVerifyCommand`, `ErrVerifyFailed`, output tail capping |
+| `commitmsg.go` | Commit message command: `commitMessage` (with fallback), `runCommitMessageCommand`, diff capping |
+| `commitmsg_test.go` | Unset/used/fallback (failure, timeout, empty)/stdin/env, merge path, diff capping |
 | `coordinator_test.go` | Unit tests for the pipeline + locking |
 | `verify_test.go` | Verify pass/fail/timeout and re-verify after rebase |
 | `task_worktree_target_test.go` | Merges into a branch checked out in a task worktree: ff, dirty/busy blocking, sibling sequence |

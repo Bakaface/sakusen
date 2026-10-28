@@ -115,6 +115,11 @@ git:
   base_branch: main
   branch_template: sakusen/{{task_id}}-{{task_slug}}
   verify_command: mise run check  # optional: must pass before on_complete: merge lands
+  # optional: writes the daemon's commit messages from the staged diff on stdin
+  # (first non-empty stdout line; failure/timeout/empty → title-derived message)
+  commit_message_command: >-
+    claude -p --model haiku "Write a one-line conventional commit message, <type>(<scope>): <subject>, for the staged diff on stdin. Print only the message."
+  commit_message_timeout: 2m      # optional: limit per message run (default 2m)
 
 on_complete: merge                # commit | merge | none (per-workflow overridable)
 

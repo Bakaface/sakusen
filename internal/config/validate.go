@@ -220,6 +220,9 @@ func validateProject(proj *ProjectConfig, filePool *workflowFilePool, globalPool
 	if err := applyGitVerifyTimeout(defaultConfig(), proj.Git.VerifyTimeout); err != nil {
 		return nil, err
 	}
+	if err := applyGitCommitMessageTimeout(defaultConfig(), proj.Git.CommitMessageTimeout); err != nil {
+		return nil, err
+	}
 
 	// Agent record shapes are checkable from the file alone. Refs (step/
 	// workflow `agent:`, default_agent) may point at agents defined in the

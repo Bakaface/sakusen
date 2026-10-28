@@ -138,6 +138,8 @@ git:
   branch_template: "sakusen/{{task_id}}-{{task_slug}}"  # Branch naming template
   verify_command: mise run check                 # Run before an on_complete: merge (default: none)
   verify_timeout: 15m                            # Limit per verify run (default: 15m; "0" = no limit)
+  commit_message_command: ./bin/commit-msg       # Writes the daemon's commit messages (default: none)
+  commit_message_timeout: 2m                     # Limit per message run (default: 2m; must be positive)
 ```
 
 > **Note:** `on_complete` is a **top-level** key (see "Finalization" below), not part of the `git:` section. The legacy `git.on_complete` location was removed — configs that still use it produce a migration error.
@@ -165,6 +167,35 @@ agent step re-run. `on_complete: commit`/`none` never run it.
 
 Both keys merge per key across tiers like the other `git:` keys (`~/.sakusen.yml`, then the
 project). An unparseable or negative `verify_timeout` is a hard load error.
+
+### Commit Message Command
+
+When the daemon commits a task worktree (`on_complete: commit`, and the final commit before an
+`on_complete: merge`), the message is derived from the task title by default: the leading verb
+picks the type, giving `<type>: <lowercased title>` with no scope. Set `commit_message_command`
+to have a command write it from the actual change instead. After staging, the daemon runs it via
+`bash -c` in the task worktree root with:
+
+- **stdin**: the staged diff (`git diff --cached`), capped at 128 KiB with a truncation note.
+- **env**: the daemon's environment plus `SAKUSEN_TASK_ID`, `SAKUSEN_TASK_TITLE`,
+  `SAKUSEN_WORKTREE`, `SAKUSEN_PROJECT_PATH`, `SAKUSEN_PURPOSE=commit_message` and, when the task
+  is on a track, `SAKUSEN_TRACK_ID`.
+
+The first non-empty line of stdout is the commit message. If the command exits non-zero, runs past
+`commit_message_timeout` (default `2m`), or prints nothing, the daemon logs the reason to the task
+log and falls back to the title-derived message: the command never blocks a commit. It is not run
+when there is nothing to commit.
+
+Pipe the diff to a headless agent CLI for one-line `<type>(<scope>): <subject>` messages:
+
+```yaml
+git:
+  commit_message_command: >-
+    claude -p --model haiku "Write a one-line conventional commit message, <type>(<scope>): <subject>, for the staged diff on stdin. Print only the message."
+```
+
+Both keys merge per key across tiers like the other `git:` keys, so this usually lives in
+`~/.sakusen.yml`. An unparseable, zero or negative `commit_message_timeout` is a hard load error.
 
 ---
 

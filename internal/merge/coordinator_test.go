@@ -941,6 +941,10 @@ func (f *fakeGitRepo) Root() string { return f.root }
 
 func (f *fakeGitRepo) Commit(worktreePath, message string) error { return nil }
 
+func (f *fakeGitRepo) StageAll(worktreePath string) error { return nil }
+
+func (f *fakeGitRepo) StagedDiff(worktreePath string) (string, error) { return "", nil }
+
 func (f *fakeGitRepo) MergeBranchIn(dir, branch string) error {
 	f.mergeCalls++
 	if f.mergeCalls <= f.mergeFailCount {

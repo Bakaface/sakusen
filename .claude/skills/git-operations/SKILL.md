@@ -19,7 +19,7 @@ Every git call is `exec.Command("git", ...)` with `Dir` set; there is no library
 |------|---------|
 | `repo.go` | `Repo`, `NewRepo()`, `Root()`, `worktreePath()` — the single definition of the worktree path convention |
 | `worktree.go` | `CreateWorktree()`, `EnsureWorktreeAt()`, `CheckoutWorktree()`, `RemoveWorktree()`, `ListWorktrees()`, `CleanupWorktrees()`, `BranchExists()`, `FetchAndTrackBranch()`, `GetDefaultBranch()` (`symbolic-ref` → main/master → HEAD), detach/reattach HEAD, `CheckoutBranch()`, `IsGitRepo()`, `GetRepoRoot()` |
-| `operations.go` | `Commit()`, `HasChanges()`, `ChangedPaths()`, `HasMeaningfulChanges()`, `MergeBranch()` (ff-only), `RebaseBranch()` (auto-abort), `RebaseInto()` / `GetConflictedFiles()` / `ContinueRebase()` / `AbortRebase()` (conflict flow), `DeleteBranch()` / `ForceDeleteBranch()`, `ListLocalBranches()`, `DiffStat()`, `GetLastCommitHash()`, `RevertCommits()`, commit-message helpers |
+| `operations.go` | `Commit()`, `StageAll()` / `StagedDiff()`, `HasChanges()`, `ChangedPaths()`, `HasMeaningfulChanges()`, `MergeBranch()` (ff-only), `RebaseBranch()` (auto-abort), `RebaseInto()` / `GetConflictedFiles()` / `ContinueRebase()` / `AbortRebase()` (conflict flow), `DeleteBranch()` / `ForceDeleteBranch()`, `ListLocalBranches()`, `DiffStat()`, `GetLastCommitHash()`, `RevertCommits()`, commit-message helpers |
 | `errors.go` | `ErrWorktreeExists`, `ErrNotAWorktree`, and `classifyGitErr()` — the one place git stderr is matched into a sentinel |
 
 ## Worktree Path Convention

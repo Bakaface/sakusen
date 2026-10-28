@@ -72,7 +72,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 | `summarizer` | object | — | Utility LLM for summaries and AI titles/slugs (`agent` or `command`, `slug_agent`/`slug_command`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`). See [Summarizer](#summarizer). |
 | `merge_conflicts` | object | — | Merge-conflict resolver role (`agent`, `timeout`, `prompt`). See [Merge conflicts](#merge-conflicts). |
 | `verification` | object | — | Summarizer verification settings (`max_retries`, `verify_summarizer`) |
-| `git` | object | — | Branch naming, base branch, pre-merge verify: `verify_command` (shell command run in the worktree before an `on_complete: merge`; failure → `merge-failed`), `verify_timeout` (duration, default `15m`, `0` = no limit). See [Verify Command](references/config-reference.md#verify-command). |
+| `git` | object | — | Branch naming, base branch, pre-merge verify: `verify_command` (shell command run in the worktree before an `on_complete: merge`; failure → `merge-failed`), `verify_timeout` (duration, default `15m`, `0` = no limit); `commit_message_command` (shell command fed the staged diff on stdin whose first stdout line becomes the daemon's commit message; failure → title-derived message), `commit_message_timeout` (duration, default `2m`). See [Verify Command](references/config-reference.md#verify-command) and [Commit Message Command](references/config-reference.md#commit-message-command). |
 | `on_complete` | string | `"commit"` | Finalization action (`commit`/`merge`/`none`); per-workflow overridable |
 | `merge` | object | — | Clean-target wait before a merge: `clean_target_timeout` (duration; empty/`0` waits forever), `ignore_paths` (git glob pathspecs that do not count as dirty). See [Merge Section](references/config-reference.md#merge-section-clean-target-wait). |
 | `workflows` | list | — | **Primary config block** — flat list of workflow pipelines |
@@ -106,7 +106,7 @@ Steps run whichever agent the cascade resolves (step `agent:` → workflow `agen
 Top-level field names mix two casing styles — **don't guess, copy exactly**:
 
 - **kebab-case:** `worktree-sync-paths`, `worktree-setup-command`, `worktree-setup-commands`, `tmux-setup-command`
-- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `hibernate_after`, `max_live_sessions`, `clean_target_timeout`, `ignore_paths`, `base_branch`, `branch_template`, `verify_command`, `verify_timeout`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`, `resume_command`, `chat_log_command`
+- **snake_case:** `max_workers`, `default_priority`, `default_agent`, `poll_interval`, `tmux_nested_attach_behavior`, `hibernate_after`, `max_live_sessions`, `clean_target_timeout`, `ignore_paths`, `base_branch`, `branch_template`, `verify_command`, `verify_timeout`, `commit_message_command`, `commit_message_timeout`, `on_complete`, `max_prompt_bytes`, `title_prompt`, `slug_prompt`, `slug_command`, `resume_command`, `chat_log_command`
 
 If you author an unrecognized variant (`worktree_sync_paths`, `tmux_setup_command`, etc.), Sakusen will silently ignore it.
 

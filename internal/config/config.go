@@ -48,9 +48,10 @@ func defaultConfig() *Config {
 		// Hibernation is on by default: an unbounded pile of idle interactive
 		// agent processes is what it exists to prevent, so a config that never
 		// mentions tmux: still gets bounded.
-		TmuxHibernateAfter:  4 * time.Hour,
-		TmuxMaxLiveSessions: 12,
-		GitVerifyTimeout:    DefaultGitVerifyTimeout,
+		TmuxHibernateAfter:      4 * time.Hour,
+		TmuxMaxLiveSessions:     12,
+		GitVerifyTimeout:        DefaultGitVerifyTimeout,
+		GitCommitMessageTimeout: DefaultGitCommitMessageTimeout,
 	}
 }
 
@@ -71,6 +72,28 @@ func applyGitVerifyTimeout(cfg *Config, timeout string) error {
 		return fmt.Errorf("invalid git.verify_timeout %q: must not be negative", timeout)
 	}
 	cfg.GitVerifyTimeout = d
+	return nil
+}
+
+// DefaultGitCommitMessageTimeout is the git.commit_message_timeout used when
+// no tier sets it.
+const DefaultGitCommitMessageTimeout = 2 * time.Minute
+
+// applyGitCommitMessageTimeout merges one tier's git.commit_message_timeout
+// into the resolved config. Unlike verify_timeout there is no "no limit"
+// value: the message command must never hold up a commit indefinitely.
+func applyGitCommitMessageTimeout(cfg *Config, timeout string) error {
+	if timeout == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(timeout)
+	if err != nil {
+		return fmt.Errorf("invalid git.commit_message_timeout %q: %w", timeout, err)
+	}
+	if d <= 0 {
+		return fmt.Errorf("invalid git.commit_message_timeout %q: must be positive", timeout)
+	}
+	cfg.GitCommitMessageTimeout = d
 	return nil
 }
 
@@ -416,6 +439,11 @@ func loadProjectConfig(path string, cfg *Config) error {
 	override(&cfg.Git.VerifyCommand, proj.Git.VerifyCommand)
 	override(&cfg.Git.VerifyTimeout, proj.Git.VerifyTimeout)
 	if err := applyGitVerifyTimeout(cfg, proj.Git.VerifyTimeout); err != nil {
+		return err
+	}
+	override(&cfg.Git.CommitMessageCommand, proj.Git.CommitMessageCommand)
+	override(&cfg.Git.CommitMessageTimeout, proj.Git.CommitMessageTimeout)
+	if err := applyGitCommitMessageTimeout(cfg, proj.Git.CommitMessageTimeout); err != nil {
 		return err
 	}
 	override(&cfg.OnComplete, proj.OnComplete)

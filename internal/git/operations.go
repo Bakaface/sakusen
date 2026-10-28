@@ -18,14 +18,8 @@ import (
 // working directory is being committed. No-op (returns nil) if there is
 // nothing to commit.
 func (r *Repo) Commit(workDir, message string) error {
-	addCmd := exec.Command("git", "add", "-A")
-	addCmd.Dir = workDir
-
-	var stderr bytes.Buffer
-	addCmd.Stderr = &stderr
-
-	if err := addCmd.Run(); err != nil {
-		return fmt.Errorf("git add failed: %w (stderr: %s)", err, stderr.String())
+	if err := r.StageAll(workDir); err != nil {
+		return err
 	}
 
 	statusCmd := exec.Command("git", "status", "--porcelain")
@@ -44,7 +38,7 @@ func (r *Repo) Commit(workDir, message string) error {
 
 	commitCmd := exec.Command("git", "commit", "-m", message)
 	commitCmd.Dir = workDir
-	stderr.Reset()
+	var stderr bytes.Buffer
 	commitCmd.Stderr = &stderr
 
 	if err := commitCmd.Run(); err != nil {
@@ -52,6 +46,35 @@ func (r *Repo) Commit(workDir, message string) error {
 	}
 
 	return nil
+}
+
+// StageAll stages every pending change in workDir (`git add -A`).
+func (r *Repo) StageAll(workDir string) error {
+	addCmd := exec.Command("git", "add", "-A")
+	addCmd.Dir = workDir
+
+	var stderr bytes.Buffer
+	addCmd.Stderr = &stderr
+
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("git add failed: %w (stderr: %s)", err, stderr.String())
+	}
+	return nil
+}
+
+// StagedDiff returns the staged diff in workDir (`git diff --cached`).
+func (r *Repo) StagedDiff(workDir string) (string, error) {
+	cmd := exec.Command("git", "diff", "--cached", "--no-color", "--no-ext-diff")
+	cmd.Dir = workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git diff --cached failed: %w (stderr: %s)", err, stderr.String())
+	}
+	return stdout.String(), nil
 }
 
 // GetCurrentBranch returns the name of the branch currently checked out at
