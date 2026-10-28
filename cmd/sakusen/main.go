@@ -45,7 +45,7 @@ dedicated git worktrees, and provides real-time monitoring via TUI.`,
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		if isDaemonSubcommand(cmd) || cmd.Name() == "tui" {
+		if isSubcommandOf(cmd, "daemon") || isSubcommandOf(cmd, "projects") || cmd.Name() == "tui" {
 			return nil
 		}
 
@@ -57,9 +57,11 @@ dedicated git worktrees, and provides real-time monitoring via TUI.`,
 	},
 }
 
-func isDaemonSubcommand(cmd *cobra.Command) bool {
+// isSubcommandOf reports whether cmd is the named command or one of its
+// subcommands.
+func isSubcommandOf(cmd *cobra.Command, name string) bool {
 	for p := cmd; p != nil; p = p.Parent() {
-		if p.Name() == "daemon" {
+		if p.Name() == name {
 			return true
 		}
 	}

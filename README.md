@@ -636,6 +636,18 @@ sakusen routines resume <name>
 sakusen tasks --routine-id N          # tasks created by a routine, by its DB id
 ```
 
+**Projects**
+
+The daemon registers a project the first time sakusen is used in it. These commands work from any directory:
+
+```bash
+sakusen projects [list]               # ID / NAME / PATH / EXISTS / TASKS / ACTIVE
+sakusen projects remove <path|id> [-y]  # unregister; deletes its tasks and their history
+sakusen projects remove --missing [-y]  # every project whose directory no longer exists
+```
+
+Removal is refused while the project has a task that is not completed, failed or merge-failed. It deletes the project's tasks with their steps, contexts, dependency and waits-on edges, routine rows and tracks; when the directory still exists, the tasks' worktrees, branches and logs go too. A project whose directory is gone can still be removed. An all-digit argument is an id: write `./123` for a directory.
+
 **Worktree branch management**
 
 ```bash

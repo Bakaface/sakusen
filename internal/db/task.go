@@ -842,19 +842,24 @@ func (db *DB) FailDependentTasks(blockerID int64) ([]int64, error) {
 }
 
 func (db *DB) DeleteTask(id int64) error {
-	_, err := db.sqlDB.Exec("DELETE FROM chats WHERE task_id = ?", id)
+	return deleteTaskRows(db.sqlDB, id)
+}
+
+// deleteTaskRows deletes a task row and the rows that reference it.
+func deleteTaskRows(ex statusExecer, id int64) error {
+	_, err := ex.Exec("DELETE FROM chats WHERE task_id = ?", id)
 	if err != nil {
 		return err
 	}
-	_, err = db.sqlDB.Exec("DELETE FROM task_dependencies WHERE task_id = ? OR blocked_by = ?", id, id)
+	_, err = ex.Exec("DELETE FROM task_dependencies WHERE task_id = ? OR blocked_by = ?", id, id)
 	if err != nil {
 		return err
 	}
-	_, err = db.sqlDB.Exec("DELETE FROM task_waits_on WHERE task_id = ? OR waits_on_id = ?", id, id)
+	_, err = ex.Exec("DELETE FROM task_waits_on WHERE task_id = ? OR waits_on_id = ?", id, id)
 	if err != nil {
 		return err
 	}
-	_, err = db.sqlDB.Exec("DELETE FROM tasks WHERE id = ?", id)
+	_, err = ex.Exec("DELETE FROM tasks WHERE id = ?", id)
 	return err
 }
 

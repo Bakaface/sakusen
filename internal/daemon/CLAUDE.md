@@ -37,6 +37,7 @@ Unix socket server, request handlers, task polling, agent lifecycle. Protocol is
 | `fanout_host.go` | `fanoutHost` — the `workflow.FanoutHost` the engine spawns fanout children through. `SpawnChild` goes through `createTaskFromRequest` (same validation, `blocked_by` wiring and async title refinement as any task) with the parent's track and priority and a `FanoutOrigin` (parent, step, item); `merge: parent` sets `TargetBranch` via `task.ParentMergeTarget`. `RetryChild` resets a terminal child through `retryTaskFull` |
 | `handlers_cleanup.go` | Worktree/branch/log cleanup for completed/failed tasks (task ID 0 = all eligible) |
 | `handlers_periodic.go` | List/get/pause/runs/run-now for routines, all addressed by (project path, name) |
+| `handlers_projects.go` | `list_projects` (path existence + task counts) and `remove_project`: refuses with the active tasks named, resolves the project context BEFORE `DeleteProject` (it needs the row), evicts the cached context and routine-reconcile state, then tears down each task's tmux sessions, worktree/branch and logs in the background via `releaseTaskResources` — only when the project directory still exists |
 | `handlers_tracks.go` | Track create/get/list/set-context, `resolveTrackRef`, `trackToInfo` |
 | `handlers_workflows.go` | `list_workflows` — flat listing across projects; a fanout step carries a `fanout` summary (`from` or `nodes:` — each node's name, effective workflow, needs and effective retries — plus `workflow`, `merge`, `require`, `retries`) |
 

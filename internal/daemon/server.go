@@ -932,6 +932,17 @@ func (s *Server) handleMessage(conn net.Conn, msg *Message) {
 		}
 		s.handleFirePeriodicNow(conn, req)
 
+	case MsgListProjects:
+		s.handleListProjects(conn)
+
+	case MsgRemoveProject:
+		var req RemoveProjectRequest
+		if err := msg.DecodePayload(&req); err != nil {
+			s.sendError(conn, "invalid payload")
+			return
+		}
+		s.handleRemoveProject(conn, req)
+
 	case MsgCreateTrack:
 		var req CreateTrackRequest
 		if err := msg.DecodePayload(&req); err != nil {

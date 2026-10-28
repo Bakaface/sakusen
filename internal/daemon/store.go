@@ -104,6 +104,8 @@ type taskStore interface {
 	GetOrCreateProject(projectPath string) (*db.Project, error)
 	GetProject(id int64) (*db.Project, error)
 	ListProjects() ([]*db.Project, error)
+	CountTasksByProject() (map[int64]db.ProjectTaskCounts, error)
+	DeleteProject(id int64) error
 	UpdateProjectDefaultWorktree(id int64, worktree bool) error
 	UpdateProjectDefaults(id int64, worktree bool, branchMode int, workflow string) error
 

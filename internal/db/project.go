@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Bakaface/sakusen/internal/config"
@@ -170,4 +171,117 @@ func (db *DB) UpdateProjectDefaultWorkflow(id int64, workflow string) error {
 func (db *DB) UpdateProjectDefaults(id int64, worktree bool, branchMode int, workflow string) error {
 	_, err := db.sqlDB.Exec(`UPDATE projects SET default_worktree = ?, default_branch_mode = ?, default_workflow = ? WHERE id = ?`, worktree, branchMode, workflow, id)
 	return err
+}
+
+// ProjectTaskCounts is a project's task total and how many of those are not
+// yet terminal.
+type ProjectTaskCounts struct {
+	Total  int
+	Active int
+}
+
+// CountTasksByProject returns task counts keyed by project ID. Projects with
+// no tasks are absent from the map.
+func (db *DB) CountTasksByProject() (map[int64]ProjectTaskCounts, error) {
+	rows, err := db.sqlDB.Query(`SELECT project_id, status, COUNT(*) FROM tasks GROUP BY project_id, status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := make(map[int64]ProjectTaskCounts)
+	for rows.Next() {
+		var projectID int64
+		var status string
+		var n int
+		if err := rows.Scan(&projectID, &status, &n); err != nil {
+			return nil, err
+		}
+		c := counts[projectID]
+		c.Total += n
+		if !task.Status(status).IsTerminal() {
+			c.Active += n
+		}
+		counts[projectID] = c
+	}
+	return counts, rows.Err()
+}
+
+// ActiveTasksError reports the non-terminal tasks that block a project removal.
+type ActiveTasksError struct {
+	TaskIDs []int64
+}
+
+func (e *ActiveTasksError) Error() string {
+	ids := make([]string, len(e.TaskIDs))
+	for i, id := range e.TaskIDs {
+		ids[i] = fmt.Sprintf("#%d", id)
+	}
+	return fmt.Sprintf("project has %d active task(s): %s", len(e.TaskIDs), strings.Join(ids, ", "))
+}
+
+// DeleteProject removes a project and everything keyed by it in one
+// transaction: its tasks (through deleteTaskRows), routine definitions and
+// tracks. Tasks of other projects attached to one of its tracks are detached.
+// It returns *ActiveTasksError, deleting nothing, while any of the project's
+// tasks is not terminal, and sql.ErrNoRows when the project does not exist.
+func (db *DB) DeleteProject(id int64) error {
+	tx, err := db.sqlDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists int
+	if err := tx.QueryRow(`SELECT 1 FROM projects WHERE id = ?`, id).Scan(&exists); err != nil {
+		return err
+	}
+
+	rows, err := tx.Query(`SELECT id, status FROM tasks WHERE project_id = ? ORDER BY id`, id)
+	if err != nil {
+		return err
+	}
+	var taskIDs, active []int64
+	for rows.Next() {
+		var taskID int64
+		var status string
+		if err := rows.Scan(&taskID, &status); err != nil {
+			rows.Close()
+			return err
+		}
+		taskIDs = append(taskIDs, taskID)
+		if !task.Status(status).IsTerminal() {
+			active = append(active, taskID)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(active) > 0 {
+		return &ActiveTasksError{TaskIDs: active}
+	}
+
+	// last_task_id has no ON DELETE action, so the routines' run pointers
+	// must let go of the tasks before they can be deleted.
+	if _, err := tx.Exec(`UPDATE periodic_definitions SET last_task_id = NULL WHERE last_task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id); err != nil {
+		return err
+	}
+	for _, taskID := range taskIDs {
+		if err := deleteTaskRows(tx, taskID); err != nil {
+			return fmt.Errorf("failed to delete task #%d: %w", taskID, err)
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM periodic_definitions WHERE project_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET track_id = NULL WHERE track_id IN (SELECT id FROM tracks WHERE project_id = ?)`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM tracks WHERE project_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

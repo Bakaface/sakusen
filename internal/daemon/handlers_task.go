@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -416,26 +417,30 @@ func (s *Server) handleDeleteTask(conn net.Conn, req DeleteTaskRequest) {
 // returned); the ClearWorktreePath call inside cleanupWorktreeAndBranch is a
 // harmless no-op UPDATE once the row has been removed.
 func (s *Server) cleanupDeletedTaskResources(t *task.Task) {
-	agentID := fmt.Sprintf("%d", t.ID)
-
-	if pc, err := s.getProjectContext(t.ProjectID); err == nil {
-		if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, agentID, t.Slug); err != nil {
-			log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
-		}
+	pc, err := s.getProjectContext(t.ProjectID)
+	if err != nil {
+		removeTaskLogDir(s.projectLogPrefix(t.ProjectID), config.GetGlobalDataDir(), t)
+		return
 	}
+	s.releaseTaskResources(pc, t)
+}
 
-	repoRoot := s.getProjectRepoRoot(t)
-
-	if t.Worktree && repoRoot != "" {
-		if pc, err := s.getProjectContext(t.ProjectID); err == nil {
-			s.cleanupWorktreeAndBranch(pc, t)
-		}
+// releaseTaskResources is cleanupDeletedTaskResources against an explicit
+// project context, for callers whose project row may already be gone.
+func (s *Server) releaseTaskResources(pc *projectContext, t *task.Task) {
+	prefix := s.projectLogPrefix(t.ProjectID)
+	if err := tmux.KillSessionsForTask(pc.cfg.Project.Name, fmt.Sprintf("%d", t.ID), t.Slug); err != nil {
+		log.Printf("%sWarning: failed to kill tmux sessions for task #%d: %v", prefix, t.ID, err)
 	}
+	if t.Worktree && pc.repoRoot != "" {
+		s.cleanupWorktreeAndBranch(pc, t)
+	}
+	removeTaskLogDir(prefix, filepath.Join(pc.repoRoot, ".sakusen"), t)
+}
 
-	dataDir := s.getProjectDataDir(t)
-	logDir := workflow.ProjectLogsDir(dataDir, t.ID)
-	if err := os.RemoveAll(logDir); err != nil {
-		log.Printf("%sWarning: failed to remove log dir for task #%d: %v", s.projectLogPrefix(t.ProjectID), t.ID, err)
+func removeTaskLogDir(logPrefix, dataDir string, t *task.Task) {
+	if err := os.RemoveAll(workflow.ProjectLogsDir(dataDir, t.ID)); err != nil {
+		log.Printf("%sWarning: failed to remove log dir for task #%d: %v", logPrefix, t.ID, err)
 	}
 }
 

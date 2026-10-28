@@ -1082,3 +1082,29 @@ func ParseAgentUpdate(msg *daemon.Message) (*daemon.AgentInfo, error) {
 
 	return &resp.Agent, nil
 }
+
+// ListProjects returns every registered project with its task counts.
+func (c *Client) ListProjects() ([]daemon.ProjectInfo, error) {
+	msg, err := c.request(daemon.MsgListProjects, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.ListProjectsResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return resp.Projects, nil
+}
+
+// RemoveProject unregisters a project and deletes its (all terminal) tasks.
+func (c *Client) RemoveProject(id int64) (*daemon.RemoveProjectResponse, error) {
+	msg, err := c.request(daemon.MsgRemoveProject, daemon.RemoveProjectRequest{ProjectID: id})
+	if err != nil {
+		return nil, err
+	}
+	var resp daemon.RemoveProjectResponse
+	if err := msg.DecodePayload(&resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

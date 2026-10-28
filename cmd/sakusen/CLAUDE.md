@@ -4,7 +4,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 
 ## Critical Invariants
 
-- **Config required for non-exempt commands** — `PersistentPreRunE` enforces a `.sakusen.yml` exists in cwd or any ancestor up to the git toplevel (`config.FindProjectRoot`, shared with the TUI and the MCP server); only daemon subcommands (`start`, `stop`, `status`), `tui`, and completion are exempt via `noProjectRequired` map
+- **Config required for non-exempt commands** — `PersistentPreRunE` enforces a `.sakusen.yml` exists in cwd or any ancestor up to the git toplevel (`config.FindProjectRoot`, shared with the TUI and the MCP server); only daemon subcommands (`start`, `stop`, `status`), `projects` and its subcommands, `tui`, and completion are exempt (the `noProjectRequired` map, plus `isSubcommandOf` for whole command trees)
 - **Task IDs are `int64`** — parsed from positional args, not strings
 - **`--no-worktree` defaults to false** — tasks get isolated worktrees by default
 
@@ -27,6 +27,7 @@ Cobra-based CLI. Every subcommand is registered in an `init()` in its own file; 
 | `depends_on.go` | `depends-on add/rm/list` |
 | `tracks.go` | `tracks create/list/show/set-context` |
 | `routines.go` | `routines list/show/pause/resume/runs/run` — all by routine name |
+| `projects.go` | `projects list`, `projects remove <path\|id> [-y] [--missing]` — the daemon's project registry; the ref resolves client-side (all-digit = id, else path as given or symlink-resolved) |
 | `backfill_context.go` | `backfill-context` for older tasks |
 | `helpers.go` | Task table printing, truncation, shell completion for task IDs |
 | `version.go` | `version` |

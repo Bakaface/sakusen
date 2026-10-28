@@ -70,6 +70,9 @@ const (
 	MsgSetPeriodicPaused MessageType = "set_periodic_paused"
 	MsgListPeriodicRuns  MessageType = "list_periodic_runs"
 	MsgFirePeriodicNow   MessageType = "fire_periodic_now"
+
+	MsgListProjects  MessageType = "list_projects"
+	MsgRemoveProject MessageType = "remove_project"
 )
 
 // IsBroadcast reports whether t is a message type the daemon pushes to
@@ -789,6 +792,30 @@ type PeriodicInfo struct {
 	NextFireAt    time.Time  `json:"next_fire_at"`
 	LastFiredAt   *time.Time `json:"last_fired_at,omitempty"`
 	LastTaskID    *int64     `json:"last_task_id,omitempty"`
+}
+
+// ProjectInfo is a registered project with its task counts. PathExists is
+// false once the project directory has been deleted.
+type ProjectInfo struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	PathExists  bool   `json:"path_exists"`
+	Tasks       int    `json:"tasks"`
+	ActiveTasks int    `json:"active_tasks"`
+}
+
+type ListProjectsResponse struct {
+	Projects []ProjectInfo `json:"projects"`
+}
+
+type RemoveProjectRequest struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type RemoveProjectResponse struct {
+	Project      ProjectInfo `json:"project"`
+	TasksRemoved int         `json:"tasks_removed"`
 }
 
 type ListPeriodicsRequest struct {

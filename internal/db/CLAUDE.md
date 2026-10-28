@@ -15,6 +15,7 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 - **Track slugs cannot be empty or purely numeric** — numeric refs resolve as track IDs everywhere (`resolveTrackRef`, `--track`, `--parent`), so a numeric slug would be unreachable; rejected in `CreateTrack`
 - **Track parent scope rule + depth cap (10) are enforced in `CreateTrack`** — parents must be same-or-broader scope (project child → global parent OK, never the reverse, never cross-project); creation-time depth check is the only cycle guard because tracks cannot be re-parented
 - **Fanout identity is written in the child's INSERT** (`CreateFanoutChildTask`), never patched on afterwards, and is unique on `(fanout_parent_id, fanout_step, fanout_item)` via the partial index `idx_tasks_fanout_item`
+- **`DeleteProject` is one transaction that refuses (`*ActiveTasksError`) while any of the project's tasks is non-terminal** — it nulls `periodic_definitions.last_task_id` (no ON DELETE action) before deleting each task through `deleteTaskRows` (the body of `DeleteTask`), then the routine rows, tracks (detaching other projects' tasks from them) and the project row
 - **Track context append is a single SQL statement** (`context = CASE ... context || char(10) || char(10) || ?`) — no read-modify-write race under concurrent agents
 
 ## File Map
@@ -23,7 +24,7 @@ SQLite with WAL mode, single writer (`MaxOpenConns=1`), foreign keys on. `schema
 |------|---------|
 | `db.go` | `DB` wrapper, open/close, `migrations` ladder, version stamping |
 | `schema.sql` | Canonical table definitions applied to fresh databases |
-| `project.go` | Project upsert/lookup by path, name, id; default worktree flag |
+| `project.go` | Project upsert/lookup by path, name, id; default worktree flag; per-project task counts; `DeleteProject` |
 | `task.go` | Task create/claim/query/update/reset/delete, commit tracking, dependency edges (`task_dependencies`, BFS cycle check) |
 | `task_steps.go` | Per-step results (`task_steps`): create/complete/fail/context read+overwrite/delete |
 | `task_waits_on.go` | Parent → child suspension edges (`task_waits_on`) |
