@@ -90,6 +90,10 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 		return fail("failed to read items published by step %q: %v", f.From, err)
 	}
 	if !ok || len(items) == 0 {
+		if f.AllowEmpty {
+			e.appendTaskLog(t.ID, "=== fanout %s: step %s published no items (allow_empty), nothing to spawn ===", step.Name, f.From)
+			return stepResult{step: step, resultText: FormatEmptyFanoutAggregate(step.Name)}, nil
+		}
 		return fail("step %q published no items", f.From)
 	}
 
@@ -200,6 +204,22 @@ func (e *Engine) runFanoutStep(t *task.Task, step config.StepConfig, tmplCtx *Te
 		return fail("%d/%d children completed (require %s); failed: %s", completed, len(items), policy, strings.Join(failed, ", "))
 	}
 	return stepResult{step: step, resultText: aggregate}, nil
+}
+
+// FormatEmptyFanoutAggregate is the aggregate step context of an allow_empty
+// fanout whose source published nothing.
+func FormatEmptyFanoutAggregate(step string) string {
+	return fmt.Sprintf("fanout %s: 0 items published (allow_empty)", step)
+}
+
+// fanoutAllowsEmpty reports whether the named fanout step sets allow_empty.
+func fanoutAllowsEmpty(wf *config.WorkflowConfig, name string) bool {
+	for i := range wf.Steps {
+		if wf.Steps[i].IsFanout() && wf.Steps[i].Name == name {
+			return wf.Steps[i].Fanout.AllowEmpty
+		}
+	}
+	return false
 }
 
 // runFanoutNodes runs a `nodes:` fanout: each node's child is spawned only

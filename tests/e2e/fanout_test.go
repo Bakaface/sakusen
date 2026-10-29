@@ -114,3 +114,29 @@ func TestFanoutMergeIntoParent(t *testing.T) {
 	}
 	e.AssertMergedFor(1)
 }
+
+// TestFanoutAllowEmpty: the inventory step publishes nothing, and because the
+// fanout sets allow_empty the parent spawns no children and advances.
+func TestFanoutAllowEmpty(t *testing.T) {
+	e := setupE2E(t, "fanout_empty")
+	gitignore := filepath.Join(e.ProjectDir, ".gitignore")
+	if err := os.WriteFile(gitignore, []byte(".sakusen/\n.sakusen-output.log\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e.mustRun(e.ProjectDir, "git", "add", ".gitignore")
+	e.mustRun(e.ProjectDir, "git", "commit", "-m", "ignore sakusen output log")
+	yml := strings.Replace(fanoutWorkflowYAML(e.StubPath), "          merge: parent\n", "          merge: parent\n          allow_empty: true\n", 1)
+	e.WriteSakusenYAML(yml)
+
+	e.MustSakusen("create", "--title", "empty fanout", "-w", "parent", "empty fanout work")
+	e.WaitStatus(1, "completed", 45*time.Second)
+
+	if n := e.DBQueryInt(`SELECT COUNT(*) FROM tasks WHERE fanout_parent_id = 1`); n != 0 {
+		t.Errorf("fanout children of #1 = %d, want 0", n)
+	}
+	prompt := e.CapturedPrompt(1, "after")
+	if want := "fanout units: 0 items published (allow_empty)"; !strings.Contains(prompt, want) {
+		t.Errorf("after prompt lacks %q:\n%s", want, prompt)
+	}
+	e.AssertMergedFor(1)
+}

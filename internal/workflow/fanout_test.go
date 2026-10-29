@@ -1084,3 +1084,38 @@ func TestFanoutNodesRestartIdempotent(t *testing.T) {
 		t.Errorf("children = %d, want exactly 5", n)
 	}
 }
+
+func TestFanoutAllowEmptyAdvancesWithoutChildren(t *testing.T) {
+	wf := fanoutWorkflow("")
+	wf.Steps[1].Fanout.AllowEmpty = true
+	engine, tk, runner, database, host := newFanoutTestEngine(t, wf)
+	if err := engine.RunTask(context.Background(), tk, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if len(host.calls) != 0 {
+		t.Errorf("spawned %d children, want 0", len(host.calls))
+	}
+	want := "fanout units: 0 items published (allow_empty)"
+	rows, err := database.GetTaskStepRows(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTaskStepRows: %v", err)
+	}
+	if rows["units"].Status != "completed" || rows["units"].Context != want {
+		t.Errorf("units row = %q %q, want completed with %q", rows["units"].Status, rows["units"].Context, want)
+	}
+	after := runner.callsFor("after")
+	if len(after) != 1 || after[0].prompt != "results:\n"+want {
+		t.Errorf("after prompt = %+v, want the empty aggregate", after)
+	}
+}
+
+func TestFanoutAllowEmptyStillFansOutPublishedItems(t *testing.T) {
+	wf := fanoutWorkflow("")
+	wf.Steps[1].Fanout.AllowEmpty = true
+	engine, tk, runner, database, _ := newFanoutTestEngine(t, wf)
+	publishOnRun(t, runner, database, tk, items("a", "b"))
+	children := runToSuspend(t, engine, database, tk)
+	if len(children) != 2 {
+		t.Fatalf("children = %d, want 2", len(children))
+	}
+}

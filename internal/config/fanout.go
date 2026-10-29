@@ -109,6 +109,9 @@ func (wf *WorkflowConfig) validateFanoutNodes(step *StepConfig, i int) error {
 	if f.Input != "" {
 		return fmt.Errorf("step %q: fanout input %q cannot be set with `nodes:` (set input on each node)", step.Name, f.Input)
 	}
+	if f.AllowEmpty {
+		return fmt.Errorf("step %q: fanout allow_empty cannot be set with `nodes:` (declared nodes are never empty)", step.Name)
+	}
 	index := make(map[string]int, len(f.Nodes))
 	for j, n := range f.Nodes {
 		if n.Name == "" {

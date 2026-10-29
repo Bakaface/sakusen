@@ -856,6 +856,7 @@ A `fanout:` step runs no agent. It spawns one child task per item that an earlie
 | `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
 | `require` | `all` | Join policy: `all`, `any`, or an integer `N >= 1` (at least N children must complete). |
 | `retries` | `0` | How many times a failed child is re-run automatically before the join judges it. |
+| `allow_empty` | `false` | Only valid with `from`. When `true`, a `from:` step that publishes nothing does not fail the task: the fanout spawns nothing, skips `require` and completes at once with context `fanout <name>: 0 items published (allow_empty)`. Rejected with `nodes:`. |
 
 A fanout step cannot set `prompt`, `agent`, `loop`, `human`, `advance`, `parallel`, `summarization_strategy`, `summarization_prompt` or `require_context`. No loop's `goto` range may contain a fanout step, because re-running it would spawn its children again. Config loading and `sakusen validate` reject every one of these.
 

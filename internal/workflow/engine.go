@@ -789,7 +789,7 @@ func (e *Engine) applyStepResult(ctx context.Context, t *task.Task, wf *config.W
 			if err != nil {
 				return stepOutcome{}, fmt.Errorf("step %q: failed to read published items: %w", step.Name, err)
 			}
-			if !published {
+			if !published && !fanoutAllowsEmpty(wf, fanout) {
 				errMsg := fmt.Sprintf("step %q completed without publishing items for fanout %q", step.Name, fanout)
 				e.recordExitCode(t.ID, 1, errMsg)
 				return stepOutcome{}, errors.New(errMsg)

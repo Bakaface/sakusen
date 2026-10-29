@@ -549,7 +549,8 @@ step context), [fan-out steps](workflow-building.md#fan-out-steps) (the `fanout:
 either `from` (one child task per item that step publishes with `publish_items`) or `nodes:` (a
 declared graph whose entries have `name`, `workflow`, `input`, `needs`, `retries`; the step's
 `workflow`/`retries` act as node defaults); `input` defaults to `{{item.input}}`, `merge` to `base`,
-`require` to `all`, `retries` to `0`),
+`require` to `all`, `retries` to `0`, `allow_empty` to `false` — with `from`, `allow_empty: true`
+lets the source step publish nothing and the fanout completes with zero children),
 [cross-task references](workflow-building.md#cross-task-references)
 (`{{tasks.<id>.<field>}}`), and
 [MCP orchestration patterns](workflow-building.md#mcp-orchestration-patterns) including child

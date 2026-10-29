@@ -300,6 +300,7 @@ A `fanout:` step runs no agent. It spawns one child task per item that an earlie
 | `merge` | `base` | `parent`: children base on and merge into the fanning-out task's branch. `base`: children target the usual base branch. |
 | `require` | `all` | Join policy: `all`, `any`, or an integer `N >= 1` (at least N children must complete). |
 | `retries` | `0` | How many times a failed child is re-run automatically before the join judges it. |
+| `allow_empty` | `false` | Only valid with `from`. When `true`, a `from:` step that publishes nothing does not fail the task: the fanout spawns nothing, skips `require` and completes at once. Rejected with `nodes:`. |
 
 A fanout step cannot set `prompt`, `agent`, `loop`, `human`, `advance`, `parallel`, `summarization_strategy`, `summarization_prompt` or `require_context`. No loop's `goto` range may contain a fanout step, because re-running it would spawn its children again. Config loading and `sakusen validate` reject every one of these.
 
@@ -309,7 +310,7 @@ A fanout step cannot set `prompt`, `agent`, `loop`, `human`, `advance`, `paralle
 - `slug` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` and be unique. A missing slug becomes `item-<n>` (1-based position).
 - `needs` lists slugs of other items whose children must complete first. It becomes the child's `blocked_by`. Unknown slugs, self-references and cycles are rejected.
 
-The call is validated at once and errors go back to the model. The step must be running, and a later fanout must name it in `from:`. Publishing again replaces the list. Every fresh run of the `from:` step clears its earlier list. A headless `from:` step that completes without publishing fails the task. A tmux one that publishes nothing fails at the fanout instead.
+The call is validated at once and errors go back to the model. The step must be running, and a later fanout must name it in `from:`. Publishing again replaces the list. Every fresh run of the `from:` step clears its earlier list. A headless `from:` step that completes without publishing fails the task. A tmux one that publishes nothing fails at the fanout instead. With `allow_empty: true`, neither fails: the fanout spawns nothing, does not apply `require`, and advances with `{{steps.<fanout>.context}}` set to `fanout <name>: 0 items published (allow_empty)`. If items were published, `allow_empty` changes nothing.
 
 **Spawn.** On entry the fanout creates one child per item in the parent's project, in dependency order:
 

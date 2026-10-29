@@ -956,6 +956,10 @@ type FanoutConfig struct {
 	// Retries is how many times a failed child is retried before it counts
 	// as failed.
 	Retries int `yaml:"retries,omitempty"`
+	// AllowEmpty lets a `from:` step publish zero items without failing the
+	// task: the fanout then spawns nothing and completes immediately. Only
+	// valid with From (declared nodes are never empty).
+	AllowEmpty bool `yaml:"allow_empty,omitempty"`
 }
 
 // FanoutNodeConfig is one declared child of a `nodes:` fanout. Its name joins
@@ -1805,13 +1809,13 @@ type Config struct {
 
 	// GitVerifyTimeout is the resolved git.verify_timeout (0 = no limit).
 	GitVerifyTimeout time.Duration
+	// GitVerifyParentMerges is the resolved git.verify_parent_merges
+	// (default true).
+	GitVerifyParentMerges bool
 
 	// GitCommitMessageTimeout is the resolved git.commit_message_timeout.
 	GitCommitMessageTimeout time.Duration
 
-	// GitVerifyParentMerges is the resolved git.verify_parent_merges
-	// (default true).
-	GitVerifyParentMerges bool
 	// From global config
 	Notifications            NotificationsConfig
 	TmuxNestedAttachBehavior string // "switch" (default) or "nest"

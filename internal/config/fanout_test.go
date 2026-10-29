@@ -431,3 +431,30 @@ func TestFanoutNodesValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestFanoutAllowEmptyValidation(t *testing.T) {
+	_, err := loadFanoutProject(t, `
+      - name: plan
+        prompt: "plan"
+      - name: units
+        fanout:
+          from: plan
+          workflow: unit
+          allow_empty: true
+`)
+	if err != nil {
+		t.Fatalf("allow_empty with from rejected: %v", err)
+	}
+	_, err = loadFanoutNodesProject(t, `
+      - name: units
+        fanout:
+          workflow: unit-merge
+          allow_empty: true
+          nodes:
+            - name: api
+              input: "x"
+`)
+	if err == nil || !strings.Contains(err.Error(), "allow_empty cannot be set with `nodes:`") {
+		t.Fatalf("error = %v, want allow_empty/nodes rejection", err)
+	}
+}

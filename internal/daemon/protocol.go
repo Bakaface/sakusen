@@ -376,6 +376,8 @@ type FanoutStepSummary struct {
 	Merge    string              `json:"merge"`   // "base" | "parent"
 	Require  string              `json:"require"` // "all" | "any" | "<N>"
 	Retries  int                 `json:"retries"`
+	// AllowEmpty is true when a `from:` step may publish nothing.
+	AllowEmpty bool `json:"allow_empty,omitempty"`
 }
 
 // FanoutNodeSummary projects one declared node of a `nodes:` fanout, with the
