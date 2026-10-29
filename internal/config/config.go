@@ -51,6 +51,7 @@ func defaultConfig() *Config {
 		TmuxHibernateAfter:      4 * time.Hour,
 		TmuxMaxLiveSessions:     12,
 		GitVerifyTimeout:        DefaultGitVerifyTimeout,
+		GitVerifyParentMerges:   true,
 		GitCommitMessageTimeout: DefaultGitCommitMessageTimeout,
 	}
 }
@@ -440,6 +441,9 @@ func loadProjectConfig(path string, cfg *Config) error {
 	override(&cfg.Git.VerifyTimeout, proj.Git.VerifyTimeout)
 	if err := applyGitVerifyTimeout(cfg, proj.Git.VerifyTimeout); err != nil {
 		return err
+	}
+	if proj.Git.VerifyParentMerges != nil {
+		cfg.GitVerifyParentMerges = *proj.Git.VerifyParentMerges
 	}
 	override(&cfg.Git.CommitMessageCommand, proj.Git.CommitMessageCommand)
 	override(&cfg.Git.CommitMessageTimeout, proj.Git.CommitMessageTimeout)

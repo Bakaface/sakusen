@@ -404,6 +404,12 @@ type GitConfig struct {
 	// time.ParseDuration; empty inherits the lower tier (default 15m), "0"
 	// disables the limit. The resolved value is Config.GitVerifyTimeout.
 	VerifyTimeout string `yaml:"verify_timeout,omitempty"`
+	// VerifyParentMerges, when false, skips VerifyCommand for merges that
+	// land on a parent task's branch (fanout `merge: parent` children and
+	// create_tasks_and_wait `merge_into_parent` children); the parent's own
+	// merge into the base branch is always verified. Nil inherits the lower
+	// tier (default true). The resolved value is Config.GitVerifyParentMerges.
+	VerifyParentMerges *bool `yaml:"verify_parent_merges,omitempty"`
 	// CommitMessageCommand runs via bash in the task worktree when the daemon
 	// commits it, with the staged diff on stdin; the first non-empty stdout
 	// line becomes the commit message. Empty keeps the title-derived message.
@@ -1803,6 +1809,9 @@ type Config struct {
 	// GitCommitMessageTimeout is the resolved git.commit_message_timeout.
 	GitCommitMessageTimeout time.Duration
 
+	// GitVerifyParentMerges is the resolved git.verify_parent_merges
+	// (default true).
+	GitVerifyParentMerges bool
 	// From global config
 	Notifications            NotificationsConfig
 	TmuxNestedAttachBehavior string // "switch" (default) or "nest"

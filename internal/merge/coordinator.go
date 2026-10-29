@@ -76,6 +76,11 @@ type Config struct {
 	// VerifyTimeout bounds one VerifyCommand run. Zero means no limit.
 	VerifyTimeout time.Duration
 
+	// SkipVerifyParentMerges skips VerifyCommand for merges whose target is
+	// another task's branch (a child landing on its parent's branch). The
+	// parent's own merge into the base branch is still verified.
+	SkipVerifyParentMerges bool
+
 	// CommitMessageCommand, when set, writes the message of every worktree
 	// commit: it runs via `bash -c` in the task worktree with the staged diff
 	// on stdin, and its first non-empty stdout line is the message. Failure,
@@ -318,7 +323,9 @@ func (c *Coordinator) merge(ctx context.Context, t *task.Task, baseBranch string
 		return fmt.Errorf("commit failed: %w", err)
 	}
 
-	if err := c.verify(ctx, t, logf); err != nil {
+	if c.skipVerifyForParentMerge(t, baseBranch) {
+		logf("Skipping verify command: %s is the branch of a parent task (git.verify_parent_merges: false)", baseBranch)
+	} else if err := c.verify(ctx, t, logf); err != nil {
 		return err
 	}
 
@@ -467,6 +474,29 @@ func (c *Coordinator) targetWorktree(t *task.Task, baseBranch string) (*TargetWo
 	return nil, "", nil
 }
 
+// skipVerifyForParentMerge reports whether the verify command is skipped for
+// t's merge into baseBranch: SkipVerifyParentMerges is set and baseBranch is
+// checked out in another task's worktree, i.e. the merge lands on a parent
+// task's branch rather than on the project base branch.
+func (c *Coordinator) skipVerifyForParentMerge(t *task.Task, baseBranch string) bool {
+	if !c.cfg.SkipVerifyParentMerges || c.cfg.VerifyCommand == "" || c.targetWorktrees == nil {
+		return false
+	}
+	candidates, err := c.targetWorktrees(t, baseBranch)
+	if err != nil {
+		return false
+	}
+	for _, wt := range candidates {
+		if wt.TaskID == t.ID || wt.Path == "" {
+			continue
+		}
+		if branch, err := c.repo.GetCurrentBranch(wt.Path); err == nil && branch == baseBranch {
+			return true
+		}
+	}
+	return false
+}
+
 // acceptsMerges reports whether a task's worktree may be fast-forwarded: only
 // while no step, finalization or interactive session of that task can be
 // writing to it.
@@ -486,7 +516,7 @@ func acceptsMerges(s task.Status) bool {
 // refreshAndReverify runs refreshFromBase and, when a verify command is
 // configured and the rebase moved the task tip, verifies the new tip.
 func (c *Coordinator) refreshAndReverify(ctx context.Context, t *task.Task, baseBranch string, logf LogFunc) error {
-	if c.cfg.VerifyCommand == "" {
+	if c.cfg.VerifyCommand == "" || c.skipVerifyForParentMerge(t, baseBranch) {
 		return c.refreshFromBase(ctx, t, baseBranch, logf)
 	}
 	before, beforeErr := c.repo.GetLastCommitHash(t.WorktreePath)

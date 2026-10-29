@@ -247,3 +247,64 @@ func TestMergeIntoTaskWorktreeNeedsLister(t *testing.T) {
 		t.Errorf("merge-blocked detail = %q, want the main-checkout blocker", got)
 	}
 }
+
+func countVerifyRuns(t *testing.T, path string) int {
+	t.Helper()
+	out, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(strings.Fields(string(out)))
+}
+
+func TestVerifyParentMerges(t *testing.T) {
+	cases := []struct {
+		name     string
+		skip     bool
+		wantRuns int
+		wantLog  bool
+	}{
+		{"verified by default", false, 1, false},
+		{"skipped when disabled", true, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newParentFixture(t)
+			child := f.child(t, 1, "child-a", "a.txt")
+			runs := filepath.Join(t.TempDir(), "verify-runs")
+			c := f.coordinator(Config{VerifyCommand: "echo run >> " + runs, SkipVerifyParentMerges: tc.skip}, nil)
+
+			var logs logCapture
+			if err := c.Finalize(context.Background(), child, "parent", ActionMerge, logs.logf); err != nil {
+				t.Fatalf("Finalize: %v\nlog:\n%s", err, logs.String())
+			}
+			if got := countVerifyRuns(t, runs); got != tc.wantRuns {
+				t.Errorf("verify ran %d times, want %d", got, tc.wantRuns)
+			}
+			if got := strings.Contains(logs.String(), "Skipping verify command"); got != tc.wantLog {
+				t.Errorf("skip logged = %v, want %v; log:\n%s", got, tc.wantLog, logs.String())
+			}
+		})
+	}
+}
+
+// The parent's own merge into the base branch is verified even when
+// SkipVerifyParentMerges is set.
+func TestVerifyParentMergesStillVerifiesBaseMerge(t *testing.T) {
+	f := newParentFixture(t)
+	runs := filepath.Join(t.TempDir(), "verify-runs")
+	c := f.coordinator(Config{VerifyCommand: "echo run >> " + runs, SkipVerifyParentMerges: true}, nil)
+
+	// The parent's branch merges into main, which no task worktree holds.
+	parent := &task.Task{ID: parentTaskID, Title: "parent", Branch: "parent", Worktree: true, WorktreePath: f.parentWT}
+	var logs logCapture
+	if err := c.Finalize(context.Background(), parent, "main", ActionMerge, logs.logf); err != nil {
+		t.Fatalf("Finalize: %v\nlog:\n%s", err, logs.String())
+	}
+	if got := countVerifyRuns(t, runs); got != 1 {
+		t.Errorf("verify ran %d times, want 1", got)
+	}
+}

@@ -115,6 +115,10 @@ git:
   base_branch: main
   branch_template: sakusen/{{task_id}}-{{task_slug}}
   verify_command: mise run check  # optional: must pass before on_complete: merge lands
+  verify_timeout: 15m             # optional: limit per verify run (default 15m, 0 = no limit)
+  verify_parent_merges: true      # optional (default true): false skips verify_command for merges
+                                  # into a parent task's branch (fanout `merge: parent`, create_tasks_and_wait
+                                  # `merge_into_parent`); the parent's own merge into the base is always verified
   # optional: writes the daemon's commit messages from the staged diff on stdin
   # (first non-empty stdout line; failure/timeout/empty → title-derived message)
   commit_message_command: >-

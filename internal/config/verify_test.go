@@ -85,3 +85,36 @@ func TestGitVerifyTimeoutInvalidFailsLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestGitVerifyParentMergesDefaultsTrueAndMergesPerTier(t *testing.T) {
+	_, homeDir, _ := writeGlobalConfigYaml(t, "")
+
+	cfg, err := LoadForProject(writeProject(t, "max_workers: 2\n"))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if !cfg.GitVerifyParentMerges {
+		t.Error("GitVerifyParentMerges = false, want default true")
+	}
+
+	writeGlobalSakusenYml(t, homeDir, "git:\n  verify_parent_merges: false\n")
+	cfg, err = LoadForProject(writeProject(t, "git:\n  verify_command: make test\n"))
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if cfg.GitVerifyParentMerges {
+		t.Error("GitVerifyParentMerges = true, want false inherited from the global tier")
+	}
+
+	projectDir := writeProject(t, "git:\n  verify_parent_merges: true\n")
+	cfg, err = LoadForProject(projectDir)
+	if err != nil {
+		t.Fatalf("LoadForProject: %v", err)
+	}
+	if !cfg.GitVerifyParentMerges {
+		t.Error("GitVerifyParentMerges = false, want project's explicit true to win")
+	}
+	if err := ValidateFile(filepath.Join(projectDir, ".sakusen.yml")); err != nil {
+		t.Errorf("verify_parent_merges must validate, got %v", err)
+	}
+}

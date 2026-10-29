@@ -27,6 +27,7 @@ previously lived across the daemon, the workflow engine, and `internal/git`.
   must be idle (`acceptsMerges`: awaiting-children, awaiting-approval or terminal) — a running,
   tmux, finalizing (etc.) owner is a merge-blocked blocker, never touched. With no lister, or no
   task worktree on the branch, only the main checkout can take the merge (today's blocker).
+- **`Config.SkipVerifyParentMerges` skips verify for merges into a parent task's branch** — `skipVerifyForParentMerge` is true when `baseBranch` is checked out in another task's worktree (the `TargetWorktreeLister` result), covering both the pre-merge verify and the post-rebase re-verify; the skip is logged once. The parent's own merge into the base is unaffected.
 - **`merge-blocked` means "waiting, nothing touched on main"** — the wait sets it with the
   blocker (wrong branch, or the blocking paths) as the status detail (`error_message`), and on
   success restores the prior `t.Status` with an empty detail. `Config.CleanTargetTimeout` (0 =

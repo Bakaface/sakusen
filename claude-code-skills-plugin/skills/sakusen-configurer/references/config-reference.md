@@ -138,6 +138,7 @@ git:
   branch_template: "sakusen/{{task_id}}-{{task_slug}}"  # Branch naming template
   verify_command: mise run check                 # Run before an on_complete: merge (default: none)
   verify_timeout: 15m                            # Limit per verify run (default: 15m; "0" = no limit)
+  verify_parent_merges: true                     # false = skip verify for merges into a parent task's branch (default: true)
   commit_message_command: ./bin/commit-msg       # Writes the daemon's commit messages (default: none)
   commit_message_timeout: 2m                     # Limit per message run (default: 2m; must be positive)
 ```
@@ -164,6 +165,11 @@ the merge: the task becomes `merge-failed` with the worktree and branch kept, th
 written to the task log, and `error_message` names the failure with a shorter tail. Fix the cause
 and `retry_merge` (TUI `M`, CLI `sakusen retry-merge <id>`) to re-run only finalization, with no
 agent step re-run. `on_complete: commit`/`none` never run it.
+
+`verify_parent_merges` (bool, default `true`) controls merges whose target is a parent task's
+branch (fanout children with `merge: parent`, `create_tasks_and_wait` children with
+`merge_into_parent: true`). Set it to `false` to skip `verify_command` for those and log a line in
+the task log; the parent's own merge into the base branch is always verified.
 
 Both keys merge per key across tiers like the other `git:` keys (`~/.sakusen.yml`, then the
 project). An unparseable or negative `verify_timeout` is a hard load error.
